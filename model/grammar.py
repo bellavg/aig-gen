@@ -3,26 +3,21 @@
 
 # AIG grammar.
 
-# Node feature vec is node_type (onehot), fanins, fanouts, out
-# Edge feature vec is one hot encoding for inv or reg
 
 # AIG Attributes
 
-# Input nodes PI and constant 0 CONST_0 node remain the exact same except for outgoing connections (fanouts) which can change,
-# but fanins=0 ie no incoming edges, type, id, out=0 (False) remain the same
+# Input nodes and constant 0 nodes cannot be destinations
 
-# AND nodes can only have 2 incoming edges (fanins) but arbitrarily many outgoing, out=0
+# the number of input nodes and output nodes must remain the same and all must appear. 
+
+# all AND nodes  (the intermediate) can only have 2 incoming edges (fanins) but arbitrarily many outgoing
 
 # all edges have to be either inverted or regular
 
-# all edges go from source id to a larger id for target #TODO think on this
+# all edges go from source id to a larger id for target
 
-# all output are fanins=1 ie one edge incoming, fanout=0 no edges outgoing, and need an out feature > 0
+# all output nodes have only one incoming connection, no outgoing edges (cannot be source)
 
-# should have less than or equal to number of nodes
+# should have less than or equal to number of nodes of input graphs
 
-# should have less than or equal to number of edges??? #TODO think on this
-
-# no edges PI to PI
-# no edges PO to PO
 
