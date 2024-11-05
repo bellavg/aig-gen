@@ -4,9 +4,7 @@ from torch_geometric.utils import from_networkx
 from torch_geometric.loader import DataLoader
 from sklearn.model_selection import train_test_split
 import argparse
-from model.ART_AIG import VariationalGATEncoder
-from torch_geometric.utils import scatter
-#from model.decoder import VariationalGATDecoder
+from encoder import GATEncoder
 
 
 # Function to convert NetworkX graph to PyTorch Geometric format
@@ -36,6 +34,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32, help="Batch size for testing the model")
     parser.add_argument('--split', type=float, default=0.2, help="Train, test split.")
     parser.add_argument('--random_seed', type=int, default=42, help="Random seed for data loader and co.")
+    parser.add_argument('--hidden_dim', type=int, default=32, help="Hidden layer size")
     parser.add_argument('--out_dim', type=int, default=64, help="Output dimension size (latent space)")
     parser.add_argument('--heads', type=int, default=4, help="Number of attention heads")
     parser.add_argument('--dropout', type=float, default=0.6, help="Dropout rate")
@@ -59,18 +58,17 @@ def main():
     edge_in_dim = len(train_graphs[0].edge_attr[0])  # Dimension of edge features
 
     # Initialize GATv2 encoder
-    gatv2_encoder = VariationalGATEncoder(
+    gatv2_encoder = GATEncoder(
         in_channels=node_in_dim,
-        out_channels=args.out_dim,
+        hidden_channels=args.hidden_dim,
+        latent_dim=args.out_dim,
         heads=args.heads,
+        num_layers=args.num_layers,
         edge_dim=edge_in_dim,
         dropout=args.dropout
     )
 
     # Decoder
-    #gat_decoder = VariationalGATDecoder()
-
-
 
     # Functional Equivalence
 
@@ -83,27 +81,12 @@ def main():
     for batch in test_loader:
         print(f"Batch contains {batch.num_graphs} graphs.")
 
-        # Number of nodes per graph
-        node_counts = scatter(torch.ones_like(batch.batch), batch.batch, dim=0, reduce='sum')
-
-        # Number of edges per graph
-        # Get the graph index for each edge using batch.batch and edge_index
-        edge_counts = scatter(torch.ones(batch.edge_index.size(1)), batch.batch[batch.edge_index[0]], dim=0,
-                              reduce='sum')
-
-        # Generate the pi_mask (1 for PI nodes) and const_0_mask (0 for CONST_0 nodes)
-        pi_mask = (batch.x[:, :4] == torch.tensor([0, 1, 0, 0], dtype=batch.x.dtype)).all(dim=1).float()  # 1 for PI
-        const_0_mask = (batch.x[:, :4] == torch.tensor([1, 0, 0, 0], dtype=batch.x.dtype)).all(
-            dim=1).float()  # 0 for CONST_0
-
         # Forward pass (no need for gradients)
         with torch.no_grad():
-            mu, logstd, z = gatv2_encoder(batch.x, batch.edge_index, batch.edge_attr, training=False)
+            output = gatv2_encoder(batch.x, batch.edge_index, batch.edge_attr)
 
-
-
-
-
+        print("Output shape (latent representation):", output.shape)
+        break  # Stop after one batch
 
 
 if __name__ == "__main__":
