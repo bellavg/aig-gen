@@ -1,110 +1,130 @@
 import pickle
+from model3.ARC_AIG import ARCDecoder
+from model3.ART_AIG import AIGTransformerEncoder
+from model3.aig_utils import  cleanup_dangling_triples, generate_binary_inputs
+from model3.model_utils import get_prior, aggregate_source_embeddings
+from model3.generator import generate_triples_with_arc
+from model3.diff_aig import DifferentiableAIGModelFromTriples
+import torch.optim as optim
+import torch.nn as nn
 import torch
-from torch_geometric.utils import from_networkx
-from torch_geometric.loader import DataLoader
-from sklearn.model_selection import train_test_split
-import argparse
-from model.ART_AIG import VariationalGATEncoder
-from torch_geometric.utils import scatter
-#from model.decoder import VariationalGATDecoder
+import torch.nn.functional as F
 
 
-# Function to convert NetworkX graph to PyTorch Geometric format
-def convert_nx_to_pyg(G):
-    # Convert NetworkX graph to PyTorch Geometric Data format, gives warning due to
-    # numpy arrays but its internal and works better than tensors
-    data = from_networkx(G, group_edge_attrs=["label_onehot"], group_node_attrs=["feature"])
-    return data
 
+# Load the .pkl file containing all graphs
+with open("/Users/bellavg/AIG_GEN/aig-gen/data/all_graphs_as_triples.pkl", "rb") as f:
+    all_graphs = pickle.load(f)
 
-# Function to load graphs from pickle file and convert them to PyTorch Geometric Data
-def load_graphs(pickle_file):
-    with open(pickle_file, 'rb') as f:
-        all_graphs = pickle.load(f)  # List of NetworkX graphs
-    # Convert each NetworkX graph to PyTorch Geometric Data
-    all_graph_data = [convert_nx_to_pyg(g) for g in all_graphs]
-    return all_graph_data
+embed_dim = 128
+heads = 2
+layers = 4
 
+# Training Loop
+# Initialize encoder and decoder models
+encoder_model = AIGTransformerEncoder(embed_dim=embed_dim, num_heads=heads, num_layers=layers)
+arc_decoder = ARCDecoder(embed_dim=embed_dim, num_relationships=4)
 
-# Main function with argument parser
-def main():
-    parser = argparse.ArgumentParser(description="Test GATv2 Graph Neural Network on AIG Graphs")
+# Define optimizer
+optimizer = optim.Adam(list(encoder_model.parameters()) + list(arc_decoder.parameters()), lr=0.001)
+criterion = nn.BCELoss()
 
-    # Arguments for the test
-    parser.add_argument('--graph_file', type=str, default="./data/all_graphs.pkl",
-                        help="Path to the .pkl file containing the graphs")
-    parser.add_argument('--batch_size', type=int, default=32, help="Batch size for testing the model")
-    parser.add_argument('--split', type=float, default=0.2, help="Train, test split.")
-    parser.add_argument('--random_seed', type=int, default=42, help="Random seed for data loader and co.")
-    parser.add_argument('--out_dim', type=int, default=64, help="Output dimension size (latent space)")
-    parser.add_argument('--heads', type=int, default=4, help="Number of attention heads")
-    parser.add_argument('--dropout', type=float, default=0.6, help="Dropout rate")
-    parser.add_argument('--num_layers', type=int, default=3, help="Number of GATv2Conv layers")
+# Compute prior probabilities
+p_R = get_prior(all_graphs) # prior for p_R[1], p_R[2], p_R[-1], p_R[-2]
 
-    args = parser.parse_args()
+#TODO: add batches
 
-    # Load the graphs from the pickle file
-    print(f"Loading graphs from {args.graph_file}...")
-    all_graph_data = load_graphs(args.graph_file)
+# Loop over each graph in the dataset
+for graph in all_graphs:
+    triples = graph["triples"]
+    input_mapping = graph["input_mapping"]
+    output_mapping = graph["output_mapping"]
+    gate_id_mapping = graph["gate_id_mapping"]
+    num_input_nodes = graph["num_input_nodes"]
+    num_output_nodes = graph["num_output_nodes"]
+    num_gate_nodes = graph["num_gates"]
 
-    # Split data into train and test sets
-    train_graphs, test_graphs = train_test_split(all_graph_data, test_size=args.split, random_state=args.random_seed)
+    # Assuming `precomputed_outputs` is the dictionary returned by precompute_aig_outputs
+    true_outputs = graph["true_outputs"]
 
-    # Create DataLoaders
-    train_loader = DataLoader(train_graphs, batch_size=args.batch_size, shuffle=True)
-    test_loader = DataLoader(test_graphs, batch_size=args.batch_size, shuffle=False)
+    # Prepare input and output nodes
+    input_nodes = list(input_mapping.keys())
+    output_nodes = list(output_mapping.keys())
 
-    # Define model parameters based on the first graph's feature dimensions
-    node_in_dim = len(train_graphs[0].x[0])  # Dimension of node features
-    edge_in_dim = len(train_graphs[0].edge_attr[0])  # Dimension of edge features
-
-    # Initialize GATv2 encoder
-    gatv2_encoder = VariationalGATEncoder(
-        in_channels=node_in_dim,
-        out_channels=args.out_dim,
-        heads=args.heads,
-        edge_dim=edge_in_dim,
-        dropout=args.dropout
+    # Encode the graph using ART (AIGTransformerEncoder)
+    encoder_output, source_to_triplet_indices = encoder_model(
+        triples,
+        num_input_nodes=num_input_nodes,
+        num_output_nodes=num_output_nodes,
+        num_intermediate_nodes=num_gate_nodes,
+        input_mapping=input_mapping,
+        output_mapping=output_mapping,
+        gate_id_mapping=gate_id_mapping
     )
 
-    # Decoder
-    #gat_decoder = VariationalGATDecoder()
+    # Total number of nodes in the graph
+    num_nodes = num_input_nodes + num_gate_nodes + num_output_nodes
+
+    # Aggregate source embeddings
+    aggregated_source_embeddings = aggregate_source_embeddings(encoder_output, source_to_triplet_indices)
+
+    # Generate triples using ARCDecoder
+    generated_triples = generate_triples_with_arc(
+        aggregated_source_embeddings=aggregated_source_embeddings,
+        input_nodes=input_nodes,
+        output_nodes=output_nodes,
+        arc_decoder=arc_decoder,
+        num_nodes=num_nodes,
+        p_R=p_R
+    )
+
+    # build into aig object and get rid of disconnected subgraphs
+    #gen_aig = build_aig_from_triples(generated_triples, input_nodes, output_nodes)
+    # get rid of disconnected subgraphs
+    generated_triples = cleanup_dangling_triples(generated_triples, input_nodes, output_nodes)
+
+    # Convert the AIG to a differentiable model
+    diff_aig_model = DifferentiableAIGModelFromTriples(generated_triples, input_nodes, output_nodes)
+
+    # Use the differentiable AIG model in your training loop
+    input_patterns = torch.tensor(generate_binary_inputs(num_input_nodes), dtype=torch.float32)
+    target_outputs = torch.tensor(true_outputs, dtype=torch.float32)
+
+    # Zero gradients
+    optimizer.zero_grad()
+
+    # Forward pass through differentiable AIG
+    predicted_outputs = diff_aig_model(input_patterns)
+
+    # Compute loss
+    loss = criterion(predicted_outputs, target_outputs)
+
+    # Backward pass
+    loss.backward()
+
+    # Update parameters
+    optimizer.step()
 
 
-
-    # Functional Equivalence
-
-    # Loss
-
-    # Test on one batch from the test loader
-    gatv2_encoder.eval()  # Set the encoder to evaluation mode
-
-    # Iterate through one batch from the test loader
-    for batch in test_loader:
-        print(f"Batch contains {batch.num_graphs} graphs.")
-
-        # Number of nodes per graph
-        node_counts = scatter(torch.ones_like(batch.batch), batch.batch, dim=0, reduce='sum')
-
-        # Number of edges per graph
-        # Get the graph index for each edge using batch.batch and edge_index
-        edge_counts = scatter(torch.ones(batch.edge_index.size(1)), batch.batch[batch.edge_index[0]], dim=0,
-                              reduce='sum')
-
-        # Generate the pi_mask (1 for PI nodes) and const_0_mask (0 for CONST_0 nodes)
-        pi_mask = (batch.x[:, :4] == torch.tensor([0, 1, 0, 0], dtype=batch.x.dtype)).all(dim=1).float()  # 1 for PI
-        const_0_mask = (batch.x[:, :4] == torch.tensor([1, 0, 0, 0], dtype=batch.x.dtype)).all(
-            dim=1).float()  # 0 for CONST_0
-
-        # Forward pass (no need for gradients)
-        with torch.no_grad():
-            mu, logstd, z = gatv2_encoder(batch.x, batch.edge_index, batch.edge_attr, training=False)
+    #TODO:
+    # arg parser
+    # Every N steps get accuracy
+    # binary_outputs = (model_outputs >= 0.5).float()
+    # correct = (binary_outputs == target_outputs).all(dim=1).float()
+    # accuracy = correct.mean().item()
+    # print(f"Functional Equivalence Rate: {accuracy * 100:.2f}%")
+    # Structural difference
+    # # Compute expected structural size from decoder outputs
+    # edge_probs = decoder_output['edge_probs']  # Obtain from your decoder
+    # expected_edge_count = torch.sum(edge_probs)
+    # # Original edge count (as a constant tensor)
+    # orig_edge_count_tensor = torch.tensor([orig_edge_count], dtype=torch.float32)
+    # # Structural loss
+    # structural_loss = F.relu(expected_edge_count - orig_edge_count_tensor)
+    # # Total loss
+    # lambda_weight = 1.0  # Hyperparameter to adjust
+    # total_loss = functional_loss + lambda_weight * structural_loss
 
 
+    #TODO: add training and testing loop, batches
 
-
-
-
-
-if __name__ == "__main__":
-    main()
