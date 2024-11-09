@@ -4,11 +4,10 @@ from model3.ART_AIG import AIGTransformerEncoder
 from model3.aig_utils import  cleanup_dangling_triples, generate_binary_inputs
 from model3.model_utils import get_prior, aggregate_source_embeddings
 from model3.generator import generate_triples_with_arc
-from model3.diff_aig import DifferentiableAIGModelFromTriples
+from model3.diff_aig import DifferentiableANDInverterNetwork
 import torch.optim as optim
 import torch.nn as nn
 import torch
-import torch.nn.functional as F
 
 
 
@@ -83,8 +82,10 @@ for graph in all_graphs:
     # get rid of disconnected subgraphs
     generated_triples = cleanup_dangling_triples(generated_triples, input_nodes, output_nodes)
 
+    #Order topoligically
+
     # Convert the AIG to a differentiable model
-    diff_aig_model = DifferentiableAIGModelFromTriples(generated_triples, input_nodes, output_nodes)
+    diff_aig_model = DifferentiableANDInverterNetwork(generated_triples, input_nodes, output_nodes)
 
     # Use the differentiable AIG model in your training loop
     input_patterns = torch.tensor(generate_binary_inputs(num_input_nodes), dtype=torch.float32)
