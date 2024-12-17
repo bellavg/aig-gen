@@ -18,7 +18,7 @@ class AIGDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ["all_rand_graphs.pkl"]  # Input file with raw NetworkX graphs
+        return ["all_6x6_graphs.pkl"]  # Input file with raw NetworkX graphs
 
     @property
     def processed_file_names(self):
