@@ -87,7 +87,7 @@ class RelationGraphConvolution(nn.Module):
 
 
 class RGCN(nn.Module):
-    def __init__(self, nfeat, nhid=128, nout=128, edge_dim=3, num_layers=3, dropout=0., normalization=False):
+    def __init__(self, nfeat, nhid, nout, edge_dim, num_layers, dropout=0., normalization=False):
         '''
         :num_layars: the number of layers in each R-GCN
         '''

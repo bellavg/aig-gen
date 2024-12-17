@@ -39,11 +39,11 @@ class GraphFlowModel(nn.Module):
     def forward(self, inp_node_features, inp_adj_features):
         """
         Args:
-            inp_node_features: (B, N, 260)
-            inp_adj_features: (B, 2, N, N)
+            inp_node_features: (B, N, NODE FEAT DIM)
+            inp_adj_features: (B, Types of edges, N, N)
 
         Returns:
-            z: [(B, node_num*9), (B, edge_num*4)]
+            z: [(B, node_num*NODE FEAT DIM), (B, edge_num*Types of edges)]
             logdet:  ([B], [B])
         """
         inp_node_features_cont = inp_node_features.clone()
@@ -229,8 +229,8 @@ class GraphFlowModel(nn.Module):
     def initialize_masks(self, max_node_unroll, max_edge_unroll):
         """
         Args:
-            max node unroll: maximal number of nodes in molecules to be generated (default: 38)
-            max edge unroll: maximal number of edges to predict for each generated nodes (default: 12, calculated from zink250K data)
+            max node unroll: maximal number of nodes in molecules to be generated (default: 100)
+            max edge unroll: maximal number of edges to predict for each generated nodes (default: 14, calculated from data)
         Returns:
             node_masks: node mask for each step
             adj_masks: adjacency mask for each step

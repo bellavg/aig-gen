@@ -18,7 +18,7 @@ class AIGDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ["all_rand_graphs.pkl"]  # Input file with raw NetworkX graphs
+        return ["all_6x6_graphs.pkl"]  # Input file with raw NetworkX graphs
 
     @property
     def processed_file_names(self):
@@ -57,14 +57,11 @@ class AIGDataset(InMemoryDataset):
                 node_features, (0, (self.node_feature_dimension - node_features.size(1)), 0, (self.num_max_node - node_features.size(0))), "constant", 0)
 
         # Step 2: Edge Features - Directed adjacency matrix
-        adj_matrix = torch.zeros((3, self.num_max_node, self.num_max_node), dtype=torch.float)
+        adj_matrix = torch.zeros((2, self.num_max_node, self.num_max_node), dtype=torch.float)  # 2 edge types
         for u, v, attrs in graph.edges(data=True):
-            edge_type = torch.argmax(torch.tensor(attrs['feature'], dtype=torch.long)).item()  # 0 or 1
+            edge_type = torch.argmax(torch.tensor(attrs['feature'], dtype=torch.long)).item()  # Edge type: 0, 1
             if u < self.num_max_node and v < self.num_max_node:  # Bounds check
-                adj_matrix[edge_type, u, v] = 1.0  # Real edges
-
-        # Add virtual edge channel (zeros by default)
-        adj_matrix[2, :, :] = 0.0
+                adj_matrix[edge_type, u, v] = 1.0  # Directed edge
 
         # Step 3: Create PyTorch Geometric Data object
         data = Data(

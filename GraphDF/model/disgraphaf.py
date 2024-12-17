@@ -26,7 +26,7 @@ class DisGraphAF(nn.Module):
         self.emb_size = nout
         self.num_flow_layer = num_flow_layer
 
-        self.rgcn = RGCN(num_node_type, nhid=nhid, nout=nout, edge_dim=self.num_edge_type-1,
+        self.rgcn = RGCN(num_node_type, nhid=nhid, nout=nout, edge_dim=self.num_edge_type,
                          num_layers=num_rgcn_layer, dropout=0., normalization=False) # why -1?
 
         if use_bn:
@@ -140,7 +140,7 @@ class DisGraphAF(nn.Module):
         Returns:
             graph embedding for updating node features with shape (batch, d)
         """
-        adj = adj[:, :self.num_edge_type-1] # (batch, 3, N, N) why 3? #TODO
+        adj = adj[:, :self.num_edge_type] # (batch, 3, N, N) why 3? #TODO
 
 
         node_emb = self.rgcn(x, adj) # (batch, N, d)
@@ -165,7 +165,7 @@ class DisGraphAF(nn.Module):
         assert batch_size == index.size(0)
 
 
-        adj = adj[:, :self.num_edge_type-1] # (batch, 3, N, N) # TODO: why 3
+        adj = adj[:, :self.num_edge_type] # (batch, 3, N, N) # TODO: why 3
 
 
 
@@ -195,7 +195,7 @@ class DisGraphAF(nn.Module):
         batch_size = x.size(0)
 
 
-        adj = adj[:, :self.num_edge_type-1]  # (batch, 3, N, N) # TODO: why 3
+        adj = adj[:, :self.num_edge_type]  # (batch, 3, N, N) # TODO: why 3
 
 
 
@@ -203,7 +203,7 @@ class DisGraphAF(nn.Module):
             -1, self.graph_size, self.num_node_type)  # (batch*repeat_num, N, 9)
 
         adj = torch.where(self.mask_edge, adj.unsqueeze(1).repeat(1, self.repeat_num, 1, 1, 1), torch.zeros([1], device=x.device)).view(
-            -1, self.num_edge_type - 1, self.graph_size, self.graph_size)  # (batch*repeat_num, 3, N, N)
+            -1, self.num_edge_type, self.graph_size, self.graph_size)  # (batch*repeat_num, 3, N, N)
         node_emb = self.rgcn(x, adj)  # (batch*repeat_num, N, d)
 
         if hasattr(self, 'batchNorm'):
