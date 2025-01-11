@@ -220,7 +220,13 @@ def main():
 
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
-            best_model_weights = copy.deepcopy(model.state_dict())
+            checkpoint_path = os.path.join("./checkpoints", f"checkpoint_epoch_{epoch + 1}.pt")
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+            }, checkpoint_path)
 
     print(f"Best Validation Accuracy: {best_val_accuracy:.4f}")
 
