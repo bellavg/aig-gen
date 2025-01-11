@@ -7,8 +7,4 @@ python-igraph
 gensim
 tqdm
 pandas
-einops
-ogb
-gtrick
-rdkit
 matplotlib

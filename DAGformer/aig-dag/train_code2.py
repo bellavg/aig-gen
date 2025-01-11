@@ -21,11 +21,11 @@ def load_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--seed', type=int, default=0,
                         help='random seed')
-    parser.add_argument('--num-heads', type=int, default=4, help="number of heads")
+    parser.add_argument('--num-heads', type=int, default=8, help="number of heads")
     parser.add_argument('--num-layers', type=int, default=6, help="number of layers")
-    parser.add_argument('--dim-hidden', type=int, default=512, help="hidden dimension of Transformer")
+    parser.add_argument('--dim-hidden', type=int, default=1028, help="hidden dimension of Transformer")
     parser.add_argument('--dropout', type=float, default=0.2, help="dropout")
-    parser.add_argument('--epochs', type=int, default=30,
+    parser.add_argument('--epochs', type=int, default=20,
                         help='number of epochs')
     parser.add_argument('--eval_freq', type=int, default=5,)
     parser.add_argument('--lr', type=float, default=0.0001,
@@ -38,7 +38,7 @@ def load_args():
     parser.add_argument('--warmup', type=int, default=2, help="number of epochs for warmup")
     parser.add_argument('--layer-norm', action='store_true', help='use layer norm instead of batch norm')
     parser.add_argument('--use-edge-attr', action='store_true', help='use edge features')
-    parser.add_argument('--edge-dim', type=int, default=128, help='edge features hidden dim')
+    parser.add_argument('--edge-dim', type=int, default=256, help='edge features hidden dim')
     parser.add_argument('--gnn-type', type=str, default='gcn',
                         choices=GNN_TYPES,
                         help="GNN structure extractor type")
