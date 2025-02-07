@@ -8,7 +8,7 @@ class RelationGraphConvolution(nn.Module):
     Relation GCN layer. 
     """
 
-    def __init__(self, in_features, out_features, edge_dim, aggregate='sum', dropout=0., use_relu=True, bias=False):
+    def __init__(self, in_features, out_features, edge_dim=2, aggregate='sum', dropout=0., use_relu=True, bias=False):
         '''
         :param in/out_features: scalar of channels for node embedding
         :param edge_dim: dim of edge type, virtual type not included
@@ -87,7 +87,7 @@ class RelationGraphConvolution(nn.Module):
 
 
 class RGCN(nn.Module):
-    def __init__(self, nfeat, nhid=128, nout=128, edge_dim=3, num_layers=3, dropout=0., normalization=False):
+    def __init__(self, nfeat, nhid=128, nout=128, edge_dim=2, num_layers=3, dropout=0., normalization=False):
         '''
         :num_layars: the number of layers in each R-GCN
         '''

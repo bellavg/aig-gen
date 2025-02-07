@@ -4,6 +4,26 @@ import numpy as np
 from .disgraphaf import DisGraphAF
 
 
+# Input and Output Count Encoder
+# self.io_count_encoder = nn.Sequential(
+#     nn.Linear(2, args.condition_dim),  # 2 for [num_inputs, num_outputs]
+#     nn.ReLU(),
+#     nn.Linear(args.condition_dim, args.condition_dim),
+# )
+#
+# # Truth Table Encoder
+# self.truth_table_encoder = TruthTableEncoder(
+#     input_dim=args.truth_table_dim,
+#     cnn_hidden_dim=args.cnn_hidden_dim,
+#     output_dim=args.condition_dim,  # Output dimension of the truth table encoding
+#     max_outputs=args.max_outputs,
+#     truth_table_dim=args.truth_table_dim,
+# )
+#
+# # Combine Encodings
+# self.condition_dim = args.condition_dim
+# self.condition_fc = nn.Linear(2 * args.condition_dim, args.condition_dim)
+
 class GraphFlowModel(nn.Module):
     def __init__(self, args):
         super(GraphFlowModel, self).__init__()
@@ -23,20 +43,19 @@ class GraphFlowModel(nn.Module):
 
 
 
-
         node_base_log_probs = torch.randn(self.max_size, self.node_dim)
         edge_base_log_probs = torch.randn(self.latent_step - self.max_size, self.edge_dim)
         self.flow_core = DisGraphAF(node_masks, adj_masks, link_prediction_index,
                                     num_flow_layer=args.num_flow_layer, graph_size=self.max_size,
                                     num_node_type=self.node_dim, num_edge_type=self.edge_dim,
                                     num_rgcn_layer=args.num_rgcn_layer,
-                                    nhid=args.nhid, nout=args.nout)
+                                    nhid=args.nhid, nout=args.nout, condition_dim=0)
 
 
         self.node_base_log_probs = nn.Parameter(node_base_log_probs, requires_grad=True)
         self.edge_base_log_probs = nn.Parameter(edge_base_log_probs, requires_grad=True)
 
-    def forward(self, inp_node_features, inp_adj_features):
+    def forward(self,inp_node_features, inp_adj_features, truth_table, num_inputs, num_outputs):
         """
         Args:
             inp_node_features: (B, N, 260)
@@ -52,12 +71,14 @@ class GraphFlowModel(nn.Module):
         assert inp_node_features.size(2) == self.node_dim, "Node dim mismatch!"
         assert inp_adj_features.size(1) == self.edge_dim, "Edge dim mismatch!"
 
+
         inp_adj_features_cont = inp_adj_features[:, :, self.flow_core_edge_masks].clone()  # (B, 2, edge_num)
 
         inp_adj_features_cont = inp_adj_features_cont.permute(0, 2, 1).contiguous()  # (B, edge_num, 2)
 
 
-        z = self.flow_core(inp_node_features, inp_adj_features, inp_node_features_cont, inp_adj_features_cont)
+        z = self.flow_core(inp_node_features, inp_adj_features,
+                           inp_node_features_cont, inp_adj_features_cont,  num_inputs, num_outputs)
         return z
 
     # def generate(self, atom_list, temperature=[0.3, 0.3], min_atoms=7, max_atoms=48):

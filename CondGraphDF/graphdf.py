@@ -6,8 +6,8 @@ from .model import GraphFlowModel
 
 class GraphDF(Generator):
     r"""
-        The method class for GraphDF algorithm proposed in the paper `GraphDF: A Discrete Flow Model for Molecular Graph Generation <https://arxiv.org/abs/2102.01189>`_. This class provides interfaces for running random generation, property
-        optimization, and constrained optimization with GraphDF algorithm. Please refer to the `example codes <https://github.com/divelab/DIG/tree/dig-stable/examples/ggraph/GraphDF>`_ for usage examples.
+    The method class for GraphDF algorithm. This class provides interfaces for running random generation, property
+    optimization, and constrained optimization with GraphDF algorithm.
     """
 
     def __init__(self):
@@ -28,34 +28,45 @@ class GraphDF(Generator):
             if key in self.model.state_dict().keys():
                 self.model.state_dict()[key].copy_(load_key[key].detach().clone())
 
-
     def train_rand_gen(self, loader, args):
         """
         Running training for random generation task.
         """
         self.get_model('rand_gen', args)
         self.model.train()
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.lr,
-                                     weight_decay=args.wd)
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=args.lr,
+            weight_decay=args.wd
+        )
+        # Setup a learning rate scheduler.
+        # If args does not have scheduler_step or scheduler_gamma, default to 10 and 0.5 respectively.
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=getattr(args, "scheduler_step", 10),
+            gamma=getattr(args, "scheduler_gamma", 0.5)
+        )
+
         if not os.path.isdir(args.save_dir):
             os.mkdir(args.save_dir)
 
         for epoch in range(1, args.max_epochs + 1):
             total_loss = 0
-
             for batch, data_batch in enumerate(loader):
                 optimizer.zero_grad()
 
-                # Extract input features and adjacency matrices
-                inp_node_features = data_batch.x  # (B, N = 100, node_dim)
-                inp_adj_features = data_batch.adj  # (B, edge_dim=2, N, N)
+                # Extract input features and adjacency matrices.
+                inp_node_features = data_batch.x  # shape: (B, N, node_dim)
+                inp_adj_features = data_batch.adj  # shape: (B, edge_dim, N, N)
+                truth_table = data_batch.tts     # shape: (B, N) or (B, N, cond_dim) depending on your setting
+                num_inputs = data_batch.input_count.unsqueeze(-1)   # (B, 1)
+                num_outputs = data_batch.output_count.unsqueeze(-1)  # (B, 1)
 
-                # Forward pass
-                out_z = self.model(inp_node_features, inp_adj_features)
+                # Forward pass through the model.
+                out_z = self.model(inp_node_features, inp_adj_features, truth_table, num_inputs, num_outputs)
 
-                # Mask the loss to exclude padded regions
-                loss = self.model.dis_log_prob(out_z)  # (B, N)
-
+                # Compute the loss.
+                loss = self.model.dis_log_prob(out_z)
                 loss.backward()
                 optimizer.step()
 
@@ -65,8 +76,16 @@ class GraphDF(Generator):
             avg_loss = total_loss / (batch + 1)
             print(f"Epoch {epoch} | Average loss {avg_loss}")
 
+            # Step the scheduler at the end of each epoch.
+            scheduler.step()
+
             if epoch % args.save_interval == 0:
-                torch.save(self.model.state_dict(), os.path.join(args.save_dir, f'rand_gen_ckpt_{epoch}.pth'))
+                ckpt_path = os.path.join(args.save_dir, f'rand_gen_ckpt_{epoch}.pth')
+                torch.save(self.model.state_dict(), ckpt_path)
+                print(f"Saved checkpoint: {ckpt_path}")
+
+    def calculate_validity(self):
+        pass
 
 
 
