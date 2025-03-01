@@ -4,82 +4,238 @@ import numpy as np
 from .disgraphaf import DisGraphAF
 
 
-# Input and Output Count Encoder
-# self.io_count_encoder = nn.Sequential(
-#     nn.Linear(2, args.condition_dim),  # 2 for [num_inputs, num_outputs]
-#     nn.ReLU(),
-#     nn.Linear(args.condition_dim, args.condition_dim),
-# )
-#
-# # Truth Table Encoder
-# self.truth_table_encoder = TruthTableEncoder(
-#     input_dim=args.truth_table_dim,
-#     cnn_hidden_dim=args.cnn_hidden_dim,
-#     output_dim=args.condition_dim,  # Output dimension of the truth table encoding
-#     max_outputs=args.max_outputs,
-#     truth_table_dim=args.truth_table_dim,
-# )
-#
-# # Combine Encodings
-# self.condition_dim = args.condition_dim
-# self.condition_fc = nn.Linear(2 * args.condition_dim, args.condition_dim)
-
 class GraphFlowModel(nn.Module):
     def __init__(self, args):
         super(GraphFlowModel, self).__init__()
         self.max_size = args.num_max_nodes
         self.edge_unroll = args.edge_unroll
-        self.node_dim = args.node_dim
         self.edge_dim = args.edge_dim
+        self.node_dim = args.node_dim  # base node dimension (e.g., 4)
+        self.condition_dim = args.condition_dim  # should be 1 in your case (tts only)
+        self.effective_node_dim = self.node_dim + self.condition_dim  # becomes 5
 
+        # Create the various masks needed for the autoregressive unrolling
         node_masks, adj_masks, link_prediction_index, self.flow_core_edge_masks = self.initialize_masks(
             max_node_unroll=self.max_size, max_edge_unroll=self.edge_unroll)
 
-        self.latent_step = node_masks.size(
-            0)  # (max_size) + (max_edge_unroll - 1) / 2 * max_edge_unroll + (max_size - max_edge_unroll) * max_edge_unroll
-        self.latent_node_length = self.max_size * self.node_dim
-
+        self.latent_step = node_masks.size(0)  # total steps
+        # self.latent_node_length = self.max_size * self.node_dim
+        self.latent_node_length = self.max_size * self.effective_node_dim
         self.latent_edge_length = (self.latent_step - self.max_size) * self.edge_dim
 
-
-
-        node_base_log_probs = torch.randn(self.max_size, self.node_dim)
+        # Base log-probabilities for the latent variables (learnable)
+        node_base_log_probs = torch.randn(self.max_size, self.effective_node_dim)
         edge_base_log_probs = torch.randn(self.latent_step - self.max_size, self.edge_dim)
-        self.flow_core = DisGraphAF(node_masks, adj_masks, link_prediction_index,
-                                    num_flow_layer=args.num_flow_layer, graph_size=self.max_size,
-                                    num_node_type=self.node_dim, num_edge_type=self.edge_dim,
-                                    num_rgcn_layer=args.num_rgcn_layer,
-                                    nhid=args.nhid, nout=args.nout, condition_dim=0)
 
+        # IMPORTANT: Now we pass a positive condition dimension from args.
+        self.flow_core = DisGraphAF(
+            node_masks,
+            adj_masks,
+            link_prediction_index,
+            num_flow_layer=args.num_flow_layer,
+            graph_size=self.max_size,
+            num_node_type=self.node_dim,   # note: base dimension (without condition)
+            num_edge_type=self.edge_dim,
+            num_rgcn_layer=args.num_rgcn_layer,
+            nhid=args.nhid,
+            nout=args.nout,
+            condition_dim=args.condition_dim  # >0 to indicate conditioning is used
+        )
 
         self.node_base_log_probs = nn.Parameter(node_base_log_probs, requires_grad=True)
         self.edge_base_log_probs = nn.Parameter(edge_base_log_probs, requires_grad=True)
 
-    def forward(self,inp_node_features, inp_adj_features, truth_table, num_inputs, num_outputs):
+    def forward(self, inp_node_features, inp_adj_features, tts_condition, num_inputs, num_outputs):
         """
         Args:
-            inp_node_features: (B, N, 260)
-            inp_adj_features: (B, 2, N, N)
-
+            inp_node_features: (B, N, base_node_dim)
+            inp_adj_features:    (B, edge_dim, N, N)
+            tts_condition:       (B, N) or (B, N, cond_dim) truth table condition per node
+            num_inputs:          Tensor with input counts (B, 1)
+            num_outputs:         Tensor with output counts (B, 1)
         Returns:
-            z: [(B, node_num*9), (B, edge_num*4)]
-            logdet:  ([B], [B])
+            z: List of latent representations (e.g. [x_deq, adj_deq])
         """
+        # Clone the input node features for later use
         inp_node_features_cont = inp_node_features.clone()
 
-
+        # Check dimensions. (If you now plan to concatenate tts_condition with inp_node_features,
+        #  you may either update args.node_dim accordingly or do the concatenation inside DisGraphAF.)
         assert inp_node_features.size(2) == self.node_dim, "Node dim mismatch!"
         assert inp_adj_features.size(1) == self.edge_dim, "Edge dim mismatch!"
 
+        # Process adjacency: select only those positions for which we model distributions.
+        inp_adj_features_cont = inp_adj_features[:, :, self.flow_core_edge_masks].clone()  # (B, edge_dim, edge_num)
+        inp_adj_features_cont = inp_adj_features_cont.permute(0, 2, 1).contiguous()  # (B, edge_num, edge_dim)
 
-        inp_adj_features_cont = inp_adj_features[:, :, self.flow_core_edge_masks].clone()  # (B, 2, edge_num)
-
-        inp_adj_features_cont = inp_adj_features_cont.permute(0, 2, 1).contiguous()  # (B, edge_num, 2)
-
-
-        z = self.flow_core(inp_node_features, inp_adj_features,
-                           inp_node_features_cont, inp_adj_features_cont,  num_inputs, num_outputs)
+        # Pass the truth table condition along to the flow core.
+        z = self.flow_core(
+            inp_node_features,
+            inp_adj_features,
+            inp_node_features_cont,
+            inp_adj_features_cont,
+            num_inputs,
+            num_outputs,
+            tts_condition  # <-- NEW: pass the condition here
+        )
         return z
+
+# class GraphFlowModel(nn.Module):
+#     def __init__(self, args):
+#         super(GraphFlowModel, self).__init__()
+#         self.max_size = args.num_max_nodes
+#         self.edge_unroll = args.edge_unroll
+#         self.node_dim = args.node_dim
+#         self.edge_dim = args.edge_dim
+#
+#         node_masks, adj_masks, link_prediction_index, self.flow_core_edge_masks = self.initialize_masks(
+#             max_node_unroll=self.max_size, max_edge_unroll=self.edge_unroll)
+#
+#         self.latent_step = node_masks.size(
+#             0)  # (max_size) + (max_edge_unroll - 1) / 2 * max_edge_unroll + (max_size - max_edge_unroll) * max_edge_unroll
+#         self.latent_node_length = self.max_size * self.node_dim
+#
+#         self.latent_edge_length = (self.latent_step - self.max_size) * self.edge_dim
+#
+#
+#
+#         node_base_log_probs = torch.randn(self.max_size, self.node_dim)
+#         edge_base_log_probs = torch.randn(self.latent_step - self.max_size, self.edge_dim)
+#         self.flow_core = DisGraphAF(node_masks, adj_masks, link_prediction_index,
+#                                     num_flow_layer=args.num_flow_layer, graph_size=self.max_size,
+#                                     num_node_type=self.node_dim, num_edge_type=self.edge_dim,
+#                                     num_rgcn_layer=args.num_rgcn_layer,
+#                                     nhid=args.nhid, nout=args.nout, condition_dim=0)
+#
+#
+#         self.node_base_log_probs = nn.Parameter(node_base_log_probs, requires_grad=True)
+#         self.edge_base_log_probs = nn.Parameter(edge_base_log_probs, requires_grad=True)
+#
+#     def forward(self,inp_node_features, inp_adj_features, tts_condition, num_inputs, num_outputs):
+#         """
+#         Args:
+#             inp_node_features: (B, N, 260)
+#             inp_adj_features: (B, 2, N, N)
+#
+#         Returns:
+#             z: [(B, node_num*9), (B, edge_num*4)]
+#             logdet:  ([B], [B])
+#         """
+#         inp_node_features_cont = inp_node_features.clone()
+#
+#
+#         assert inp_node_features.size(2) == self.node_dim, "Node dim mismatch!"
+#         assert inp_adj_features.size(1) == self.edge_dim, "Edge dim mismatch!"
+#
+#
+#         inp_adj_features_cont = inp_adj_features[:, :, self.flow_core_edge_masks].clone()  # (B, 2, edge_num)
+#
+#         inp_adj_features_cont = inp_adj_features_cont.permute(0, 2, 1).contiguous()  # (B, edge_num, 2)
+#
+#
+#         z = self.flow_core(inp_node_features, inp_adj_features,
+#                            inp_node_features_cont, inp_adj_features_cont,  num_inputs, num_outputs)
+#         return z
+
+
+    def initialize_masks(self, max_node_unroll, max_edge_unroll):
+        """
+        Args:
+            max node unroll: maximal number of nodes in molecules to be generated (default: 38)
+            max edge unroll: maximal number of edges to predict for each generated nodes (default: 12, calculated from zink250K data)
+        Returns:
+            node_masks: node mask for each step
+            adj_masks: adjacency mask for each step
+            is_node_update_mask: 1 indicate this step is for updating node features
+            flow_core_edge_mask: get the distributions we want to model in adjacency matrix
+        """
+        num_masks = int(
+            max_node_unroll + (max_edge_unroll - 1) * max_edge_unroll / 2 + (max_node_unroll - max_edge_unroll) * (
+                max_edge_unroll))
+        num_mask_edge = int(num_masks - max_node_unroll)
+
+        node_masks1 = torch.zeros([max_node_unroll, max_node_unroll]).bool()
+        adj_masks1 = torch.zeros([max_node_unroll, max_node_unroll, max_node_unroll]).bool()
+        node_masks2 = torch.zeros([num_mask_edge, max_node_unroll]).bool()
+        adj_masks2 = torch.zeros([num_mask_edge, max_node_unroll, max_node_unroll]).bool()
+        link_prediction_index = torch.zeros([num_mask_edge, 2]).long()
+        flow_core_edge_masks = torch.zeros([max_node_unroll, max_node_unroll]).bool()
+
+        cnt = 0
+        cnt_node = 0
+        cnt_edge = 0
+        for i in range(max_node_unroll):
+            node_masks1[cnt_node][:i] = 1
+            adj_masks1[cnt_node][:i, :i] = 1
+            cnt += 1
+            cnt_node += 1
+
+            edge_total = 0
+            if i < max_edge_unroll:
+                start = 0
+                edge_total = i
+            else:
+                start = i - max_edge_unroll
+                edge_total = max_edge_unroll
+            for j in range(edge_total):
+                if j == 0:
+                    node_masks2[cnt_edge][:i + 1] = 1
+                    adj_masks2[cnt_edge] = adj_masks1[cnt_node - 1].clone()
+                    adj_masks2[cnt_edge][i, i] = 1
+                else:
+                    node_masks2[cnt_edge][:i + 1] = 1
+                    adj_masks2[cnt_edge] = adj_masks2[cnt_edge - 1].clone()
+                    adj_masks2[cnt_edge][i, start + j - 1] = 1
+                    adj_masks2[cnt_edge][start + j - 1, i] = 1
+                cnt += 1
+                cnt_edge += 1
+        assert cnt == num_masks, 'masks cnt wrong'
+        assert cnt_node == max_node_unroll, 'node masks cnt wrong'
+        assert cnt_edge == num_mask_edge, 'edge masks cnt wrong'
+
+        cnt = 0
+        for i in range(max_node_unroll):
+            if i < max_edge_unroll:
+                start = 0
+                edge_total = i
+            else:
+                start = i - max_edge_unroll
+                edge_total = max_edge_unroll
+
+            for j in range(edge_total):
+                link_prediction_index[cnt][0] = start + j
+                link_prediction_index[cnt][1] = i
+                cnt += 1
+        assert cnt == num_mask_edge, 'edge mask initialize fail'
+
+        for i in range(max_node_unroll):
+            if i == 0:
+                continue
+            if i < max_edge_unroll:
+                start = 0
+                end = i
+            else:
+                start = i - max_edge_unroll
+                end = i
+            flow_core_edge_masks[i][start:end] = 1
+
+        node_masks = torch.cat((node_masks1, node_masks2), dim=0)
+        adj_masks = torch.cat((adj_masks1, adj_masks2), dim=0)
+
+        node_masks = nn.Parameter(node_masks, requires_grad=False)
+        adj_masks = nn.Parameter(adj_masks, requires_grad=False)
+        link_prediction_index = nn.Parameter(link_prediction_index, requires_grad=False)
+        flow_core_edge_masks = nn.Parameter(flow_core_edge_masks, requires_grad=False)
+
+        return node_masks, adj_masks, link_prediction_index, flow_core_edge_masks
+
+    def dis_log_prob(self, z):
+        x_deq, adj_deq = z
+        node_base_log_probs_sm = torch.nn.functional.log_softmax(self.node_base_log_probs, dim=-1)
+        ll_node = torch.sum(x_deq * node_base_log_probs_sm, dim=(-1, -2))
+        edge_base_log_probs_sm = torch.nn.functional.log_softmax(self.edge_base_log_probs, dim=-1)
+        ll_edge = torch.sum(adj_deq * edge_base_log_probs_sm, dim=(-1, -2))
+        return -(torch.mean(ll_node + ll_edge) / (self.latent_edge_length + self.latent_node_length))
 
     # def generate(self, atom_list, temperature=[0.3, 0.3], min_atoms=7, max_atoms=48):
     #     """
@@ -246,102 +402,3 @@ class GraphFlowModel(nn.Module):
     #             pure_valid = 1.0
     #
     #         return final_mol, pure_valid, num_atoms
-
-    def initialize_masks(self, max_node_unroll, max_edge_unroll):
-        """
-        Args:
-            max node unroll: maximal number of nodes in molecules to be generated (default: 38)
-            max edge unroll: maximal number of edges to predict for each generated nodes (default: 12, calculated from zink250K data)
-        Returns:
-            node_masks: node mask for each step
-            adj_masks: adjacency mask for each step
-            is_node_update_mask: 1 indicate this step is for updating node features
-            flow_core_edge_mask: get the distributions we want to model in adjacency matrix
-        """
-        num_masks = int(
-            max_node_unroll + (max_edge_unroll - 1) * max_edge_unroll / 2 + (max_node_unroll - max_edge_unroll) * (
-                max_edge_unroll))
-        num_mask_edge = int(num_masks - max_node_unroll)
-
-        node_masks1 = torch.zeros([max_node_unroll, max_node_unroll]).bool()
-        adj_masks1 = torch.zeros([max_node_unroll, max_node_unroll, max_node_unroll]).bool()
-        node_masks2 = torch.zeros([num_mask_edge, max_node_unroll]).bool()
-        adj_masks2 = torch.zeros([num_mask_edge, max_node_unroll, max_node_unroll]).bool()
-        link_prediction_index = torch.zeros([num_mask_edge, 2]).long()
-        flow_core_edge_masks = torch.zeros([max_node_unroll, max_node_unroll]).bool()
-
-        cnt = 0
-        cnt_node = 0
-        cnt_edge = 0
-        for i in range(max_node_unroll):
-            node_masks1[cnt_node][:i] = 1
-            adj_masks1[cnt_node][:i, :i] = 1
-            cnt += 1
-            cnt_node += 1
-
-            edge_total = 0
-            if i < max_edge_unroll:
-                start = 0
-                edge_total = i
-            else:
-                start = i - max_edge_unroll
-                edge_total = max_edge_unroll
-            for j in range(edge_total):
-                if j == 0:
-                    node_masks2[cnt_edge][:i + 1] = 1
-                    adj_masks2[cnt_edge] = adj_masks1[cnt_node - 1].clone()
-                    adj_masks2[cnt_edge][i, i] = 1
-                else:
-                    node_masks2[cnt_edge][:i + 1] = 1
-                    adj_masks2[cnt_edge] = adj_masks2[cnt_edge - 1].clone()
-                    adj_masks2[cnt_edge][i, start + j - 1] = 1
-                    adj_masks2[cnt_edge][start + j - 1, i] = 1
-                cnt += 1
-                cnt_edge += 1
-        assert cnt == num_masks, 'masks cnt wrong'
-        assert cnt_node == max_node_unroll, 'node masks cnt wrong'
-        assert cnt_edge == num_mask_edge, 'edge masks cnt wrong'
-
-        cnt = 0
-        for i in range(max_node_unroll):
-            if i < max_edge_unroll:
-                start = 0
-                edge_total = i
-            else:
-                start = i - max_edge_unroll
-                edge_total = max_edge_unroll
-
-            for j in range(edge_total):
-                link_prediction_index[cnt][0] = start + j
-                link_prediction_index[cnt][1] = i
-                cnt += 1
-        assert cnt == num_mask_edge, 'edge mask initialize fail'
-
-        for i in range(max_node_unroll):
-            if i == 0:
-                continue
-            if i < max_edge_unroll:
-                start = 0
-                end = i
-            else:
-                start = i - max_edge_unroll
-                end = i
-            flow_core_edge_masks[i][start:end] = 1
-
-        node_masks = torch.cat((node_masks1, node_masks2), dim=0)
-        adj_masks = torch.cat((adj_masks1, adj_masks2), dim=0)
-
-        node_masks = nn.Parameter(node_masks, requires_grad=False)
-        adj_masks = nn.Parameter(adj_masks, requires_grad=False)
-        link_prediction_index = nn.Parameter(link_prediction_index, requires_grad=False)
-        flow_core_edge_masks = nn.Parameter(flow_core_edge_masks, requires_grad=False)
-
-        return node_masks, adj_masks, link_prediction_index, flow_core_edge_masks
-
-    def dis_log_prob(self, z):
-        x_deq, adj_deq = z
-        node_base_log_probs_sm = torch.nn.functional.log_softmax(self.node_base_log_probs, dim=-1)
-        ll_node = torch.sum(x_deq * node_base_log_probs_sm, dim=(-1, -2))
-        edge_base_log_probs_sm = torch.nn.functional.log_softmax(self.edge_base_log_probs, dim=-1)
-        ll_edge = torch.sum(adj_deq * edge_base_log_probs_sm, dim=(-1, -2))
-        return -(torch.mean(ll_node + ll_edge) / (self.latent_edge_length + self.latent_node_length))
