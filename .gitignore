@@ -5,6 +5,7 @@ __pycache__/
 *.so
 *.pt
 *.pkl
+*.csv
 *.tgz
 *.zip
 # Distribution / packaging
