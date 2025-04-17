@@ -4,6 +4,9 @@ __pycache__/
 # C extensions
 *.so
 *.pt
+*.pkl
+*.tgz
+*.zip
 # Distribution / packaging
 .Python
 build/
