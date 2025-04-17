@@ -5,6 +5,8 @@ from torch.nn.utils.rnn import pad_sequence
 import os
 import numpy as np
 import json
+
+
 CFG = SimpleNamespace(
     dataset=SimpleNamespace(
         name='tree',

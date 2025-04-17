@@ -1,36 +1,17 @@
 #!/usr/bin/env python3
 """
-Update Node Type Encodings in AIG Graph Dataset
+Find Maximum Node Count in AIG Graph Dataset
 
-This script loads an AIG graph dataset, updates the node type encodings to use
-a true one-hot encoding format, and saves the modified dataset to a new file.
+This script loads an AIG graph dataset and analyzes the node count distribution,
+with a focus on finding the maximum number of nodes in any graph.
 """
 
 import os
 import pickle
 import networkx as nx
 from typing import List, Dict, Any, Tuple
-import numpy as np
 import time
-
-# Original node type encoding
-ORIGINAL_NODE_TYPE_ENCODING = {
-    "0": [0, 0, 0],
-    "PI": [1, 0, 0],
-    "AND": [0, 1, 0],
-    "PO": [0, 0, 1]
-}
-
-# New true one-hot node type encoding
-NEW_NODE_TYPE_ENCODING = {
-    "0": [1, 0, 0, 0],
-    "PI": [0, 1, 0, 0],
-    "AND": [0, 0, 1, 0],
-    "PO": [0, 0, 0, 1]
-}
-
-# Reverse mapping from encoding to node type name
-ORIGINAL_ENCODING_TO_TYPE = {str(v): k for k, v in ORIGINAL_NODE_TYPE_ENCODING.items()}
+from collections import Counter
 
 
 def load_graphs(pickle_path: str) -> List[nx.DiGraph]:
@@ -58,161 +39,147 @@ def load_graphs(pickle_path: str) -> List[nx.DiGraph]:
     return graphs
 
 
-def update_node_encodings(graphs: List[nx.DiGraph],
-                          verbose: bool = True,
-                          sample_interval: int = 1000) -> Tuple[List[nx.DiGraph], Dict[str, int]]:
+def analyze_node_counts(graphs: List[nx.DiGraph]) -> Dict[str, Any]:
     """
-    Update node type encodings in all graphs from original to new format.
+    Analyze the node count distribution in the graph dataset.
 
     Args:
         graphs: List of NetworkX DiGraph objects
-        verbose: Whether to print progress updates
-        sample_interval: How often to print progress updates
 
     Returns:
-        Tuple of (updated graphs, statistics dictionary)
+        Dictionary with analysis results
     """
-    stats = {
-        "total_graphs": len(graphs),
-        "total_nodes": 0,
-        "nodes_updated": 0,
-        "graphs_with_no_node_types": 0,
-        "type_counts": {
-            "0": 0,
-            "PI": 0,
-            "AND": 0,
-            "PO": 0,
-            "unknown": 0
-        }
-    }
-
     start_time = time.time()
 
+    results = {
+        "total_graphs": len(graphs),
+        "node_counts": [],
+        "min_nodes": float('inf'),
+        "max_nodes": 0,
+        "avg_nodes": 0,
+        "median_nodes": 0,
+        "graphs_by_size": Counter(),
+        "largest_graphs": []
+    }
+
+    # Count nodes in each graph
     for i, G in enumerate(graphs):
-        if verbose and (i % sample_interval == 0 or i == len(graphs) - 1):
-            elapsed = time.time() - start_time
-            graphs_per_sec = (i + 1) / elapsed if elapsed > 0 else 0
-            print(f"Processing graph {i + 1}/{len(graphs)} ({graphs_per_sec:.2f} graphs/s)")
+        node_count = G.number_of_nodes()
+        results["node_counts"].append(node_count)
+        results["graphs_by_size"][node_count] += 1
 
-        graph_has_node_types = False
+        # Update min and max
+        if node_count < results["min_nodes"]:
+            results["min_nodes"] = node_count
+        if node_count > results["max_nodes"]:
+            results["max_nodes"] = node_count
+            results["largest_graphs"] = [(i, node_count)]
+        elif node_count == results["max_nodes"]:
+            results["largest_graphs"].append((i, node_count))
 
-        # Update node encodings
-        for node, data in G.nodes(data=True):
-            stats["total_nodes"] += 1
+    # Calculate average
+    if results["node_counts"]:
+        results["avg_nodes"] = sum(results["node_counts"]) / len(results["node_counts"])
 
-            if "type" in data:
-                graph_has_node_types = True
-                node_type = data["type"]
+    # Calculate median
+    if results["node_counts"]:
+        sorted_counts = sorted(results["node_counts"])
+        mid = len(sorted_counts) // 2
+        if len(sorted_counts) % 2 == 0:
+            results["median_nodes"] = (sorted_counts[mid - 1] + sorted_counts[mid]) / 2
+        else:
+            results["median_nodes"] = sorted_counts[mid]
 
-                # Convert numpy arrays to lists for comparison
-                if isinstance(node_type, np.ndarray):
-                    node_type = node_type.tolist()
+    # Get top 20 most common node counts
+    results["most_common_sizes"] = results["graphs_by_size"].most_common(20)
 
-                # Convert to string for dictionary lookup
-                node_type_str = str(node_type)
+    # Get histogram data
+    histogram_data = []
+    min_size = max(results["min_nodes"], 0)
+    max_size = results["max_nodes"] + 1
+    bin_size = max(1, (max_size - min_size) // 20)  # Aim for ~20 bins
 
-                # Map the original encoding to node type name
-                if node_type_str in ORIGINAL_ENCODING_TO_TYPE:
-                    type_name = ORIGINAL_ENCODING_TO_TYPE[node_type_str]
-                    stats["type_counts"][type_name] += 1
+    for bin_start in range(min_size, max_size, bin_size):
+        bin_end = min(bin_start + bin_size, max_size)
+        bin_count = sum(results["graphs_by_size"][size] for size in range(bin_start, bin_end))
+        histogram_data.append((f"{bin_start}-{bin_end - 1}", bin_count))
 
-                    # Update to new encoding
-                    data["type"] = NEW_NODE_TYPE_ENCODING[type_name]
-                    stats["nodes_updated"] += 1
-                else:
-                    stats["type_counts"]["unknown"] += 1
+    results["histogram"] = histogram_data
 
-        if not graph_has_node_types:
-            stats["graphs_with_no_node_types"] += 1
+    # Time tracking
+    analysis_time = time.time() - start_time
+    results["analysis_time"] = analysis_time
 
-    total_time = time.time() - start_time
-    stats["processing_time"] = total_time
-    stats["nodes_per_second"] = stats["total_nodes"] / total_time if total_time > 0 else 0
-
-    return graphs, stats
+    return results
 
 
-def save_graphs(graphs: List[nx.DiGraph], output_path: str) -> None:
+def get_largest_graph_details(graphs: List[nx.DiGraph], graph_indices: List[Tuple[int, int]],
+                              max_examples: int = 5) -> List[Dict[str, Any]]:
     """
-    Save the updated graphs to a pickle file.
+    Get detailed information about the largest graphs.
 
     Args:
         graphs: List of NetworkX DiGraph objects
-        output_path: Path to save the pickle file
+        graph_indices: List of tuples (index, node_count) for the largest graphs
+        max_examples: Maximum number of examples to include
+
+    Returns:
+        List of dictionaries with details about the largest graphs
     """
-    print(f"Saving {len(graphs)} graphs to {output_path}...")
-    start_time = time.time()
+    largest_graph_details = []
 
-    with open(output_path, "wb") as f:
-        pickle.dump(graphs, f)
+    for i, (graph_idx, node_count) in enumerate(graph_indices[:max_examples]):
+        G = graphs[graph_idx]
 
-    save_time = time.time() - start_time
-    print(f"Saved successfully in {save_time:.2f} seconds.")
+        # Count node types
+        node_types = {}
+        type_counts = {"constant-0": 0, "PI": 0, "AND": 0, "PO": 0, "unknown": 0}
 
+        for _, data in G.nodes(data=True):
+            if "type" in data:
+                node_type = data["type"]
+                type_str = str(node_type)
 
-def verify_update(original_graphs: List[nx.DiGraph],
-                  updated_graphs: List[nx.DiGraph],
-                  num_to_check: int = 5) -> None:
-    """
-    Verify that the update was performed correctly by comparing
-    a sample of original and updated graphs.
-
-    Args:
-        original_graphs: List of original NetworkX DiGraph objects
-        updated_graphs: List of updated NetworkX DiGraph objects
-        num_to_check: Number of graphs to check
-    """
-    print(f"\nVerifying update on {num_to_check} sample graphs:")
-
-    for i in range(min(num_to_check, len(original_graphs))):
-        original_G = original_graphs[i]
-        updated_G = updated_graphs[i]
-
-        print(f"\nGraph {i + 1}:")
-
-        # Check node count
-        print(f"  Node count: Original={original_G.number_of_nodes()}, Updated={updated_G.number_of_nodes()}")
-
-        # Check a sample node
-        sample_nodes = list(original_G.nodes(data=True))[:3]
-        for node_id, orig_data in sample_nodes:
-            if "type" in orig_data:
-                # Get original type
-                orig_type = orig_data["type"]
-                if isinstance(orig_type, np.ndarray):
-                    orig_type = orig_type.tolist()
-
-                # Get updated type
-                updated_type = updated_G.nodes[node_id]["type"]
-                if isinstance(updated_type, np.ndarray):
-                    updated_type = updated_type.tolist()
-
-                # Map to type names
-                orig_type_str = str(orig_type)
-                orig_type_name = ORIGINAL_ENCODING_TO_TYPE.get(orig_type_str, "unknown")
-
-                print(f"  Node {node_id}:")
-                print(f"    Original type: {orig_type} ({orig_type_name})")
-                print(f"    Updated type: {updated_type}")
-
-                # Check if update is correct
-                expected_type = NEW_NODE_TYPE_ENCODING.get(orig_type_name, None)
-                if expected_type is not None:
-                    is_correct = updated_type == expected_type
-                    print(f"    Correct update: {is_correct}")
+                # Identify node type based on pattern
+                if type_str == "[0, 0, 0]" or type_str == "[1, 0, 0, 0]":  # Original or new encoding
+                    type_counts["constant-0"] += 1
+                elif type_str == "[1, 0, 0]" or type_str == "[0, 1, 0, 0]":
+                    type_counts["PI"] += 1
+                elif type_str == "[0, 1, 0]" or type_str == "[0, 0, 1, 0]":
+                    type_counts["AND"] += 1
+                elif type_str == "[0, 0, 1]" or type_str == "[0, 0, 0, 1]":
+                    type_counts["PO"] += 1
                 else:
-                    print(f"    Unknown original type, can't verify")
+                    type_counts["unknown"] += 1
+
+        # Get graph attributes
+        details = {
+            "graph_index": graph_idx,
+            "node_count": node_count,
+            "edge_count": G.number_of_edges(),
+            "inputs": G.graph.get("inputs", "unknown"),
+            "outputs": G.graph.get("outputs", "unknown"),
+            "node_type_counts": type_counts
+        }
+
+        largest_graph_details.append(details)
+
+    return largest_graph_details
 
 
 def main():
-    """Main function to update node type encodings."""
+    """Main function to find the maximum node count."""
     # Try to find the pickle file
     home_dir = os.path.expanduser("~")
     potential_paths = [
         "final_data.pkl",
         "all_rand_aigs_data.pkl",
+        "updated_final_data.pkl",
+        "updated_all_rand_aigs_data.pkl",
         os.path.join(home_dir, "Downloads", "final_data.pkl"),
-        os.path.join(home_dir, "Downloads", "all_rand_aigs_data.pkl")
+        os.path.join(home_dir, "Downloads", "all_rand_aigs_data.pkl"),
+        os.path.join(home_dir, "Downloads", "updated_final_data.pkl"),
+        os.path.join(home_dir, "Downloads", "updated_all_rand_aigs_data.pkl")
     ]
 
     pickle_path = None
@@ -224,50 +191,55 @@ def main():
     if not pickle_path:
         pickle_path = input("Please enter the path to your pickle file: ").strip()
 
-    # Ask for output path
-    output_dir = os.path.dirname(pickle_path) or '.'
-    default_output = os.path.join(output_dir, "updated_" + os.path.basename(pickle_path))
-    output_path = input(f"Enter output path or press Enter for default [{default_output}]: ").strip()
-    if not output_path:
-        output_path = default_output
-
     # Load the graphs
     try:
-        original_graphs = load_graphs(pickle_path)
+        graphs = load_graphs(pickle_path)
     except Exception as e:
         print(f"Error loading graphs: {e}")
         return
 
-    # Create a copy of the original graphs
-    print("Creating a copy of the original graphs...")
-    graphs_copy = pickle.loads(pickle.dumps(original_graphs))
+    # Analyze node counts
+    print("\nAnalyzing node count distribution...")
+    results = analyze_node_counts(graphs)
 
-    # Update node encodings
-    print("\nUpdating node type encodings...")
-    updated_graphs, stats = update_node_encodings(graphs_copy)
+    # Print results
+    print("\n=== NODE COUNT ANALYSIS ===")
+    print(f"Total graphs: {results['total_graphs']}")
+    print(f"Minimum node count: {results['min_nodes']}")
+    print(f"Maximum node count: {results['max_nodes']}")
+    print(f"Average node count: {results['avg_nodes']:.2f}")
+    print(f"Median node count: {results['median_nodes']}")
 
-    # Print statistics
-    print("\n=== UPDATE STATISTICS ===")
-    print(f"Total graphs: {stats['total_graphs']}")
-    print(f"Total nodes: {stats['total_nodes']}")
-    print(f"Nodes updated: {stats['nodes_updated']} ({stats['nodes_updated'] / stats['total_nodes'] * 100:.2f}%)")
-    print(f"Graphs with no node types: {stats['graphs_with_no_node_types']}")
-    print("\nNode type counts:")
-    for type_name, count in stats['type_counts'].items():
-        print(f"  {type_name}: {count}")
-    print(f"\nProcessing time: {stats['processing_time']:.2f} seconds")
-    print(f"Processing speed: {stats['nodes_per_second']:.2f} nodes/second")
+    # Print histogram
+    print("\nNode count distribution:")
+    for bin_range, count in results["histogram"]:
+        percentage = (count / results["total_graphs"]) * 100
+        print(f"  {bin_range}: {count} graphs ({percentage:.1f}%)")
 
-    # Verify the update
-    verify_update(original_graphs, updated_graphs)
+    # Print most common sizes
+    print("\nMost common node counts:")
+    for size, count in results["most_common_sizes"][:10]:
+        percentage = (count / results["total_graphs"]) * 100
+        print(f"  {size} nodes: {count} graphs ({percentage:.1f}%)")
 
-    # Confirm save
-    should_save = input("\nSave updated graphs? (y/n): ").strip().lower()
-    if should_save == 'y':
-        save_graphs(updated_graphs, output_path)
-        print(f"Updated graphs saved to {output_path}")
-    else:
-        print("Update canceled. No changes were saved.")
+    # Get details about the largest graphs
+    print(f"\nFound {len(results['largest_graphs'])} graphs with {results['max_nodes']} nodes (the maximum)")
+    largest_graph_details = get_largest_graph_details(graphs, results["largest_graphs"])
+
+    print("\nLargest graph details:")
+    for i, details in enumerate(largest_graph_details):
+        print(f"\nLarge Graph {i + 1} (Index {details['graph_index']}):")
+        print(f"  Nodes: {details['node_count']}")
+        print(f"  Edges: {details['edge_count']}")
+        print(f"  Inputs: {details['inputs']}")
+        print(f"  Outputs: {details['outputs']}")
+        print("  Node type distribution:")
+        for node_type, count in details['node_type_counts'].items():
+            if count > 0:
+                percentage = (count / details['node_count']) * 100
+                print(f"    {node_type}: {count} ({percentage:.1f}%)")
+
+    print(f"\nAnalysis completed in {results['analysis_time']:.2f} seconds.")
 
 
 if __name__ == "__main__":
