@@ -18,7 +18,7 @@ CFG = SimpleNamespace(
         # Path to your input pickle file containing NetworkX DiGraphs
         pickle_path='current_data.pkl',  # Make sure this path is correct
         # Output directory for processed data (relative to where script is run)
-        output_dir='./datasets/data/aig/',
+        output_dir='./aig/',
         # Train/Val/Test split ratios
         split_ratios=(0.8, 0.1, 0.1)  # Includes test split
     ),

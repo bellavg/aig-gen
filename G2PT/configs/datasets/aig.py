@@ -20,10 +20,10 @@ block_size = 1024 # ADJUST AS NEEDED
 
 # Path to the directory containing the processed .bin files (relative to project root)
 # Matches the output_dir used in prepare_aig.py
-data_dir = './datasets/data/aig/'
+data_dir = '../../datasets/aig/'
 
 # Path to the tokenizer directory (relative to project root)
-tokenizer_path = './tokenizers/aig/'
+tokenizer_path = '../../tokenizers/aig/'
 
 # Add any other dataset-specific flags or settings if needed by your setup
 # Example:

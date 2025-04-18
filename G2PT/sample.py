@@ -7,9 +7,10 @@ import torch
 import numpy as np
 from model import GPTConfig, GPT
 from transformers import AutoTokenizer
-from datasets_utils import seq_to_mol, get_smiles, seq_to_molecule_with_partial_charges, seq_to_nxgraph
+from datasets_utils import  seq_to_nxgraph
 import argparse
 from contextlib import nullcontext
+import pickle
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Sample from a trained model')
@@ -84,70 +85,122 @@ def generate_sequences(model, tokenizer, batch_size, num_samples, device, prefix
         
     return generated_sequences[:num_samples]
 
+
 if __name__ == '__main__':
     args = parse_args()
     device, ctx = setup_device(args.seed)
-    
+
+    # Load the correct AIG tokenizer and the trained AIG model
+    # Ensure args.tokenizer_path points to 'tokenizers/aig/'
+    # Ensure args.out_dir points to your trained AIG model checkpoint directory
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
     model = load_model(args.out_dir, device)
-    
-   
-    if any(dataset_name in args.tokenizer_path for dataset_name in ['guacamol', 'qm9', 'moses']):
-        with ctx:
-            generated_sequences = generate_sequences(
-                model, 
-                tokenizer,
-                args.batch_size,
-                args.num_samples,
-                device,
-            )
+
+    # Determine dataset type based on tokenizer path
+    dataset_type = 'unknown'
+    if 'aig' in args.tokenizer_path:
+        dataset_type = 'aig'
+    elif any(name in args.tokenizer_path for name in ['guacamol', 'qm9', 'moses']):
+        dataset_type = 'molecular'
+    elif any(name in args.tokenizer_path for name in ['planar', 'sbm', 'tree', 'lobster']):
+        dataset_type = 'general_graph'
+
+    # --- Sequence Generation (Common) ---
+    prefix = None # AIG usually starts from <boc>
+    temperature = 1.0 # Standard temperature unless specific tuning needed
+    # Add specific prefix/temperature logic here if needed for AIG, similar to 'planar' example
+
+    with ctx:
+        generated_sequences = generate_sequences(
+            model,
+            tokenizer,
+            args.batch_size,
+            args.num_samples,
+            device,
+            prefix=prefix,
+            temperature=temperature,
+        )
+
+    # --- Post-processing based on dataset type ---
+    if dataset_type == 'molecular':
+        # --- Keep existing molecular processing logic ---
         # save smiles
         smiles = []
+        # Import molecule processing functions if needed
+        from datasets_utils import seq_to_mol, get_smiles, seq_to_molecule_with_partial_charges
         for seq_str in generated_sequences:
             try:
                 if 'guacamol' in args.tokenizer_path:
                     mol = seq_to_molecule_with_partial_charges(seq_str)
                 else:
-                    mol = seq_to_mol(seq_str) 
+                    mol = seq_to_mol(seq_str)
                 smile = get_smiles(mol)
                 if smile:
                     smiles.append(smile)
                 else:
-                    smiles.append(None)
-            except:
-                # handling sequence invalid error (we ignore decoding errors as it can be easily fixed by constrained sampling)
-                continue
-        smiles = [str(s) for s in smiles]
-        open(f'{args.out_dir}/generated_smiles.txt', 'w').write('\n'.join(smiles))
-        
-    elif any(dataset_name in args.tokenizer_path for dataset_name in ['planar', 'sbm', 'tree', 'lobster']):
-        if 'planar' in args.tokenizer_path:
-            prefix = sum([['NODE', f'IDX_{i}', '<sepc>'] for i in range(64)],[])
-            prefix[-1] = '<eoc>'
-            prefix = ' '.join(['<boc>'] + prefix)
-            temperature = 0.3
-        else:
-            prefix = None
-            temperature = 1.0
-        with ctx:
-            generated_sequences = generate_sequences(
-                model, 
-                tokenizer,
-                args.batch_size,
-                args.num_samples,
-                device,
-                prefix=prefix,
-                temperature=temperature,
-            )
-        # save nx graph
-        import pickle
-        nx_graphs = []
+                    smiles.append(None) # Keep track of failed conversions
+            except Exception as e:
+                print(f"Error processing sequence to SMILES: {e}")
+                smiles.append(None) # Add None for errors
+        smiles_out = [str(s) if s else "" for s in smiles] # Represent None as empty string
+        output_file = os.path.join(args.out_dir, 'generated_smiles.txt')
+        print(f"Saving {len(smiles_out)} generated SMILES (including empty strings for errors) to {output_file}")
+        with open(output_file, 'w') as f:
+            f.write('\n'.join(smiles_out))
 
+    elif dataset_type == 'general_graph':
+         # --- Keep existing general graph processing logic ---
+        nx_graphs = []
+        # Import graph processing function if needed
+        from datasets_utils import seq_to_nxgraph # Ensure this uses the *old* version if needed for these datasets
         for seq_str in generated_sequences:
-            try: 
+            try:
+                # Use the appropriate seq_to_nxgraph for undirected graphs if necessary
+                # This assumes the seq_to_nxgraph in datasets_utils handles these cases correctly
+                graph = seq_to_nxgraph(seq_str) # Make sure this call reconstructs undirected nx.Graph
+                nx_graphs.append(graph)
+            except Exception as e:
+                print(f"Error processing sequence to graph: {e}")
+                # Optionally append None or skip
+        output_file = os.path.join(args.out_dir, 'generated_graphs.pkl')
+        print(f"Saving {len(nx_graphs)} generated graphs to {output_file}")
+        with open(output_file, 'wb') as f:
+            pickle.dump(nx_graphs, f)
+
+    # --- ADDED AIG Handling ---
+    elif dataset_type == 'aig':
+        print("Processing generated sequences as AIGs...")
+        aig_graphs = []
+        # Ensure seq_to_nxgraph is imported (it should be already)
+        # from datasets_utils import seq_to_nxgraph # Make sure this uses the *updated* DiGraph version
+
+        num_processed = 0
+        num_errors = 0
+        for seq_str in generated_sequences:
+            try:
+                # Call the UPDATED seq_to_nxgraph which creates nx.DiGraph
                 graph = seq_to_nxgraph(seq_str)
-                nx_graphs.append(graph) 
-            except:
-                continue
-        open(f'{args.out_dir}/generated_graphs.pkl', 'wb').write(pickle.dumps(nx_graphs))
+                # Optional: Add validation checks specific to AIGs if needed
+                aig_graphs.append(graph)
+                num_processed += 1
+            except Exception as e:
+                print(f"Error processing sequence to AIG: {e}\nSequence sample: {seq_str[:100]}...")
+                num_errors += 1
+                # Decide if you want to store None for errors or just skip
+                # aig_graphs.append(None) # Option to store None
+
+        output_file = os.path.join(args.out_dir, 'generated_aigs.pkl')
+        print(f"Processed {num_processed} sequences, encountered {num_errors} errors.")
+        print(f"Saving {len(aig_graphs)} generated AIG DiGraphs to {output_file}")
+        with open(output_file, 'wb') as f:
+            pickle.dump(aig_graphs, f)
+
+    else:
+         print(f"Warning: Unknown dataset type derived from tokenizer path '{args.tokenizer_path}'. No specific post-processing applied.")
+         # Optionally save the raw sequences
+         output_file = os.path.join(args.out_dir, 'generated_sequences.txt')
+         print(f"Saving raw generated sequences to {output_file}")
+         with open(output_file, 'w') as f:
+            f.write('\n'.join(generated_sequences))
+
 
