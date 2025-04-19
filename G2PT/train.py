@@ -342,7 +342,7 @@ if __name__ == '__main__':
                     print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
                 iter_num += 1
                 local_iter_num += 1
-                print("Did a loop")
+
 
                 # termination conditions
                 if iter_num > max_iters:
