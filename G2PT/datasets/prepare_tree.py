@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from digress_datasets import spectre_dataset
+from dataset_classes import spectre_dataset
 from tqdm import tqdm
 from torch.nn.utils.rnn import pad_sequence
 import os

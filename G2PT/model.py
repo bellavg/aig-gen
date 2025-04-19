@@ -201,9 +201,9 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),reduction='none')
+            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), reduction='none')
             # print(loss.shape, target_masks.shape)
-            target_masks = target_masks.view(-1)
+            target_masks = target_masks.reshape(-1)
             loss = (loss * target_masks.float()).sum() / target_masks.sum()
             
         else:

@@ -1,284 +1,241 @@
-# File: G2PT/datasets/prepare_aig.py
+# G2PT/datasets/prepare_aig_final.py
+# Stage 2: Convert AIG PyG Data objects into final .bin format with vocab IDs.
+# Based on prepare_tree.py
 
-import os
-import pickle
-import json
 from types import SimpleNamespace
-import numpy as np
-import torch
-from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
-import networkx as nx
+from torch.nn.utils.rnn import pad_sequence
+import os
+import numpy as np
+import json
+import torch
 import warnings
 
+# Import your new PyG DataModule
+from aig_dataset import *
+
+
 # --- Configuration ---
-# Adjust these paths and settings as needed
 CFG = SimpleNamespace(
+    # --- Dataset loading config ---
     dataset=SimpleNamespace(
-        # Path to your input pickle file containing NetworkX DiGraphs
-        pickle_path='current_data.pkl',  # Make sure this path is correct
-        # Output directory for processed data (relative to where script is run)
-        output_dir='./aig/',
-        # Train/Val/Test split ratios
-        split_ratios=(0.8, 0.1, 0.1)  # Includes test split
+        name='aig',                   # Keep name 'aig' for consistency downstream
+        datadir='./aig/',         # <--- POINT THIS to your PyG dataset dir (contains raw/processed)
+        filter=False,                 # Filtering should be done before this stage
     ),
+    # --- Dataloader config (used by DataModule init) ---
+    train=SimpleNamespace(
+        batch_size=32,                # Not critical for this script, but needed by DataModule
+        num_workers=0,                # Use 0 for sequential processing in this script
+    ),
+    # --- General processing config ---
     general=SimpleNamespace(
-        # Padding value used in G2PT examples
-        padding_value=-100,
-        # --- Expected vocab IDs (THESE MUST MATCH YOUR vocab.json) ---
+        name='aig',
+        padding_value=-100,          # Padding value for .bin files
+        # --- Target Vocab IDs (MUST MATCH vocab.json) ---
         node_const0_id=97,
         node_pi_id=98,
         node_and_id=99,
         node_po_id=100,
         edge_inv_id=101,
         edge_reg_id=102,
-        # --- Corresponding one-hot encodings from your data ---
-        node_const0_enc=tuple([1, 0, 0, 0]),
-        node_pi_enc=tuple([0, 1, 0, 0]),
-        node_and_enc=tuple([0, 0, 1, 0]),
-        node_po_enc=tuple([0, 0, 0, 1]),
-        edge_inv_enc=tuple([1, 0]),
-        edge_reg_enc=tuple([0, 1]),
-    )
+    ),
+    # --- Mapping from PyG feature index (from argmax) back to Vocab ID ---
+    # Assumes one-hot encoding used in prepare_aig_pyg.py stage:
+    # Index 0 -> CONST0, Index 1 -> PI, etc.
+    node_feature_index_to_id = {
+        0: 97, # CONST0 Feature Index 0 maps to Vocab ID 97
+        1: 98, # PI Feature Index 1 maps to Vocab ID 98
+        2: 99, # AND Feature Index 2 maps to Vocab ID 99
+        3: 100 # PO Feature Index 3 maps to Vocab ID 100
+    },
+    # Index 0 -> INV, Index 1 -> REG
+    edge_feature_index_to_id = {
+        0: 101, # INV Feature Index 0 maps to Vocab ID 101
+        1: 102  # REG Feature Index 1 maps to Vocab ID 102
+    },
+    # --- Final output directory for .bin files ---
+    final_output_dir='./aig/' # <--- SET THIS: Where G2PT expects the final dataset (e.g., ./aig/)
+                                # Relative to the script location (datasets/)
 )
 
-# --- Vocabulary Mapping (using IDs from CFG) ---
-# Maps the tuple representation of one-hot encodings to the correct integer IDs
-NODE_TYPE_MAP = {
-    CFG.general.node_const0_enc: CFG.general.node_const0_id,
-    CFG.general.node_pi_enc: CFG.general.node_pi_id,
-    CFG.general.node_and_enc: CFG.general.node_and_id,
-    CFG.general.node_po_enc: CFG.general.node_po_id,
-}
-
-EDGE_TYPE_MAP = {
-    CFG.general.edge_inv_enc: CFG.general.edge_inv_id,
-    CFG.general.edge_reg_enc: CFG.general.edge_reg_id,
-}
-
-
 # --- Main Processing Logic ---
-def prepare_aig_dataset():
-    print(f"Starting AIG dataset preparation...")
-    print(f"Loading AIG dataset from: {CFG.dataset.pickle_path}")
+if __name__ == '__main__':
+    print(f"--- Stage 2: AIG PyG .pt to final .bin Conversion ---")
+    print(f"Loading PyG data using AIGPygDataModule from: {CFG.dataset.datadir}")
+
+    # Instantiate your AIG PyG DataModule
     try:
-        with open(CFG.dataset.pickle_path, 'rb') as f:
-            all_graphs = pickle.load(f)
-        print(f"Loaded {len(all_graphs)} graphs.")
+        datamodule = AIGPygDataModule(CFG)
     except Exception as e:
-        print(f"Error loading pickle file '{CFG.dataset.pickle_path}': {e}")
-        return
+        print(f"Failed to initialize AIGPygDataModule: {e}")
+        print("Check if the paths are correct and if the processed PyG files exist.")
+        exit(1)
+    print("DataModule initialized.")
 
-    if not isinstance(all_graphs, list):
-        print(f"Error: Expected a list of graphs from pickle file, got {type(all_graphs)}")
-        return
+    # Access the underlying PyG datasets for each split
+    # The DataModule ensures they are loaded/processed
+    dataset_split = {}
+    try:
+         dataset_split['train'] = datamodule.train_dataset
+         dataset_split['eval'] = datamodule.val_dataset # Use 'eval' key for consistency with G2PT
+         dataset_split['test'] = datamodule.test_dataset
+    except AttributeError:
+         print("Error accessing datasets from DataModule. Check DataModule implementation.")
+         exit(1)
 
-    # Filter out non-DiGraph items just in case
-    num_original = len(all_graphs)
-    all_graphs = [g for g in all_graphs if isinstance(g, nx.DiGraph)]
-    if len(all_graphs) < num_original:
-        print(f"Warning: Filtered out {num_original - len(all_graphs)} non-DiGraph items.")
-    if not all_graphs:
-        print("Error: No valid DiGraphs found in the pickle file.")
-        return
+    data_meta = {} # To store final shapes for data_meta.json
 
-    # --- Shuffle and Split Data ---
-    print("Shuffling and splitting graphs...")
-    np.random.shuffle(all_graphs)
-    num_graphs = len(all_graphs)
-    num_train = int(num_graphs * CFG.dataset.split_ratios[0])
-    num_val = int(num_graphs * CFG.dataset.split_ratios[1])
-    num_test = num_graphs - num_train - num_val  # Remainder goes to test
+    # Ensure final output directory exists
+    os.makedirs(CFG.final_output_dir, exist_ok=True)
+    print(f"Output directory for .bin files: {CFG.final_output_dir}")
 
-    # Ensure splits are valid
-    if num_train <= 0 or num_val <= 0 or num_test <= 0:
-        print(f"Warning: Dataset size ({num_graphs}) is too small for 80/10/10 split. Adjusting.")
-        if num_graphs >= 3:
-            num_val = max(1, int(num_graphs * CFG.dataset.split_ratios[1]))
-            num_test = max(1, int(num_graphs * CFG.dataset.split_ratios[2]))
-            num_train = num_graphs - num_val - num_test
-            if num_train <= 0:  # Handle edge case where val/test take everything
-                num_train = 1
-                num_val = max(1, num_graphs - num_train - num_test)
-                if num_val <= 0: num_val = 1
-                num_test = num_graphs - num_train - num_val
-        elif num_graphs == 2:
-            num_train, num_val, num_test = 1, 1, 0
-        elif num_graphs == 1:
-            num_train, num_val, num_test = 1, 0, 0
-        else:  # num_graphs == 0
-            print("Error: No graphs to process after filtering.")
-            return
+    print("Processing PyG datasets into final .bin format...")
+    for split_name_internal, pyg_dataset in dataset_split.items():
+        # Map internal split names ('val') to G2PT's expected dir names ('eval')
+        split_name_output = 'eval' if split_name_internal == 'val' else split_name_internal
 
-    dataset_splits = {
-        'train': all_graphs[:num_train],
-        'eval': all_graphs[num_train:num_train + num_val],
-        'test': all_graphs[num_train + num_val:]
-    }
-    print(
-        f"Final Split - Train: {len(dataset_splits['train'])}, Val: {len(dataset_splits['eval'])}, Test: {len(dataset_splits['test'])}")
-
-    data_meta = {}
-
-    # --- Process Each Split ---
-    for split_name, graph_list in dataset_splits.items():
-        if not graph_list:  # Skip empty splits
-            print(f"Skipping empty split: {split_name}")
+        if not pyg_dataset or len(pyg_dataset) == 0:
+            print(f"Skipping empty split: {split_name_internal}")
+            # Create metadata entry even for empty splits if needed downstream
+            data_meta[f'{split_name_output}_shape'] = {'xs': [0, 0], 'edge_indices': [0, 0, 0], 'edge_attrs': [0, 0]}
             continue
 
-        print(f"\nProcessing split: {split_name}")
-        output_split_dir = os.path.join(CFG.dataset.output_dir, split_name)
-        os.makedirs(output_split_dir, exist_ok=True)
+        split_output_dir = os.path.join(CFG.final_output_dir, split_name_output)
+        os.makedirs(split_output_dir, exist_ok=True)
+        print(f"\nProcessing split: {split_name_internal} -> {split_name_output} ({len(pyg_dataset)} graphs)")
 
-        all_xs = []
-        all_edge_indices = []  # Will store tensors of shape [2, num_edges]
-        all_edge_attrs = []
+        xs_vocab_ids = []           # List to store tensors of node vocab IDs
+        edge_indices_list = []      # List to store edge_index tensors [num_edges, 2]
+        edge_attrs_vocab_ids = []   # List to store tensors of edge vocab IDs
 
-        skipped_graphs = 0
-        for graph in tqdm(graph_list, desc=f"  Processing {split_name} graphs"):
-            valid_graph = True
-
-            # --- 1. Node Processing ---
-            node_list = list(graph.nodes())
-            if not node_list:  # Skip empty graphs
-                skipped_graphs += 1
+        # Iterate through PyG Data objects from the loaded dataset
+        for data in tqdm(pyg_dataset, desc=f"  Converting {split_name_internal} PyG data"):
+            # 1. Convert node features (e.g., one-hot) back to integer vocab IDs
+            if data.x is None or data.x.numel() == 0:
+                warnings.warn("Skipping graph with missing or empty node features (data.x)")
                 continue
-            # Create mapping from original node ID to 0-based index
-            node_map = {node_id: i for i, node_id in enumerate(node_list)}
+            try:
+                # Get index of '1' in one-hot (or class index directly if not one-hot)
+                node_feature_indices = data.x.argmax(dim=-1)
+                # Map feature index to vocabulary ID using the config mapping
+                node_ids = torch.tensor(
+                    [CFG.node_feature_index_to_id.get(idx.item(), -1) # Default to -1 for unknown
+                     for idx in node_feature_indices],
+                    dtype=torch.long
+                )
+                # Check if any node mapping failed
+                if torch.any(node_ids == -1):
+                    warnings.warn(f"Skipping graph: Found unknown node feature index during mapping.")
+                    continue # Skip this graph
+                xs_vocab_ids.append(node_ids) # Append tensor of vocab IDs
+            except Exception as e:
+                warnings.warn(f"Skipping graph: Error processing node features: {e}")
+                continue
 
-            xs_for_graph = []
-            for node_id in node_list:
+            # 2. Convert edge features back to integer vocab IDs & prepare edge_index
+            if data.edge_index is not None and data.edge_index.numel() > 0:
+                if data.edge_attr is None or data.edge_attr.numel() == 0:
+                     warnings.warn("Skipping graph: edge_index present but edge_attr missing or empty.")
+                     xs_vocab_ids.pop() # Remove corresponding node data
+                     continue
                 try:
-                    # Ensure 'type' attribute exists
-                    if 'type' not in graph.nodes[node_id]:
-                        raise KeyError(f"Node {node_id} missing 'type' attribute.")
+                    edge_feature_indices = data.edge_attr.argmax(dim=-1)
+                    edge_ids = torch.tensor(
+                        [CFG.edge_feature_index_to_id.get(idx.item(), -1) # Default -1
+                         for idx in edge_feature_indices],
+                        dtype=torch.long
+                    )
+                    if torch.any(edge_ids == -1):
+                        warnings.warn(f"Skipping graph: Found unknown edge feature index during mapping.")
+                        xs_vocab_ids.pop() # Remove corresponding node data
+                        continue
+                    edge_attrs_vocab_ids.append(edge_ids) # Append tensor of vocab IDs
+                    # Append edge_index (transpose required for padding later)
+                    edge_indices_list.append(data.edge_index.t()) # Shape [num_edges, 2]
 
-                    node_type_one_hot = tuple(graph.nodes[node_id]['type'])
-                    node_type_id = NODE_TYPE_MAP.get(node_type_one_hot)  # Map to vocab ID
-                    if node_type_id is None:
-                        warnings.warn(f"Graph skipped: Unknown node type {node_type_one_hot} for node {node_id}.")
-                        valid_graph = False
-                        break
-                    xs_for_graph.append(node_type_id)
                 except Exception as e:
-                    warnings.warn(f"Graph skipped: Error processing node {node_id}: {e}")
-                    valid_graph = False
-                    break
+                    warnings.warn(f"Skipping graph: Error processing edge features/indices: {e}")
+                    xs_vocab_ids.pop() # Remove corresponding node data
+                    continue
+            else: # No edges in this graph
+                 edge_attrs_vocab_ids.append(torch.tensor([], dtype=torch.long))
+                 edge_indices_list.append(torch.tensor([], dtype=torch.long).reshape(0,2)) # Shape [0, 2]
 
-            if not valid_graph:
-                skipped_graphs += 1
-                continue
 
-            # --- 2. Edge Processing ---
-            edge_indices_for_graph = []  # List of [src_idx, dst_idx] pairs
-            edge_attrs_for_graph = []  # List of edge type IDs
-            for u, v, edge_data in graph.edges(data=True):
-                try:
-                    # Map original NetworkX node IDs to 0-based indices
-                    src_idx = node_map[u]
-                    dst_idx = node_map[v]
+        # --- Padding (convert lists of tensors to padded numpy arrays) ---
+        if not xs_vocab_ids:
+             print(f"Skipping saving for {split_name_output} as no valid graphs were processed.")
+             data_meta[f'{split_name_output}_shape'] = {'xs': [0, 0], 'edge_indices': [0, 0, 0], 'edge_attrs': [0, 0]}
+             continue # Skip to next split
 
-                    # Default to REG edge type if 'type' attribute is missing
-                    edge_type_enc = tuple(edge_data.get('type', CFG.general.edge_reg_enc))
-                    edge_type_id = EDGE_TYPE_MAP.get(edge_type_enc)  # Map to vocab ID
+        print(f"  Padding {split_name_output} data ({len(xs_vocab_ids)} graphs)...")
+        try:
+            # Pad node vocab IDs
+            xs_padded = pad_sequence(xs_vocab_ids, batch_first=True, padding_value=float(CFG.general.padding_value))
+            xs_np = xs_padded.numpy().astype(np.int16)
 
-                    if edge_type_id is None:
-                        warnings.warn(
-                            f"Graph skipped: Unknown edge type {edge_type_enc} for edge ({u},{v}). Defaulting to REG.")
-                        # Default to REG ID if type is unknown, or skip graph if preferred
-                        edge_type_id = CFG.general.edge_reg_id  # Or set valid_graph=False and break
+            # Pad edge vocab IDs
+            edge_attrs_padded = pad_sequence(edge_attrs_vocab_ids, batch_first=True, padding_value=float(CFG.general.padding_value))
+            edge_attrs_np = edge_attrs_padded.numpy().astype(np.int16)
 
-                    edge_indices_for_graph.append([src_idx, dst_idx])
-                    edge_attrs_for_graph.append(edge_type_id)
+            # Pad edge_index list (elements are shape [num_edges, 2])
+            edge_indices_padded = pad_sequence(edge_indices_list, batch_first=True, padding_value=float(CFG.general.padding_value)) # Pads to [N, max_edges, 2]
+            # Transpose final array to match expected [N, 2, max_edges] format
+            edge_indices_np = edge_indices_padded.numpy().astype(np.int16).transpose(0, 2, 1)
 
-                except KeyError as e:
-                    warnings.warn(f"Graph skipped: Node {e} in edge ({u},{v}) not found in node_map.")
-                    valid_graph = False
-                    break
-                except Exception as e:
-                    warnings.warn(f"Graph skipped: Error processing edge ({u},{v}): {e}")
-                    valid_graph = False
-                    break
+        except Exception as e:
+            print(f"Error during padding for split {split_name_output}: {e}")
+            # Avoid saving potentially corrupted data for this split
+            data_meta[f'{split_name_output}_shape'] = {'xs': [0, 0], 'edge_indices': [0, 0, 0], 'edge_attrs': [0, 0]}
+            continue # Skip to next split
 
-            if not valid_graph:
-                skipped_graphs += 1
-                continue
+        print(f"    Final shapes - xs: {xs_np.shape}, edge_indices: {edge_indices_np.shape}, edge_attrs: {edge_attrs_np.shape}")
 
-            # Append tensors for the valid graph
-            all_xs.append(torch.tensor(xs_for_graph, dtype=torch.long))
-            all_edge_attrs.append(torch.tensor(edge_attrs_for_graph, dtype=torch.long))
+        # --- Saving with Memmap ---
+        print(f"  Saving final {split_name_output} data using memmap to {split_output_dir}...")
+        xs_path = os.path.join(split_output_dir, 'xs.bin')
+        edge_indices_path = os.path.join(split_output_dir, 'edge_indices.bin') # Plural key
+        edge_attrs_path = os.path.join(split_output_dir, 'edge_attrs.bin')     # Plural key
 
-            # Convert edge list to tensor [2, num_edges]
-            if edge_indices_for_graph:
-                # Shape [num_edges, 2] -> transpose to [2, num_edges]
-                edge_indices_tensor = torch.tensor(edge_indices_for_graph, dtype=torch.long).t().contiguous()
-                all_edge_indices.append(edge_indices_tensor)
-            else:
-                all_edge_indices.append(torch.empty((2, 0), dtype=torch.long))
+        try:
+            # Save node data
+            xs_memmap = np.memmap(xs_path, dtype=np.int16, mode='w+', shape=xs_np.shape)
+            xs_memmap[:] = xs_np
+            xs_memmap.flush(); del xs_memmap # Flush and close
 
-        if skipped_graphs > 0:
-            print(f"  Skipped {skipped_graphs} invalid or empty graphs in {split_name} split.")
-        if not all_xs:
-            print(f"Error: No valid graphs processed for {split_name} split. Cannot save .bin files.")
-            continue
+            # Save edge index data
+            edge_indices_memmap = np.memmap(edge_indices_path, dtype=np.int16, mode='w+', shape=edge_indices_np.shape)
+            edge_indices_memmap[:] = edge_indices_np
+            edge_indices_memmap.flush(); del edge_indices_memmap
 
-        # --- 3. Padding ---
-        print(f"  Padding {split_name} data...")
-        xs_padded = pad_sequence(all_xs, batch_first=True, padding_value=float(CFG.general.padding_value))
-        xs_np = xs_padded.numpy().astype(np.int16)
+            # Save edge attribute data
+            edge_attrs_memmap = np.memmap(edge_attrs_path, dtype=np.int16, mode='w+', shape=edge_attrs_np.shape)
+            edge_attrs_memmap[:] = edge_attrs_np
+            edge_attrs_memmap.flush(); del edge_attrs_memmap
 
-        edge_attrs_padded = pad_sequence(all_edge_attrs, batch_first=True,
-                                         padding_value=float(CFG.general.padding_value))
-        edge_attrs_np = edge_attrs_padded.numpy().astype(np.int16)
+            print(f"    Saved final data bins to {split_output_dir}")
 
-        # Pad the list of [2, num_edges] tensors. Transpose each to [num_edges, 2] before padding.
-        edge_indices_to_pad = [ei.t() for ei in all_edge_indices]
-        edge_indices_padded = pad_sequence(edge_indices_to_pad, batch_first=True,
-                                           padding_value=float(CFG.general.padding_value))  # Pads to [N, max_edges, 2]
-        # Transpose final array to [N, 2, max_edges]
-        edge_indices_np = edge_indices_padded.numpy().astype(np.int16).transpose(0, 2, 1)
+            # Store shapes in metadata (use output split name)
+            data_meta[f'{split_name_output}_shape'] = {
+                'xs': list(xs_np.shape),
+                'edge_indices': list(edge_indices_np.shape), # Use plural key
+                'edge_attrs': list(edge_attrs_np.shape)      # Use plural key
+            }
+        except Exception as e:
+            print(f"Error saving memmap files for split {split_name_output}: {e}")
+            # Set empty shapes in metadata if saving failed
+            data_meta[f'{split_name_output}_shape'] = {'xs': [0, 0], 'edge_indices': [0, 0, 0], 'edge_attrs': [0, 0]}
 
-        print(
-            f"    Final shapes - xs: {xs_np.shape}, edge_indices: {edge_indices_np.shape}, edge_attrs: {edge_attrs_np.shape}")
-
-        # --- 4. Saving with Memmap ---
-        print(f"  Saving {split_name} data using memmap...")
-        xs_path = os.path.join(output_split_dir, 'xs.bin')
-        edge_indices_path = os.path.join(output_split_dir, 'edge_indices.bin')
-        edge_attrs_path = os.path.join(output_split_dir, 'edge_attrs.bin')
-
-        # Save arrays
-        xs_data = np.memmap(xs_path, dtype=np.int16, mode='w+', shape=xs_np.shape)
-        xs_data[:] = xs_np
-        xs_data.flush()
-
-        edge_indices_data = np.memmap(edge_indices_path, dtype=np.int16, mode='w+', shape=edge_indices_np.shape)
-        edge_indices_data[:] = edge_indices_np
-        edge_indices_data.flush()
-
-        edge_attrs_data = np.memmap(edge_attrs_path, dtype=np.int16, mode='w+', shape=edge_attrs_np.shape)
-        edge_attrs_data[:] = edge_attrs_np
-        edge_attrs_data.flush()
-        print(f"    Saved data to {output_split_dir}")
-
-        # Store shapes in metadata (convert numpy shapes to lists for JSON)
-        data_meta[f'{split_name}_shape'] = {
-            'xs': list(xs_np.shape),
-            'edge_indices': list(edge_indices_np.shape),
-            'edge_attrs': list(edge_attrs_np.shape)
-        }
 
     # --- Save Metadata ---
-    meta_path = os.path.join(CFG.dataset.output_dir, 'data_meta.json')
-    print(f"\nSaving metadata to: {meta_path}")
+    meta_path = os.path.join(CFG.final_output_dir, 'data_meta.json')
+    print(f"\nSaving final metadata to: {meta_path}")
     try:
         with open(meta_path, 'w') as f:
             json.dump(data_meta, f, indent=2)
     except Exception as e:
         print(f"Error saving metadata: {e}")
 
-    print("\nDataset preparation finished.")
-
-
-if __name__ == '__main__':
-    prepare_aig_dataset()
+    print("\n--- Stage 2: Final dataset preparation (.bin files) finished. ---")
+    print(f"Final data location: {CFG.final_output_dir}")
