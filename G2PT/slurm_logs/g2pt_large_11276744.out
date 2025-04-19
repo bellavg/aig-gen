@@ -1,0 +1,82 @@
+============================================================================================== 
+Warning! Mixing Conda and module environments may lead to corruption of the
+user environment. 
+We do not recommend users mixing those two environments unless absolutely
+necessary. Note that 
+SURF does not provide any support for Conda environment.
+For more information, please refer to our software policy page:
+https://servicedesk.surf.nl/wiki/display/WIKI/Software+policy+Snellius#SoftwarepolicySnellius-UseofAnacondaandMinicondaenvironmentsonSnellius 
+
+Remember that many packages have already been installed on the system and can
+be loaded using 
+the 'module load <package__name>' command. If you are uncertain if a package is
+already available 
+on the system, please use 'module avail' or 'module spider' to search for it.
+============================================================================================== 
+Overriding config with configs/datasets/aig.py:
+dataset = 'aig'
+vocab_size = 112 # Or use 106 if you prefer the exact count
+block_size = 1024
+data_dir = '../../datasets/aig/'
+tokenizer_path = '../../tokenizers/aig/'
+
+Overriding config with configs/networks/large.py:
+
+n_layer = 24
+n_head = 16
+n_embd = 1024
+dropout = 0.0
+bias = False
+model_name = 'large'
+
+Overriding: dataset = aig
+Overriding: ordering = topo
+Overriding: batch_size = 32
+CUDA available. Using device: cuda
+tokens per iteration will be: 1310720,40,1
+Using dtype: bfloat16
+Autocast context type: cuda, ptdtype: torch.bfloat16
+Using topological sequence generation logic for AIG dataset.
+DataLoader num_workers: 0
+Initializing a new model from scratch
+number of parameters: 302.15M
+num decayed parameter tensors: 98, with 303,153,152 parameters
+num non-decayed parameter tensors: 49, with 50,176 parameters
+using fused AdamW: True
+iter 0: loss 4.9163, time 11482.16ms, mfu -100.00%
+iter 10: loss 4.8569, time 10660.52ms, mfu 83.34%
+iter 20: loss 3.6080, time 10789.51ms, mfu 83.24%
+iter 30: loss 3.2963, time 10502.11ms, mfu 83.38%
+iter 40: loss 2.9744, time 10747.91ms, mfu 83.31%
+iter 50: loss 2.4955, time 10712.26ms, mfu 83.27%
+iter 60: loss 2.1697, time 10456.07ms, mfu 83.44%
+iter 70: loss 2.0424, time 10697.17ms, mfu 83.40%
+iter 80: loss 1.8324, time 10723.67ms, mfu 83.35%
+iter 90: loss 1.7627, time 10633.25ms, mfu 83.37%
+iter 100: loss 1.5504, time 10261.81ms, mfu 83.69%
+iter 110: loss 1.5179, time 10552.30ms, mfu 83.74%
+iter 120: loss 1.4938, time 10511.13ms, mfu 83.82%
+iter 130: loss 1.4914, time 10755.45ms, mfu 83.70%
+iter 140: loss 1.5447, time 10690.54ms, mfu 83.64%
+iter 150: loss 1.5190, time 10843.80ms, mfu 83.47%
+iter 160: loss 1.3849, time 10692.70ms, mfu 83.43%
+iter 170: loss 1.3514, time 10420.54ms, mfu 83.61%
+iter 180: loss 1.4535, time 10675.90ms, mfu 83.58%
+iter 190: loss 1.4644, time 10476.48ms, mfu 83.70%
+iter 200: loss 1.4533, time 10598.63ms, mfu 83.71%
+iter 210: loss 1.3571, time 10586.59ms, mfu 83.73%
+iter 220: loss 1.3368, time 10482.94ms, mfu 83.84%
+iter 230: loss 1.2415, time 10355.38ms, mfu 84.03%
+iter 240: loss 1.4421, time 10695.10ms, mfu 83.94%
+iter 250: loss 1.3582, time 10886.50ms, mfu 83.70%
+iter 260: loss 1.2630, time 10536.68ms, mfu 83.77%
+iter 270: loss 1.2141, time 10908.21ms, mfu 83.53%
+iter 280: loss 1.1625, time 10372.67ms, mfu 83.75%
+iter 290: loss 1.3639, time 10927.20ms, mfu 83.50%
+iter 300: loss 1.3487, time 10847.27ms, mfu 83.34%
+iter 310: loss 1.2998, time 10489.79ms, mfu 83.48%
+iter 320: loss 1.3396, time 10993.90ms, mfu 83.21%
+iter 330: loss 1.2535, time 10940.27ms, mfu 83.01%
+iter 340: loss 1.2365, time 10392.62ms, mfu 83.26%
+iter 350: loss 1.1025, time 10416.87ms, mfu 83.46%
+iter 360: loss 1.2076, time 10747.62ms, mfu 83.38%
