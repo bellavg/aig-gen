@@ -11,6 +11,13 @@ cd ..
 # Create log directories if they don't exist
 mkdir -p slurm_logs
 
+
+module load 2024
+module load Anaconda3/2024.06-1
+
+source activate g2pt-aig
+
+
 srun python -u train.py configs/datasets/aig.py configs/networks/small.py \
     --dataset=aig \
     --ordering=topo \
