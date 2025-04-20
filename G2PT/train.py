@@ -47,7 +47,7 @@ ordering = 'bfs'
 n_layer = 12  # Number of layers
 n_head = 12  # Number of attention heads
 n_embd = 768  # Embedding size
-dropout = 0.0  # Dropout rate; 0 for pretraining, 0.1+ for finetuning
+dropout = 0.1  # Dropout rate; 0 for pretraining, 0.1+ for finetuning
 bias = False  # Use bias in LayerNorm and Linear layers if True
 model_name = 'base'
 
