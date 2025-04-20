@@ -34,15 +34,16 @@ srun python -u sample.py \
     --out_dir $MODEL_OUT_DIR \
     --tokenizer_path tokenizers/aig/ \
     --num_samples 25000 \
+    --parsing_mode='robust' \
     --batch_size 256 \
     --seed 1337 \
-    --output_filename generated_base_aigs.pkl # Optional: give specific name
+    --output_filename generated_base_robust_aigs.pkl # Optional: give specific name
 
 echo "--- Sampling Finished ---"
 
 echo "--- Starting Evaluation Script ---"
 # Define the path to the generated pickle file
-GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_base_aigs.pkl"
+GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_base_robust_aig.pkl"
 
 # Check if the generated file exists before running evaluation
 if [ -f "$GENERATED_PICKLE_PATH" ]; then
