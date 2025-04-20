@@ -52,9 +52,9 @@ bias = False  # Use bias in LayerNorm and Linear layers if True
 model_name = 'base'
 
 # AdamW optimizer settings
-learning_rate = 7e-5  # Maximum learning rate
+learning_rate = 5e-5  # Maximum learning rate
 max_iters = 300000  # Total number of training iterations
-weight_decay = 0.05  # Weight decay for optimizer
+weight_decay = 0.1  # Weight decay for optimizer
 beta1 = 0.9  # Beta1 for AdamW
 beta2 = 0.95  # Beta2 for AdamW
 grad_clip = 1.0  # Gradient clipping value; disable if 0.0
@@ -62,7 +62,7 @@ grad_clip = 1.0  # Gradient clipping value; disable if 0.0
 # Learning rate decay settings
 decay_lr = True  # Enable learning rate decay if True
 warmup_iters = 2000  # Number of warmup iterations
-lr_decay_iters = 300000  # Iterations for learning rate decay
+lr_decay_iters = 30000  # Iterations for learning rate decay
 min_lr = 1e-5  # Minimum learning rate
 
 # Distributed Data Parallel (DDP) settings
@@ -176,7 +176,7 @@ eval_loader = torch.utils.data.DataLoader(
     collate_fn=data_collate_fn
 )
 
-patience = 3
+patience = 7
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
 best_val_loss = 1e3

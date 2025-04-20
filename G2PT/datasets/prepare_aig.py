@@ -14,6 +14,7 @@ import warnings
 # Import your new PyG DataModule
 from aig_dataset import *
 
+# TODO add prefix to sequence for input and output node counts
 
 # --- Configuration ---
 CFG = SimpleNamespace(
