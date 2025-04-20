@@ -80,7 +80,7 @@ exec(open('configurator.py').read())  # Override settings from command line or c
 config = {k: globals()[k] for k in config_keys}  # Configuration dictionary for logging
 # -----------------------------------------------------------------------------
 if wandb_log:
-    wandb_run_name = f"{out_dir}"
+    wandb_run_name = f"{dataset}-{model_name}-{ordering}"
 out_dir = f'results/{wandb_run_name}'
 # -----------------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
