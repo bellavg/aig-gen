@@ -24,7 +24,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # I/O settings
 out_dir = 'out'  # Directory to save outputs
-eval_interval = 1000  # Interval for evaluation
+eval_interval = 500  # Interval for evaluation
 log_interval = 10  # Interval for logging
 eval_iters = 200  # Number of iterations for evaluation
 always_save_checkpoint = False  # Save checkpoint after each eval if True
@@ -52,9 +52,9 @@ bias = False  # Use bias in LayerNorm and Linear layers if True
 model_name = 'base'
 
 # AdamW optimizer settings
-learning_rate = 1e-4  # Maximum learning rate
+learning_rate = 7e-5  # Maximum learning rate
 max_iters = 300000  # Total number of training iterations
-weight_decay = 1e-1  # Weight decay for optimizer
+weight_decay = 0.05  # Weight decay for optimizer
 beta1 = 0.9  # Beta1 for AdamW
 beta2 = 0.95  # Beta2 for AdamW
 grad_clip = 1.0  # Gradient clipping value; disable if 0.0
@@ -80,7 +80,7 @@ exec(open('configurator.py').read())  # Override settings from command line or c
 config = {k: globals()[k] for k in config_keys}  # Configuration dictionary for logging
 # -----------------------------------------------------------------------------
 if wandb_log:
-    wandb_run_name = f"{dataset}-{model_name}-{ordering}"
+    wandb_run_name = f"{out_dir}"
 out_dir = f'results/{wandb_run_name}'
 # -----------------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
@@ -176,9 +176,10 @@ eval_loader = torch.utils.data.DataLoader(
     collate_fn=data_collate_fn
 )
 
+patience = 3
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
-best_val_loss = 1e9
+best_val_loss = 1e3
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
@@ -298,6 +299,7 @@ if __name__ == '__main__':
     local_iter_num = 0  # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model  # unwrap DDP container if needed
     running_mfu = -1.0
+    evals_no_improve = 0
 
     micro_step = 0
     while True:
@@ -347,6 +349,10 @@ if __name__ == '__main__':
                 # termination conditions
                 if iter_num > max_iters:
                     break
+
+                if evals_no_improve > patience:
+                    break
+
                 # determine and set the learning rate for this iteration
                 lr = get_lr(iter_num) if decay_lr else learning_rate
                 for param_group in optimizer.param_groups:
@@ -366,6 +372,7 @@ if __name__ == '__main__':
                         })
                     if losses['val'] < best_val_loss or always_save_checkpoint:
                         best_val_loss = losses['val']
+                        evals_no_improve = 0
                         if iter_num > 0:
                             checkpoint = {
                                 'model': raw_model.state_dict(),
@@ -377,6 +384,11 @@ if __name__ == '__main__':
                             }
                             print(f"saving checkpoint to {out_dir}")
                             torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+                    else:
+                        evals_no_improve += 1
+
+        if evals_no_improve > patience:
+            break
 
         if iter_num > max_iters:
             break
