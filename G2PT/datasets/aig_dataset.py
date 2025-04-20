@@ -4,10 +4,11 @@
 import os
 import pathlib
 import torch
+import numpy as np
 from torch_geometric.data import Data, InMemoryDataset
 # Adjust import path based on your directory structure
 # If aig_pyg_dataset.py is inside 'datasets', this should work:
-from abstract_dataset import AbstractDataModule, AbstractDatasetInfos
+from .abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 
 class AIGPygDataset(InMemoryDataset):
     """
@@ -136,12 +137,6 @@ class AIGPygDataModule(AbstractDataModule):
 
 # G2PT/datasets/aig_pyg_dataset.py (Add this class)
 
-import os
-import torch
-import numpy as np
-import json
-# Adjust import path if needed
-from abstract_dataset import AbstractDatasetInfos, AbstractDataModule
 
 # (Keep AIGPygDataset and AIGPygDataModule definitions from the previous step here)
 

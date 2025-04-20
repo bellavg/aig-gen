@@ -1,4 +1,4 @@
-from utils import *
+from .utils import *
 import torch
 from torch_geometric.data.lightning import LightningDataset
 

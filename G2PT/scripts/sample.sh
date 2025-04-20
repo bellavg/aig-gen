@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=sample_eval_small
+#SBATCH --job-name=sample_eval_medium
 #SBATCH --partition=gpu_h100     # Or another suitable GPU partition
 #SBATCH --gpus=1
 #SBATCH --time=04:00:00          # Adjust time as needed for sampling
-#SBATCH --output=../slurm_logs/sample_eval_small_%j.out
+#SBATCH --output=../slurm_logs/sample_eval_medium_%j.out
 
 # Optional: Load API key if needed by sample/eval scripts (usually not)
 # export WANDB_API_KEY="YOUR_API_KEY"
@@ -13,7 +13,7 @@ cd ..
 
 # Ensure output directories exist (sample.py saves inside --out_dir)
 # The evaluation script reads from this directory.
-MODEL_OUT_DIR="results/aig-small-topo"
+MODEL_OUT_DIR="results/aig-medium-topo"
 mkdir -p slurm_logs
 mkdir -p $MODEL_OUT_DIR # Ensure the model output dir exists
 
@@ -33,16 +33,16 @@ echo "--- Starting Sampling Script ---"
 srun python -u sample.py \
     --out_dir $MODEL_OUT_DIR \
     --tokenizer_path tokenizers/aig/ \
-    --num_samples 10000 \
-    --batch_size 512 \
+    --num_samples 25000 \
+    --batch_size 256 \
     --seed 1337 \
-    --output_filename generated_small_aigs.pkl # Optional: give specific name
+    --output_filename generated_medium_aigs.pkl # Optional: give specific name
 
 echo "--- Sampling Finished ---"
 
 echo "--- Starting Evaluation Script ---"
 # Define the path to the generated pickle file
-GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_small_aigs.pkl"
+GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_medium_aigs.pkl"
 
 # Check if the generated file exists before running evaluation
 if [ -f "$GENERATED_PICKLE_PATH" ]; then
