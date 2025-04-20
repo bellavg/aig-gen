@@ -2,7 +2,7 @@
 #SBATCH --job-name=g2pt_l_bfs
 #SBATCH --partition=gpu_h100     # Specify the appropriate partition here
 #SBATCH --gpus=1
-#SBATCH --time=08:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=../slurm_logs/g2pt_large_bfs_%j.out
 
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83"
