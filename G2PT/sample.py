@@ -29,6 +29,9 @@ def parse_args():
                         help='Sampling temperature (1.0 = standard)')
     parser.add_argument('--output_filename', type=str, default='generated_aigs.pkl',
                         help='Name for the output pickle file')
+    parser.add_argument('--parsing_mode', type=str, default='strict', choices=['strict', 'robust'],
+                        help='Edge sequence parsing mode: strict (fail on non-triplet length) or robust (skip malformed parts)')
+
     return parser.parse_args()
 
 def setup_device(seed):
@@ -200,7 +203,7 @@ if __name__ == '__main__':
     for i, seq_str in enumerate(generated_sequences):
         try:
             # Convert sequence to graph using the function from datasets_utils
-            graph = seq_to_nxgraph(seq_str) # Should return nx.DiGraph
+            graph = seq_to_nxgraph(seq_str, parsing_mode=args.parsing_mode)  #  # Should return nx.DiGraph
             # Basic check: Ensure it's a NetworkX graph object
             if isinstance(graph, nx.Graph): # Check base class (DiGraph inherits from Graph)
                 generated_graphs.append(graph)
