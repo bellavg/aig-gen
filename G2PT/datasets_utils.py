@@ -432,65 +432,200 @@ def remove_edge_with_attr(graph, edge_to_remove):
     return new_graph, poped_edge_attr
 
 
-def bfs_with_all_edges(G, source):
-    visited = set()
-    edges = set()
+# --- In datasets_utils.py ---
+
+from collections import deque
+import networkx as nx
+import torch
+from torch_geometric.data import Data # Make sure Data is imported
+
+# --- REFINED bfs_edge_order ---
+# Renamed for clarity and simplified logic for directed graphs
+def get_bfs_edge_order(G):
+    """
+    Performs BFS starting from all nodes with in-degree 0
+    and returns a list of directed edges in the order they are traversed.
+    Handles disconnected graphs by restarting BFS from unvisited nodes.
+
+    Args:
+        G (nx.DiGraph): Input directed graph.
+
+    Returns:
+        list: List of edge tuples (u, v) in BFS traversal order.
+    """
+    if not G:
+        return []
+
     edges_bfs = []
+    visited_nodes = set()
+    nodes_to_process = list(G.nodes()) # Keep track of nodes not yet started from
 
-    queue = deque([source])
-    visited.add(source)
+    while nodes_to_process:
+        # Find a starting node for the next BFS component
+        start_node = -1
+        # Prioritize nodes with in-degree 0 among the remaining ones
+        possible_starts = [n for n in nodes_to_process if G.in_degree(n) == 0]
+        if possible_starts:
+            start_node = possible_starts[0]
+        else:
+            # If no nodes with in-degree 0 left (e.g., cycles or only visited nodes remain)
+            # just pick the first unvisited node from the remaining list
+            for n in nodes_to_process:
+                 if n not in visited_nodes:
+                      start_node = n
+                      # This might indicate a cycle or unusual component starting point
+                      print(f"Warning (BFS Edge Order): No source node found. Starting BFS from node {start_node}")
+                      break
 
-    while queue:
-        node = queue.popleft()
-        for neighbor in G[node]:
-            if neighbor not in visited:
-                edges.add(tuple(sorted((node, neighbor))))
-                edges_bfs.append((node, neighbor))
+        if start_node == -1: # All remaining nodes must have been visited already
+            break
 
-                visited.add(neighbor)
-                queue.append(neighbor)
-            else:
-                if tuple(sorted((neighbor, node))) not in edges:
-                    edges.add(tuple(sorted((neighbor, node))))
-                    edges_bfs.append((node, neighbor))
+        # Start BFS from the selected start_node
+        queue = deque([start_node])
+        visited_nodes.add(start_node)
+        nodes_to_process.remove(start_node) # Mark as processed for starting purposes
+
+        component_edges = []
+        while queue:
+            u = queue.popleft()
+            # Process neighbors in a deterministic order
+            for v in sorted(list(G.successors(u))):
+                # Record the directed edge
+                component_edges.append((u, v))
+                if v not in visited_nodes:
+                    visited_nodes.add(v)
+                    if v in nodes_to_process: # Only remove if it was pending start
+                         nodes_to_process.remove(v)
+                    queue.append(v)
+
+        edges_bfs.extend(component_edges) # Add edges from this component
+
+    # Sanity check: Ensure all edges were captured (optional, might be slow)
+    # if len(edges_bfs) != G.number_of_edges():
+    #    print(f"Warning (BFS Edge Order): Number of traversed edges ({len(edges_bfs)}) doesn't match graph edges ({G.number_of_edges()}). Graph might be disconnected or have issues.")
 
     return edges_bfs
 
 
+# --- REFINED to_seq_by_bfs ---
 def to_seq_by_bfs(data, atom_type, bond_type):
-    x, edge_index, edge_attr = data['x'], data['edge_index'], data['edge_attr']
-    x, edge_index = randperm_node(x, edge_index)
-    ctx = [['<sepc>', atom_type[node_type.item()], f'IDX_{node_idx}'] for node_idx, node_type in
-           enumerate(x.argmax(-1))]
-    ctx = sum(ctx, [])
+    """
+    Converts AIG data (nodes, directed edges) to G2PT sequence format
+    using BFS ordering.
+    REFINED to use get_bfs_edge_order and corrected data handling.
 
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    outputs = []
+    Args:
+        data (dict): {'x': tensor (N,), 'edge_index': tensor (2, E), 'edge_attr': tensor (E,)}
+                     Assumes tensors contain INTEGER VOCABULARY IDs (e.g., 97-102).
+        atom_type (list): List of node type token strings ['NODE_CONST0', ...] (Indices 0-3 map to IDs 97-100)
+        bond_type (list): List of edge type token strings ['EDGE_INV', 'EDGE_REG'] (Indices 0-1 map to IDs 101-102)
 
-    G = to_networkx(data)
+    Returns:
+        dict: {"text": [sequence_string]}
+    """
+    if 'x' not in data or 'edge_index' not in data or 'edge_attr' not in data:
+        print("Warning (BFS): Input data dictionary missing required keys ('x', 'edge_index', 'edge_attr').")
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
 
-    # get edge order from dfs,begin from node 0, G is nx graph
-    # _,edges_order_dfs = dfs_with_all_edges(G,0)
-    edges_order_bfs = bfs_with_all_edges(G, 0)
-    for selected_source_node_idx, selected_dest_node_idx in edges_order_bfs:
-        # get_edge_attr
-        edge_mask = ((data.edge_index[0] == selected_source_node_idx) & (
-                    data.edge_index[1] == selected_dest_node_idx)) | \
-                    ((data.edge_index[0] == selected_dest_node_idx) & (data.edge_index[1] == selected_source_node_idx))
-        edge_indices = edge_mask.nonzero(as_tuple=True)[0]
-        if len(edge_indices) > 0:
-            removed_edge_type = data.edge_attr[edge_indices][0].argmax().item()
-        outputs.append(['<sepg>', f'IDX_{selected_source_node_idx}', f'IDX_{selected_dest_node_idx}',
-                        bond_type[removed_edge_type - 1]])
+    x_ids, edge_index, edge_attr_ids = data['x'], data['edge_index'], data['edge_attr']
+    num_nodes = x_ids.shape[0]
 
-    ctx[0] = '<boc>'
+    if num_nodes == 0:
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
+
+    # --- 1. Build Node Context (<boc>...<eoc>) ---
+    # Node context should list nodes in their original 0..N-1 index order
+    ctx = ['<boc>']
+    node_indices_map = {} # Map node index (0..N-1) to IDX_n token string
+    node_id_to_type_token = {} # Map node index to its type token string (for building G)
+    node_vocab_offset = 97
+
+    for node_idx in range(num_nodes):
+        idx_token_str = f'IDX_{node_idx}'
+        node_indices_map[node_idx] = idx_token_str
+
+        node_vocab_id = x_ids[node_idx].item()
+        node_token_index = node_vocab_id - node_vocab_offset
+        if 0 <= node_token_index < len(atom_type):
+            node_type_str = atom_type[node_token_index]
+        else:
+            print(f"Warning (BFS Node Ctx): Node {node_idx} unexpected ID {node_vocab_id}. UNK type.")
+            node_type_str = "[UNK]"
+
+        node_id_to_type_token[node_idx] = node_type_str
+        ctx.extend(['<sepc>', node_type_str, idx_token_str])
     ctx.append('<eoc>')
-    outputs = sum(outputs, [])
-    outputs[0] = '<bog>'
+
+    # --- 2. Build NetworkX DiGraph (for BFS traversal) ---
+    G = nx.DiGraph()
+    edge_data_map = {} # Store edge attributes keyed by (u,v) tuple for easy lookup
+    edge_vocab_offset = 101
+
+    for node_idx in range(num_nodes):
+        G.add_node(node_idx, type=node_id_to_type_token.get(node_idx, "[UNK]"))
+
+    num_edges = edge_index.shape[1]
+    if num_edges != edge_attr_ids.shape[0]:
+         print(f"Warning (BFS Graph Build): Mismatch between edge_index count ({num_edges}) and edge_attr count ({edge_attr_ids.shape[0]}).")
+         # Decide how to handle: proceed cautiously or return error? Let's proceed.
+
+    for i in range(num_edges):
+        src_node_idx = edge_index[0, i].item()
+        dst_node_idx = edge_index[1, i].item()
+
+        if src_node_idx in G and dst_node_idx in G:
+            G.add_edge(src_node_idx, dst_node_idx)
+            # Store edge type string in map
+            edge_vocab_id = edge_attr_ids[i].item()
+            edge_token_index = edge_vocab_id - edge_vocab_offset
+            if 0 <= edge_token_index < len(bond_type):
+                bond_type_str = bond_type[edge_token_index]
+            else:
+                print(f"Warning (BFS Edge Attr): Edge ({src_node_idx}->{dst_node_idx}) unexpected ID {edge_vocab_id}. UNK type.")
+                bond_type_str = "[UNK]"
+            edge_data_map[(src_node_idx, dst_node_idx)] = bond_type_str
+        else:
+            print(f"Warning (BFS Graph Build): Skipping edge ({src_node_idx}->{dst_node_idx}) due to missing node.")
+
+    # --- 3. Perform BFS and Build Edge Sequence (<bog>...<eog>) ---
+    outputs = ['<bog>']
+    # Get edge order using the refined BFS function
+    edges_order_bfs = get_bfs_edge_order(G)
+
+    for src_idx, dest_idx in edges_order_bfs:
+        src_token_str = node_indices_map.get(src_idx)
+        dest_token_str = node_indices_map.get(dest_idx)
+        # Retrieve edge type from the map built earlier
+        bond_type_str = edge_data_map.get((src_idx, dest_idx))
+
+        # Check if all components were found
+        if src_token_str and dest_token_str and bond_type_str:
+            outputs.extend(['<sepg>', src_token_str, dest_token_str, bond_type_str])
+        else:
+            # This indicates an edge from BFS wasn't properly recorded in edge_data_map or node_indices_map
+            print(f"Warning (BFS Edge Seq): Missing data for edge ({src_idx}->{dest_idx}) from BFS order.")
+            if not bond_type_str:
+                 print(f" > Edge type missing from edge_data_map.")
+                 # Attempt fallback lookup (less efficient)
+                 edge_mask = (edge_index[0] == src_idx) & (edge_index[1] == dest_idx)
+                 if edge_mask.any():
+                      edge_vocab_id = edge_attr_ids[edge_mask.nonzero(as_tuple=True)[0][0]].item()
+                      edge_token_index = edge_vocab_id - edge_vocab_offset
+                      if 0 <= edge_token_index < len(bond_type):
+                           bond_type_str = bond_type[edge_token_index]
+                           print(f" > Recovered edge type: {bond_type_str}")
+                           outputs.extend(['<sepg>', src_token_str, dest_token_str, bond_type_str])
+                      else:
+                           print(f" > Fallback lookup failed: Unknown edge vocab ID {edge_vocab_id}")
+                 else:
+                      print(f" > Fallback lookup failed: Edge not found in original edge_index.")
+
     outputs.append('<eog>')
+    if len(outputs) == 2: # Only <bog> and <eog>
+        outputs = ['<bog>', '<eog>']
 
+    # --- 4. Combine and Return ---
     return {"text": [" ".join(ctx + outputs)]}
-
 
 def to_seq_by_deg(data, atom_type, bond_type):
     x, edge_index, edge_attr = data['x'], data['edge_index'], data['edge_attr']
@@ -546,17 +681,21 @@ def to_seq_by_deg(data, atom_type, bond_type):
 # --- Modified get_datasets function ---
 def get_datasets(dataset_name, tokenizer, order='bfs'):
     # Select the sequence generation function based on dataset and order
-    if dataset_name == 'aig' or order == 'topo':  # Use topo sort for AIG regardless of 'order' arg for now
+    if order == 'topo' and dataset_name == 'aig':  # Only use topo if explicitly requested for AIG
         print(f"Using topological sequence generation logic for AIG dataset.")
         order_function = to_seq_aig_topo
-        if dataset_name != 'aig':
-            print(f"Warning: Using topological sort for non-AIG dataset '{dataset_name}' based on --ordering=topo.")
     elif order == 'bfs':
-        order_function = to_seq_by_bfs
+        print(f"Using BFS sequence generation logic for {dataset_name} dataset.")  # NEW/MODIFIED PRINT
+        order_function = to_seq_by_bfs  # SELECT BFS
     elif order == 'deg':
+        print(f"Using Degree-based sequence generation logic for {dataset_name} dataset.")  # NEW/MODIFIED PRINT
         order_function = to_seq_by_deg
+        # Add back the 'aig' check for topo if needed, or handle default order differently
+    elif dataset_name == 'aig' and order != 'bfs' and order != 'deg':  # Fallback for AIG if invalid order given?
+        print(f"Warning: Unsupported order '{order}' for AIG. Defaulting to BFS.")
+        order_function = to_seq_by_bfs
     else:
-        raise NotImplementedError(f"Order function {order} is not implemented")
+        raise NotImplementedError(f"Order function {order} is not implemented or invalid for {dataset_name}")
 
     # --- Dataset Specific Setups ---
     train_datasets = None
