@@ -179,7 +179,7 @@ def main(args):
             # --- Step 2: Convert Sequence -> Reconstructed Graph --- (Keep as is)
             reconstructed_graph = None
             try:
-                reconstructed_graph = seq_to_nxgraph(sequence)
+                reconstructed_graph = seq_to_nxgraph(sequence, parsing_mode='robust')
                 if reconstructed_graph is None: raise ValueError("seq_to_nxgraph returned None")
             except Exception as e:
                 logger.warning(f"Graph {i}: Failed to convert BFS sequence back to graph. Error: {e}")

@@ -243,8 +243,6 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
         # --- End Strict Logic ---
 
     elif parsing_mode == 'robust':
-        print(
-            f"Warning (Strict): Malformed edge sequence. Length ({len(edge_tokens)}) not multiple of 3.")
         # --- Proposed Robust Logic ---
         idx = 0
         while idx < len(edge_tokens):
