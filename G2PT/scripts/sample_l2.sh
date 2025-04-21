@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=sample_eval_large3
+#SBATCH --job-name=sample_eval_large-bfs
 #SBATCH --partition=gpu_h100     # Or another suitable GPU partition
 #SBATCH --gpus=1
 #SBATCH --time=04:00:00          # Adjust time as needed for sampling
-#SBATCH --output=../slurm_logs/sample_eval_large3_%j.out
+#SBATCH --output=../slurm_logs/sample_eval_large-bfs_%j.out
 
 # Optional: Load API key if needed by sample/eval scripts (usually not)
 # export WANDB_API_KEY="YOUR_API_KEY"
@@ -13,7 +13,7 @@ cd ..
 
 # Ensure output directories exist (sample.py saves inside --out_dir)
 # The evaluation script reads from this directory.
-MODEL_OUT_DIR="results/aig-large3-topo"
+MODEL_OUT_DIR="results/aig-large-bfs"
 mkdir -p slurm_logs
 mkdir -p $MODEL_OUT_DIR # Ensure the model output dir exists
 
@@ -38,13 +38,13 @@ srun python -u sample.py \
     --parsing_mode='robust' \
     --batch_size 128 \
     --seed 1337 \
-    --output_filename generated_large3_robust_aigs.pkl # Optional: give specific name
+    --output_filename generated_large_bfs_robust_aigs.pkl # Optional: give specific name
 
 echo "--- Sampling Finished ---"
 
 echo "--- Starting Evaluation Script ---"
 # Define the path to the generated pickle file
-GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_large3_robust_aigs.pkl"
+GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_large_bfs_robust_aigs.pkl"
 
 # Check if the generated file exists before running evaluation
 if [ -f "$GENERATED_PICKLE_PATH" ]; then
