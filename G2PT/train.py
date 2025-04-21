@@ -21,6 +21,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # -----------------------------------------------------------------------------
 # Default configuration values for training a GPT-2 model on OpenWebText
+# for data sequences per graph
+num_augmentations = 1
 
 # I/O settings
 out_dir = 'out'  # Directory to save outputs
@@ -80,7 +82,7 @@ exec(open('configurator.py').read())  # Override settings from command line or c
 config = {k: globals()[k] for k in config_keys}  # Configuration dictionary for logging
 # -----------------------------------------------------------------------------
 if wandb_log:
-    wandb_run_name = f"{dataset}-{model_name}-{ordering}"
+    wandb_run_name = f"{dataset}-{model_name}-{ordering}-{num_augmentations}"
 out_dir = f'results/{wandb_run_name}'
 # -----------------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
@@ -138,7 +140,7 @@ print(f"Autocast context type: {device_type}, ptdtype: {ptdtype}")
 
 # data preparation
 tokenizer = AutoTokenizer.from_pretrained(f'tokenizers/{dataset}')
-train_dataset, eval_dataset = get_datasets(dataset, tokenizer, ordering)
+train_dataset, eval_dataset = get_datasets(dataset, tokenizer, ordering, num_augmentations)
 
 
 def data_collate_fn(features):

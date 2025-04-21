@@ -12,17 +12,19 @@ cd ..
 
 # Create log directories if they don't exist
 mkdir -p slurm_logs
-mkdir -p results/aig-base-deg # Ensure output dir exists
+mkdir -p results/aig-base-deg-5 # Ensure output dir exists
 
 module load 2024
 module load Anaconda3/2024.06-1
 
 source activate g2pt-aig
-
+# f"{dataset}-{model_name}-{ordering}-{num_augmentations}"
 echo "Starting training script..."
 srun python -u train.py configs/datasets/aig.py \
     --dataset=aig \
-    --wandb_log=True
+    --wandb_log=True \
+    --ordering=deg \
+    --num_augmentations=5
 
 echo "Training script finished."
 
