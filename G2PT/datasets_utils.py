@@ -560,6 +560,4 @@ def get_datasets(dataset_name, tokenizer, order='bfs', num_augmentations=1): # <
 
     if train_datasets is None or eval_datasets is None: raise RuntimeError(f"Failed to initialize datasets")
 
-    # Report augmented size for training set
-    logger.info(f"Successfully loaded {dataset_name} - Train: {len(train_datasets)} samples (augmented), Eval: {len(eval_datasets)} samples.")
     return train_datasets, eval_datasets
