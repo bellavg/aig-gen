@@ -3,13 +3,13 @@
 # --- Keep all original imports ---
 from torch.utils.data import Dataset
 import torch
-from torch_geometric.utils import degree
+# from torch_geometric.utils import degree # We'll use networkx degree
 from torch_geometric.data import Data
 from collections import deque
 import numpy as np
 import os
-from torch_geometric.utils import to_networkx
-from torch_geometric.utils.convert import from_networkx
+# from torch_geometric.utils import to_networkx # Use nx directly
+# from torch_geometric.utils.convert import from_networkx
 import re
 from functools import partial
 import json
@@ -24,14 +24,19 @@ def pre_tokenize_function(examples, tokenizer, order_function, atom_type, bond_t
     """
     # Ensure 'examples' dict contains integer tensors 'x', 'edge_index', 'edge_attr'
     # Use the passed order_function
-    data = order_function(examples, atom_type, bond_type)
+    # The order_function now directly takes the dictionary with integer tensors
+    data_dict = {'x': examples['x'], 'edge_index': examples['edge_index'], 'edge_attr': examples['edge_attr']}
+    sequence_data = order_function(data_dict, atom_type, bond_type) # Pass atom/bond types
+
     # Tokenize the generated text sequence
     # Assuming tokenizer is pre-configured (e.g., from AutoTokenizer)
-    tokenized_data = tokenizer(data['text'], padding='max_length', truncation=True,
+    tokenized_data = tokenizer(sequence_data['text'], padding='max_length', truncation=True,
                                return_tensors='pt')  # Added truncation
+
     # Ensure tensors are correctly shaped (remove batch dim if tokenizer adds one)
-    input_ids = tokenized_data['input_ids'].squeeze(0)
-    attention_mask = tokenized_data['attention_mask'].squeeze(0)
+    input_ids = tokenized_data['input_ids'].squeeze(0) if tokenized_data['input_ids'].ndim > 1 else tokenized_data['input_ids']
+    attention_mask = tokenized_data['attention_mask'].squeeze(0) if tokenized_data['attention_mask'].ndim > 1 else tokenized_data['attention_mask']
+
     # Create labels (shifted input_ids)
     labels = input_ids.clone()
     # G2PT typically uses the input_ids directly as labels, handle potential shifts if needed
@@ -56,6 +61,10 @@ def to_seq_aig_topo(data, atom_type, bond_type):
     Returns:
         dict: {"text": [sequence_string]}
     """
+    if 'x' not in data or 'edge_index' not in data or 'edge_attr' not in data:
+        print("Warning (Topo): Input data dictionary missing required keys ('x', 'edge_index', 'edge_attr').")
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
+
     x_ids, edge_index, edge_attr_ids = data['x'], data['edge_index'], data['edge_attr']
     num_nodes = x_ids.shape[0]
 
@@ -65,7 +74,7 @@ def to_seq_aig_topo(data, atom_type, bond_type):
     # 1. Build NetworkX DiGraph from input tensors
     G = nx.DiGraph()
     node_idx_map = {}  # Map internal 0..N-1 index to IDX_n token
-    node_id_to_token_map = {}  # Map vocab ID (e.g., 97) to token ('NODE_CONST0')
+    node_id_to_token_map = {}  # Map node index (0..N-1) to token ('NODE_CONST0')
     node_vocab_offset = 97  # ID of NODE_CONST0
 
     for node_idx in range(num_nodes):
@@ -76,7 +85,7 @@ def to_seq_aig_topo(data, atom_type, bond_type):
         if 0 <= node_token_index < len(atom_type):
             node_id_to_token_map[node_idx] = atom_type[node_token_index]
         else:
-            print(f"Warning: Node {node_idx} has unexpected ID {node_id_val}. Assigning UNK type.")
+            print(f"Warning (Topo Node Type): Node {node_idx} has unexpected ID {node_id_val}. Assigning UNK type.")
             node_id_to_token_map[node_idx] = "[UNK]"  # Or handle differently
 
     # Add edges to the DiGraph
@@ -97,10 +106,10 @@ def to_seq_aig_topo(data, atom_type, bond_type):
                 edge_id_to_token_map[(src_node_idx, dst_node_idx)] = bond_type[edge_token_index]
             else:
                 print(
-                    f"Warning: Edge ({src_node_idx}->{dst_node_idx}) has unexpected ID {edge_id_val}. Assigning UNK type.")
+                    f"Warning (Topo Edge Type): Edge ({src_node_idx}->{dst_node_idx}) has unexpected ID {edge_id_val}. Assigning UNK type.")
                 edge_id_to_token_map[(src_node_idx, dst_node_idx)] = "[UNK]"  # Or handle differently
         else:
-            print(f"Warning: Skipping edge ({src_node_idx}->{dst_node_idx}) due to missing node index.")
+            print(f"Warning (Topo Edge Add): Skipping edge ({src_node_idx}->{dst_node_idx}) due to missing node index.")
 
     # 2. Perform Topological Sort
     try:
@@ -108,7 +117,7 @@ def to_seq_aig_topo(data, atom_type, bond_type):
         topo_order = list(nx.topological_sort(G))
     except nx.NetworkXUnfeasible:
         print(
-            "Warning: Graph contains a cycle, cannot perform topological sort. Falling back to BFS order for sequence generation.")
+            "Warning (Topo Sort): Graph contains a cycle, cannot perform topological sort. Falling back to BFS order for sequence generation.")
         # Fallback: Use directed BFS - find a root (node with in-degree 0) or start at 0
         roots = [n for n, d in G.in_degree() if d == 0]
         start_node = roots[0] if roots else 0
@@ -117,14 +126,15 @@ def to_seq_aig_topo(data, atom_type, bond_type):
 
         if start_node != -1:
             # Perform directed BFS traversal to get node order
-            topo_order = list(nx.bfs_tree(G, source=start_node))
+            bfs_nodes_order = list(nx.bfs_tree(G, source=start_node))
             # Add remaining nodes from other components if graph is not connected
-            if len(topo_order) < G.number_of_nodes():
-                remaining_nodes = list(set(G.nodes()) - set(topo_order))
+            if len(bfs_nodes_order) < G.number_of_nodes():
+                remaining_nodes = list(set(G.nodes()) - set(bfs_nodes_order))
                 # Could perform BFS on remaining components, adding for simplicity
-                topo_order.extend(remaining_nodes)
+                bfs_nodes_order.extend(remaining_nodes)
+            topo_order = bfs_nodes_order # Use BFS order as fallback
         else:
-            topo_order = list(G.nodes())  # Fallback to arbitrary node order if graph is empty
+            topo_order = list(G.nodes())  # Fallback to arbitrary node order if graph is empty/malformed
 
     # 3. Build Node Context (<boc>...<eoc>) based on Topological Order
     ctx = ['<boc>']
@@ -152,7 +162,7 @@ def to_seq_aig_topo(data, atom_type, bond_type):
                     processed_edges.add(edge_tuple)
             else:
                 # This might happen if edges were filtered earlier
-                print(f"Warning: Edge ({u}->{v}) found during traversal but missing from edge_id_to_token_map.")
+                print(f"Warning (Topo Edge Seq): Edge ({u}->{v}) found during traversal but missing from edge_id_to_token_map.")
 
     outputs.append('<eog>')
     if len(outputs) == 2:  # Only contains <bog> and <eog>
@@ -183,7 +193,7 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
         bog_start = tokens.index('<bog>') + 1
         eog_end = tokens.index('<eog>')
     except ValueError:
-        print(f"Warning: Malformed sequence missing <boc>/<eoc> or <bog>/<eog>. Seq: {seq_str[:100]}...")
+        print(f"Warning (Seq Parse): Malformed sequence missing <boc>/<eoc> or <bog>/<eog>. Seq: {seq_str[:100]}...")
         return nx.DiGraph()
 
     ctx_tokens = tokens[ctx_start:ctx_end]
@@ -210,13 +220,20 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
         elif idx_match: current_node_idx_str = idx_match.group(0)
         if current_node_type_str and current_node_idx_str:
             if current_node_idx_str not in processed_idx_tokens:
-                node_index = node_counter
-                node_map[current_node_idx_str] = node_index
-                node_data[node_index] = {'type': current_node_type_str}
+                # Use the index from the token itself (IDX_*) if possible
+                node_index_from_token = int(idx_match.group(1))
+                # If multiple nodes map to the same IDX_*, this will overwrite, which
+                # implies the sequence generation might be flawed. Robust parsing accepts this.
+                node_map[current_node_idx_str] = node_index_from_token
+                node_data[node_index_from_token] = {'type': current_node_type_str}
                 processed_idx_tokens.add(current_node_idx_str)
-                node_counter += 1
+                # Keep track of max node index seen for adding nodes later
+                node_counter = max(node_counter, node_index_from_token + 1)
             current_node_type_str = None; current_node_idx_str = None
-    G.add_nodes_from([(idx, data) for idx, data in node_data.items()])
+    # Add all nodes up to the maximum index encountered
+    G.add_nodes_from([(idx, node_data.get(idx, {'type': 'UNKNOWN'})) for idx in range(node_counter)])
+    # Update attributes for nodes that were actually defined
+    nx.set_node_attributes(G, {idx: data for idx, data in node_data.items()})
     # --- End Node Parsing ---
 
     # --- Parse Edges (Conditional Logic) ---
@@ -224,7 +241,7 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
         # --- Original Strict Logic ---
         if len(edge_tokens) % 3 != 0:
             if edge_tokens: # Only warn if there were actually edge tokens
-                 print(f"Warning (Strict): Malformed edge sequence. Length ({len(edge_tokens)}) not multiple of 3. Discarding all edges.")
+                 print(f"Warning (Strict Parse): Malformed edge sequence. Length ({len(edge_tokens)}) not multiple of 3. Discarding all edges.")
             # Return graph with only nodes if edge part is malformed in strict mode
             return G
         # Proceed with strict 3-step iteration if length is okay
@@ -238,8 +255,8 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
             edge_type = edge_type_match.group(0) if edge_type_match else 'UNKNOWN_EDGE'
             if src_idx is not None and dest_idx is not None:
                 if src_idx in G and dest_idx in G: G.add_edge(src_idx, dest_idx, type=edge_type)
-                else: print(f"Warning (Strict): Node index {src_idx} or {dest_idx} invalid.")
-            else: print(f"Warning (Strict): Could not map edge tokens {src_id_str} or {dest_id_str}. Skipping.")
+                else: print(f"Warning (Strict Parse): Node index {src_idx} or {dest_idx} invalid or missing from node context.")
+            else: print(f"Warning (Strict Parse): Could not map edge tokens {src_id_str} or {dest_id_str} to node indices. Skipping.")
         # --- End Strict Logic ---
 
     elif parsing_mode == 'robust':
@@ -251,6 +268,7 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
                 src_candidate = edge_tokens[idx]
                 dst_candidate = edge_tokens[idx+1]
                 type_candidate = edge_tokens[idx+2]
+                # Check if candidates look like IDX_*, IDX_*, EDGE_*
                 if node_idx_pattern.match(src_candidate) and \
                    node_idx_pattern.match(dst_candidate) and \
                    edge_type_pattern.match(type_candidate):
@@ -265,9 +283,13 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
                 edge_type = edge_type_str # Already matched by regex
 
                 if src_idx is not None and dest_idx is not None:
-                    if src_idx in G and dest_idx in G: G.add_edge(src_idx, dest_idx, type=edge_type)
-                    else: print(f"Warning (Robust): Node index {src_idx} or {dest_idx} invalid.")
-                else: print(f"Warning (Robust): Could not map edge tokens {src_id_str} or {dest_id_str}. Skipping.")
+                    # Ensure nodes actually exist in the graph before adding edge
+                    if G.has_node(src_idx) and G.has_node(dest_idx):
+                        G.add_edge(src_idx, dest_idx, type=edge_type)
+                    else:
+                         print(f"Warning (Robust Parse): Node index {src_idx} or {dest_idx} (from {src_id_str}/{dest_id_str}) not found in graph nodes despite being parsed. Skipping edge.")
+                else:
+                    print(f"Warning (Robust Parse): Could not map edge tokens {src_id_str} or {dest_id_str} to node indices. Skipping edge.")
                 # Advance past the processed triplet
                 idx += 3
             else:
@@ -285,12 +307,12 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
              src_id_str = edge_tokens[i]; dest_id_str = edge_tokens[i+1]; edge_type_str = edge_tokens[i+2]
              src_idx = node_map.get(src_id_str); dest_idx = node_map.get(dest_id_str)
              edge_type = edge_type_str if edge_type_pattern.match(edge_type_str) else 'UNKNOWN_EDGE'
-             if src_idx is not None and dest_idx is not None and src_idx in G and dest_idx in G: G.add_edge(src_idx, dest_idx, type=edge_type)
-
+             if src_idx is not None and dest_idx is not None and G.has_node(src_idx) and G.has_node(dest_idx):
+                 G.add_edge(src_idx, dest_idx, type=edge_type)
 
     return G
 
-# --- Keep NumpyBinDataset class as corrected in the previous step ---
+# --- Keep NumpyBinDataset class as corrected ---
 class NumpyBinDataset(Dataset):
     """
     Loads graph data preprocessed into numpy memmap files (.bin).
@@ -310,12 +332,17 @@ class NumpyBinDataset(Dataset):
 
         # --- Ensure shapes are tuples using CONSISTENT keys from data_meta.json ---
         try:
+            # Ensure keys exist before accessing them
+            required_keys = ['xs', 'edge_indices', 'edge_attrs']
+            for key in required_keys:
+                if key not in local_shape:
+                     raise KeyError(f"Missing key '{key}' in shape dictionary")
             local_shape['xs'] = tuple(local_shape['xs'])
             local_shape['edge_indices'] = tuple(local_shape['edge_indices'])  # Use PLURAL
             local_shape['edge_attrs'] = tuple(local_shape['edge_attrs'])  # Use PLURAL
         except KeyError as e:
             raise KeyError(
-                f"Error converting shapes to tuples. Missing key {e} in shape dictionary: {local_shape}. Check data_meta.json.")
+                f"Error converting shapes to tuples. {e} in shape dictionary: {local_shape}. Check data_meta.json.")
         except Exception as e:
             raise RuntimeError(f"Error processing shape dictionary {local_shape}: {e}")
 
@@ -344,6 +371,7 @@ class NumpyBinDataset(Dataset):
     def __getitem__(self, idx):
         # Load raw int16 data from memmap files for the given index
         try:
+            # Slice the first dimension (batch)
             raw_x = np.array(self.xs[idx]).astype(np.int64)
             # --- Use self.edge_indices (PLURAL) ---
             raw_edge_index = np.array(self.edge_indices[idx]).astype(np.int64)
@@ -355,118 +383,89 @@ class NumpyBinDataset(Dataset):
             empty_data = {'x': torch.tensor([], dtype=torch.long),
                           'edge_index': torch.tensor([[], []], dtype=torch.long),
                           'edge_attr': torch.tensor([], dtype=torch.long)}
-            return self.process_fn(empty_data)  # Use self.process_fn
+            # Process the empty data using the bound pre_tokenize_function
+            return self.process_fn(empty_data)
         except Exception as e:
             print(f"Error accessing memmap data at index {idx}: {e}")
             empty_data = {'x': torch.tensor([], dtype=torch.long),
                           'edge_index': torch.tensor([[], []], dtype=torch.long),
                           'edge_attr': torch.tensor([], dtype=torch.long)}
-            return self.process_fn(empty_data)  # Use self.process_fn
+            # Process the empty data using the bound pre_tokenize_function
+            return self.process_fn(empty_data)
 
         # Filter padding (-100) from node features
         node_padding_mask = raw_x != -100
         x_ids = torch.from_numpy(raw_x[node_padding_mask])
         num_valid_nodes = len(x_ids)
 
+        # Create a mapping from old (padded) index to new (unpadded) index
+        old_indices = np.arange(len(raw_x))
+        new_indices_map = -np.ones_like(old_indices) # Initialize with -1
+        new_indices_map[node_padding_mask] = np.arange(num_valid_nodes)
+
         if num_valid_nodes == 0:
             # Handle graphs with no valid nodes after filtering padding
             empty_data = {'x': x_ids,
                           'edge_index': torch.tensor([[], []], dtype=torch.long),
                           'edge_attr': torch.tensor([], dtype=torch.long)}
-            return self.process_fn(empty_data)  # Use self.process_fn
+            # Process the empty data using the bound pre_tokenize_function
+            return self.process_fn(empty_data)
 
-        # Filter edge attributes based on padding
+        # Filter edge attributes based on padding (-100)
+        # Ensure raw_edge_attr is 1D before applying mask
+        if raw_edge_attr.ndim > 1:
+             print(f"Warning: edge_attr has unexpected shape {raw_edge_attr.shape} at index {idx}. Flattening.")
+             raw_edge_attr = raw_edge_attr.flatten()
+
         edge_padding_mask = raw_edge_attr != -100
         edge_attr_ids_filtered_by_attr = torch.from_numpy(raw_edge_attr[edge_padding_mask])
 
         # Filter edge indices based *only* on the edge attribute padding mask initially
         # raw_edge_index has shape [2, max_num_edges]
         # edge_padding_mask has shape [max_num_edges]
-        edge_index_filtered_by_attr = torch.from_numpy(raw_edge_index[:, edge_padding_mask])
-
-        # Further filter edges where BOTH source and destination nodes are valid
-        # Node indices should be between 0 and num_valid_nodes - 1
-        if edge_index_filtered_by_attr.numel() > 0:  # Check if there are any edges left
-            src_nodes = edge_index_filtered_by_attr[0, :]
-            dst_nodes = edge_index_filtered_by_attr[1, :]
-            node_indices_valid_mask = (src_nodes < num_valid_nodes) & (dst_nodes < num_valid_nodes) & \
-                                      (src_nodes >= 0) & (dst_nodes >= 0)
-
-            # Apply the node validity mask to get final edge indices and attributes
-            edge_index_final = edge_index_filtered_by_attr[:, node_indices_valid_mask]
-            edge_attr_final = edge_attr_ids_filtered_by_attr[node_indices_valid_mask]
+        # Ensure shapes match before filtering
+        if edge_padding_mask.shape[0] != raw_edge_index.shape[1]:
+             print(f"Warning: Mismatch between edge_attr padding mask ({edge_padding_mask.shape[0]}) and edge_index columns ({raw_edge_index.shape[1]}) at index {idx}. Skipping edge processing.")
+             edge_index_filtered_by_attr = torch.tensor([[], []], dtype=torch.long)
+             edge_attr_ids_filtered_by_attr = torch.tensor([], dtype=torch.long) # Ensure consistency
         else:
-            # No edges were valid based on attribute padding
-            edge_index_final = torch.tensor([[], []], dtype=torch.long)
-            edge_attr_final = torch.tensor([], dtype=torch.long)
+             edge_index_filtered_by_attr = torch.from_numpy(raw_edge_index[:, edge_padding_mask])
+
+
+        # Remap edge indices to the new node indices (0 to num_valid_nodes - 1)
+        # and filter edges connecting to padded nodes
+        if edge_index_filtered_by_attr.numel() > 0: # Check if there are any edges left
+             src_nodes_old = edge_index_filtered_by_attr[0, :].numpy()
+             dst_nodes_old = edge_index_filtered_by_attr[1, :].numpy()
+
+             # Map old indices to new indices
+             src_nodes_new = new_indices_map[src_nodes_old]
+             dst_nodes_new = new_indices_map[dst_nodes_old]
+
+             # Create a mask for valid edges (where both src and dst map to non -1 indices)
+             valid_edge_mask = (src_nodes_new != -1) & (dst_nodes_new != -1)
+
+             # Apply the mask to get final edge indices and attributes
+             edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask],
+                                              dst_nodes_new[valid_edge_mask]], dtype=torch.long)
+             edge_attr_final = edge_attr_ids_filtered_by_attr[valid_edge_mask]
+        else:
+             # No edges were valid based on attribute padding
+             edge_index_final = torch.tensor([[], []], dtype=torch.long)
+             edge_attr_final = torch.tensor([], dtype=torch.long)
+
 
         # Return dictionary containing tensors with INTEGER vocabulary IDs
         data_dict = {'x': x_ids, 'edge_index': edge_index_final, 'edge_attr': edge_attr_final}
 
         # Pass the dictionary with integer IDs to the processing function (pre_tokenize_function)
-        return self.process_fn(data_dict)  # Use self.process_fn
+        return self.process_fn(data_dict)
 
 
-# --- Keep randperm_node, remove_edge_with_attr, bfs_with_all_edges, to_seq_by_bfs, to_seq_by_deg ---
-# ... (these functions remain unchanged) ...
-def randperm_node(x, edge_index):
-    num_nodes = x.shape[0]
+# --- REMOVE unused randperm_node and remove_edge_with_attr ---
+# def randperm_node(x, edge_index): ...
+# def remove_edge_with_attr(graph, edge_to_remove): ...
 
-    perm = torch.randperm(num_nodes)
-
-    # Create a mapping from old node indices to new node indices
-    mapping = torch.empty_like(perm)
-    mapping[perm] = torch.arange(num_nodes)
-
-    # Permute node features
-    new_x = x[perm]
-    # Update edge indices using the mapping
-    new_edge_index = mapping[edge_index]
-
-    return new_x, new_edge_index
-
-
-def remove_edge_with_attr(graph, edge_to_remove):
-    """
-    Remove an edge and its attributes from a PyTorch Geometric graph.
-
-    Args:
-        graph (torch_geometric.data.Data): Input graph.
-        edge_to_remove (tuple): Edge to remove, specified as (source, target).
-
-    Returns:
-        torch_geometric.data.Data: Graph with the specified edge and its attributes removed.
-    """
-    new_graph = graph.clone()
-    edge_index = new_graph.edge_index
-    edge_attr = new_graph.edge_attr
-
-    # Find edges to keep
-    mask1 = ~((edge_index[0] == edge_to_remove[0]) & (edge_index[1] == edge_to_remove[1]))
-    mask2 = ~((edge_index[1] == edge_to_remove[0]) & (edge_index[0] == edge_to_remove[1]))
-    mask = mask1.logical_and(mask2)
-    # Apply the mask to edge_index and edge_attr
-    new_edge_index = edge_index[:, mask]
-    if edge_attr is not None:
-        new_edge_attr = edge_attr[mask]
-    else:
-        new_edge_attr = None
-    if len(edge_attr.shape) == 2:  # one hot
-        poped_edge_attr = edge_attr[~mask1].argmax().item()
-    else:
-        poped_edge_attr = edge_attr[~mask1].item()
-    # Update the graph
-    new_graph.edge_index = new_edge_index
-    new_graph.edge_attr = new_edge_attr
-    return new_graph, poped_edge_attr
-
-
-# --- In datasets_utils.py ---
-
-from collections import deque
-import networkx as nx
-import torch
-from torch_geometric.data import Data # Make sure Data is imported
 
 # --- REFINED bfs_edge_order ---
 # Renamed for clarity and simplified logic for directed graphs
@@ -482,29 +481,29 @@ def get_bfs_edge_order(G):
     Returns:
         list: List of edge tuples (u, v) in BFS traversal order.
     """
-    if not G:
+    if not G or G.number_of_edges() == 0:
         return []
 
     edges_bfs = []
     visited_nodes = set()
     nodes_to_process = list(G.nodes()) # Keep track of nodes not yet started from
+    processed_edges = set() # Keep track of edges already added
 
     while nodes_to_process:
         # Find a starting node for the next BFS component
         start_node = -1
-        # Prioritize nodes with in-degree 0 among the remaining ones
-        possible_starts = [n for n in nodes_to_process if G.in_degree(n) == 0]
+        # Prioritize nodes with in-degree 0 among the remaining unvisited ones
+        possible_starts = sorted([n for n in nodes_to_process if G.in_degree(n) == 0 and n not in visited_nodes])
         if possible_starts:
-            start_node = possible_starts[0]
+            start_node = possible_starts[0] # Pick lowest index source node
         else:
             # If no nodes with in-degree 0 left (e.g., cycles or only visited nodes remain)
-            # just pick the first unvisited node from the remaining list
-            for n in nodes_to_process:
-                 if n not in visited_nodes:
-                      start_node = n
-                      # This might indicate a cycle or unusual component starting point
-                      print(f"Warning (BFS Edge Order): No source node found. Starting BFS from node {start_node}")
-                      break
+            # just pick the first unvisited node from the remaining list (sorted for determinism)
+            unvisited_remaining = sorted([n for n in nodes_to_process if n not in visited_nodes])
+            if unvisited_remaining:
+                 start_node = unvisited_remaining[0]
+                 # This might indicate a cycle or unusual component starting point
+                 # print(f"Warning (BFS Edge Order): No source node found. Starting BFS from node {start_node}")
 
         if start_node == -1: # All remaining nodes must have been visited already
             break
@@ -517,10 +516,14 @@ def get_bfs_edge_order(G):
         component_edges = []
         while queue:
             u = queue.popleft()
-            # Process neighbors in a deterministic order
+            # Process neighbors in a deterministic order (sorted by node index)
             for v in sorted(list(G.successors(u))):
-                # Record the directed edge
-                component_edges.append((u, v))
+                edge = (u, v)
+                # Record the directed edge only if not already processed
+                if edge not in processed_edges:
+                    component_edges.append(edge)
+                    processed_edges.add(edge)
+
                 if v not in visited_nodes:
                     visited_nodes.add(v)
                     if v in nodes_to_process: # Only remove if it was pending start
@@ -529,9 +532,9 @@ def get_bfs_edge_order(G):
 
         edges_bfs.extend(component_edges) # Add edges from this component
 
-    # Sanity check: Ensure all edges were captured (optional, might be slow)
-    # if len(edges_bfs) != G.number_of_edges():
-    #    print(f"Warning (BFS Edge Order): Number of traversed edges ({len(edges_bfs)}) doesn't match graph edges ({G.number_of_edges()}). Graph might be disconnected or have issues.")
+    # Sanity check (optional): Ensure all edges were captured
+    if len(processed_edges) != G.number_of_edges():
+       print(f"Warning (BFS Edge Order): Number of traversed edges ({len(processed_edges)}) doesn't match graph edges ({G.number_of_edges()}). Possible disconnected graph or issue.")
 
     return edges_bfs
 
@@ -540,7 +543,7 @@ def get_bfs_edge_order(G):
 def to_seq_by_bfs(data, atom_type, bond_type):
     """
     Converts AIG data (nodes, directed edges) to G2PT sequence format
-    using BFS ordering.
+    using BFS ordering for edges. Nodes listed in index order.
     REFINED to use get_bfs_edge_order and corrected data handling.
 
     Args:
@@ -563,7 +566,7 @@ def to_seq_by_bfs(data, atom_type, bond_type):
         return {"text": ["<boc> <eoc> <bog> <eog>"]}
 
     # --- 1. Build Node Context (<boc>...<eoc>) ---
-    # Node context should list nodes in their original 0..N-1 index order
+    # Node context lists nodes in their original 0..N-1 index order
     ctx = ['<boc>']
     node_indices_map = {} # Map node index (0..N-1) to IDX_n token string
     node_id_to_type_token = {} # Map node index to its type token string (for building G)
@@ -590,6 +593,7 @@ def to_seq_by_bfs(data, atom_type, bond_type):
     edge_data_map = {} # Store edge attributes keyed by (u,v) tuple for easy lookup
     edge_vocab_offset = 101
 
+    # Add nodes with their type string as an attribute
     for node_idx in range(num_nodes):
         G.add_node(node_idx, type=node_id_to_type_token.get(node_idx, "[UNK]"))
 
@@ -602,7 +606,10 @@ def to_seq_by_bfs(data, atom_type, bond_type):
         src_node_idx = edge_index[0, i].item()
         dst_node_idx = edge_index[1, i].item()
 
-        if src_node_idx in G and dst_node_idx in G:
+        # Ensure indices are within the valid range of nodes added
+        if src_node_idx >= 0 and src_node_idx < num_nodes and \
+           dst_node_idx >= 0 and dst_node_idx < num_nodes:
+            # Add edge to graph
             G.add_edge(src_node_idx, dst_node_idx)
             # Store edge type string in map
             edge_vocab_id = edge_attr_ids[i].item()
@@ -612,9 +619,11 @@ def to_seq_by_bfs(data, atom_type, bond_type):
             else:
                 print(f"Warning (BFS Edge Attr): Edge ({src_node_idx}->{dst_node_idx}) unexpected ID {edge_vocab_id}. UNK type.")
                 bond_type_str = "[UNK]"
+            # Store bond type in the map (overwrites if multiple edges exist, assumes simple graph for seq)
             edge_data_map[(src_node_idx, dst_node_idx)] = bond_type_str
         else:
-            print(f"Warning (BFS Graph Build): Skipping edge ({src_node_idx}->{dst_node_idx}) due to missing node.")
+            print(f"Warning (BFS Graph Build): Skipping edge ({src_node_idx}->{dst_node_idx}) due to invalid node index (max is {num_nodes-1}).")
+
 
     # --- 3. Perform BFS and Build Edge Sequence (<bog>...<eog>) ---
     outputs = ['<bog>']
@@ -633,21 +642,7 @@ def to_seq_by_bfs(data, atom_type, bond_type):
         else:
             # This indicates an edge from BFS wasn't properly recorded in edge_data_map or node_indices_map
             print(f"Warning (BFS Edge Seq): Missing data for edge ({src_idx}->{dest_idx}) from BFS order.")
-            if not bond_type_str:
-                 print(f" > Edge type missing from edge_data_map.")
-                 # Attempt fallback lookup (less efficient)
-                 edge_mask = (edge_index[0] == src_idx) & (edge_index[1] == dest_idx)
-                 if edge_mask.any():
-                      edge_vocab_id = edge_attr_ids[edge_mask.nonzero(as_tuple=True)[0][0]].item()
-                      edge_token_index = edge_vocab_id - edge_vocab_offset
-                      if 0 <= edge_token_index < len(bond_type):
-                           bond_type_str = bond_type[edge_token_index]
-                           print(f" > Recovered edge type: {bond_type_str}")
-                           outputs.extend(['<sepg>', src_token_str, dest_token_str, bond_type_str])
-                      else:
-                           print(f" > Fallback lookup failed: Unknown edge vocab ID {edge_vocab_id}")
-                 else:
-                      print(f" > Fallback lookup failed: Edge not found in original edge_index.")
+            # Optional: Add more debugging if needed
 
     outputs.append('<eog>')
     if len(outputs) == 2: # Only <bog> and <eog>
@@ -656,75 +651,218 @@ def to_seq_by_bfs(data, atom_type, bond_type):
     # --- 4. Combine and Return ---
     return {"text": [" ".join(ctx + outputs)]}
 
+
+# --- REWRITTEN to_seq_by_deg ---
 def to_seq_by_deg(data, atom_type, bond_type):
-    x, edge_index, edge_attr = data['x'], data['edge_index'], data['edge_attr']
-    x, edge_index = randperm_node(x, edge_index)
-    num_nodes = x.shape[0]
+    """
+    Converts AIG data (nodes, directed edges) to G2PT sequence format
+    using Degree-based ordering for edges. Nodes listed in index order.
 
-    ctx = [['<sepc>', atom_type[node_type.item()], f'IDX_{node_idx}'] for node_idx, node_type in
-           enumerate(x.argmax(-1))]
-    ctx = sum(ctx, [])
-    data_t = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    outputs = []
-    INF = 100
-    while True:
-        source_nodes_t = data_t.edge_index[0]
-        node_degrees_t = degree(source_nodes_t, num_nodes=num_nodes)
-        if torch.all(node_degrees_t == 0):
-            break
-        node_degrees_t[node_degrees_t == 0] = INF
-        # sample a source node with minimum deg
-        candidate_source_nodes = torch.where(node_degrees_t == node_degrees_t.min())[0]
-        selected_index = torch.randint(0, candidate_source_nodes.shape[0], (1,)).item()
-        selected_source_node_idx = candidate_source_nodes[selected_index].item()
+    Edge Selection Strategy:
+    1. Select source node `u` with the minimum *non-zero* out-degree. Break ties using the lowest node index.
+    2. Among `u`'s neighbors `v`, select the destination node `v` with the minimum out-degree (can be zero). Break ties using the lowest node index.
+    3. Add the edge `(u, v)` to the sequence.
+    4. Remove the edge `(u, v)` from the graph.
+    5. Repeat until no edges remain.
 
-        # get the dest node with minimum deg
-        source_node_mask = source_nodes_t == selected_source_node_idx
-        candidate_dest_nodes = data_t.edge_index[1][source_node_mask].unique()
+    Args:
+        data (dict): {'x': tensor (N,), 'edge_index': tensor (2, E), 'edge_attr': tensor (E,)}
+                     Assumes tensors contain INTEGER VOCABULARY IDs (e.g., 97-102).
+        atom_type (list): List of node type token strings ['NODE_CONST0', ...]
+        bond_type (list): List of edge type token strings ['EDGE_INV', 'EDGE_REG']
 
-        candidate_dest_degrees = node_degrees_t[candidate_dest_nodes]
-        min_dest_degree = candidate_dest_degrees.min()
+    Returns:
+        dict: {"text": [sequence_string]}
+    """
+    if 'x' not in data or 'edge_index' not in data or 'edge_attr' not in data:
+        print("Warning (Deg): Input data dictionary missing required keys ('x', 'edge_index', 'edge_attr').")
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
 
-        indices = torch.where(candidate_dest_degrees == min_dest_degree)[0]
-        selected_index = indices[torch.randint(0, len(indices), (1,)).item()]
-        selected_dest_node_idx = candidate_dest_nodes[selected_index].item()
+    x_ids, edge_index, edge_attr_ids = data['x'], data['edge_index'], data['edge_attr']
+    num_nodes = x_ids.shape[0]
 
-        # get new graph at t-1
-        data_tminus1, removed_edge_type = remove_edge_with_attr(data_t,
-                                                                (selected_source_node_idx, selected_dest_node_idx))
-        # selected_source_node_type = data.x[selected_source_node_idx].argmax(-1).item()
-        # selected_dest_node_type = data.x[selected_dest_node_idx].argmax(-1).item()
-        outputs.append(['<sepg>', f'IDX_{selected_source_node_idx}', f'IDX_{selected_dest_node_idx}',
-                        bond_type[removed_edge_type - 1]])
-        data_t = data_tminus1
+    if num_nodes == 0:
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
 
-    ctx[0] = '<boc>'
+    # --- 1. Build Node Context (<boc>...<eoc>) ---
+    # Node context lists nodes in their original 0..N-1 index order
+    ctx = ['<boc>']
+    node_indices_map = {} # Map node index (0..N-1) to IDX_n token string
+    node_id_to_type_token = {} # Map node index to its type token string
+    node_vocab_offset = 97
+
+    for node_idx in range(num_nodes):
+        idx_token_str = f'IDX_{node_idx}'
+        node_indices_map[node_idx] = idx_token_str
+
+        node_vocab_id = x_ids[node_idx].item()
+        node_token_index = node_vocab_id - node_vocab_offset
+        if 0 <= node_token_index < len(atom_type):
+            node_type_str = atom_type[node_token_index]
+        else:
+            print(f"Warning (Deg Node Ctx): Node {node_idx} unexpected ID {node_vocab_id}. UNK type.")
+            node_type_str = "[UNK]"
+
+        node_id_to_type_token[node_idx] = node_type_str
+        ctx.extend(['<sepc>', node_type_str, idx_token_str])
     ctx.append('<eoc>')
-    outputs = outputs[::-1]
-    outputs = sum(outputs, [])
-    outputs[0] = '<bog>'
+
+    # --- 2. Build NetworkX DiGraph ---
+    # We build a mutable copy to remove edges during selection
+    G = nx.DiGraph()
+    original_edge_attributes = {} # Store original attributes keyed by (u,v)
+    edge_vocab_offset = 101
+
+    # Add nodes
+    for node_idx in range(num_nodes):
+        G.add_node(node_idx, type=node_id_to_type_token.get(node_idx, "[UNK]"))
+
+    # Add edges and store attributes
+    num_edges_original = edge_index.shape[1]
+    if num_edges_original != edge_attr_ids.shape[0]:
+         print(f"Warning (Deg Graph Build): Mismatch between edge_index count ({num_edges_original}) and edge_attr count ({edge_attr_ids.shape[0]}).")
+
+    for i in range(num_edges_original):
+        src_node_idx = edge_index[0, i].item()
+        dst_node_idx = edge_index[1, i].item()
+
+        # Ensure indices are valid
+        if src_node_idx >= 0 and src_node_idx < num_nodes and \
+           dst_node_idx >= 0 and dst_node_idx < num_nodes:
+            # Add edge to the graph we'll modify
+            G.add_edge(src_node_idx, dst_node_idx)
+
+            # Store original edge type string in the map
+            edge_vocab_id = edge_attr_ids[i].item()
+            edge_token_index = edge_vocab_id - edge_vocab_offset
+            if 0 <= edge_token_index < len(bond_type):
+                bond_type_str = bond_type[edge_token_index]
+            else:
+                print(f"Warning (Deg Edge Attr): Edge ({src_node_idx}->{dst_node_idx}) unexpected ID {edge_vocab_id}. UNK type.")
+                bond_type_str = "[UNK]"
+            # Store the attribute (overwrites if parallel edges exist, assumes simple for seq)
+            original_edge_attributes[(src_node_idx, dst_node_idx)] = bond_type_str
+        else:
+            print(f"Warning (Deg Graph Build): Skipping edge ({src_node_idx}->{dst_node_idx}) due to invalid node index (max is {num_nodes-1}).")
+
+    # --- 3. Iteratively Select Edges based on Degree and Build Edge Sequence ---
+    outputs = ['<bog>']
+    ordered_edges = [] # List to store edges in the selected order
+
+    current_num_edges = G.number_of_edges()
+    while current_num_edges > 0:
+        # Calculate current out-degrees for all nodes
+        # G.out_degree() returns an iterator of (node, degree) pairs
+        out_degrees = dict(G.out_degree())
+
+        # Find source nodes with minimum *non-zero* out-degree
+        min_out_degree = float('inf')
+        candidate_sources = []
+        for node, degree in out_degrees.items():
+            if degree > 0: # Only consider nodes with outgoing edges
+                if degree < min_out_degree:
+                    min_out_degree = degree
+                    candidate_sources = [node]
+                elif degree == min_out_degree:
+                    candidate_sources.append(node)
+
+        if not candidate_sources:
+            # Should not happen if current_num_edges > 0, but break defensively
+            print("Warning (Deg Edge Sel): No source nodes with non-zero out-degree found, but edges remain.")
+            break
+
+        # Tie-breaking for source: choose the one with the smallest node index
+        selected_source = min(candidate_sources)
+
+        # Find neighbors of the selected source
+        neighbors = list(G.successors(selected_source))
+        if not neighbors:
+             # Should not happen if source had non-zero out-degree
+             print(f"Warning (Deg Edge Sel): Source {selected_source} selected with non-zero degree but has no successors.")
+             # As a fallback, remove the node and try again? Or just break. Let's break.
+             break
+
+
+        # Find the neighbor(s) with the minimum out-degree (can be zero)
+        min_neighbor_degree = float('inf')
+        candidate_destinations = []
+        for neighbor in neighbors:
+            neighbor_degree = out_degrees.get(neighbor, 0) # Use .get() for nodes with 0 out-degree now
+            if neighbor_degree < min_neighbor_degree:
+                min_neighbor_degree = neighbor_degree
+                candidate_destinations = [neighbor]
+            elif neighbor_degree == min_neighbor_degree:
+                candidate_destinations.append(neighbor)
+
+        # Tie-breaking for destination: choose the one with the smallest node index
+        selected_destination = min(candidate_destinations)
+
+        # --- Record the selected edge ---
+        edge_tuple = (selected_source, selected_destination)
+        src_token_str = node_indices_map.get(selected_source)
+        dest_token_str = node_indices_map.get(selected_destination)
+        # Retrieve the original edge attribute
+        bond_type_str = original_edge_attributes.get(edge_tuple)
+
+        if src_token_str and dest_token_str and bond_type_str:
+             outputs.extend(['<sepg>', src_token_str, dest_token_str, bond_type_str])
+             ordered_edges.append(edge_tuple) # Keep track if needed
+        else:
+             print(f"Warning (Deg Edge Seq): Missing data for selected edge {edge_tuple}. Src:{src_token_str}, Dst:{dest_token_str}, Type:{bond_type_str}")
+
+        # --- Remove the edge from the graph for the next iteration ---
+        if G.has_edge(*edge_tuple):
+            G.remove_edge(*edge_tuple)
+        else:
+            # This indicates a logic error or graph state issue
+            print(f"Error (Deg Edge Sel): Attempted to remove non-existent edge {edge_tuple}.")
+            break # Avoid infinite loop
+
+        current_num_edges = G.number_of_edges() # Update edge count
+
     outputs.append('<eog>')
+    if len(outputs) == 2: # Only <bog> and <eog>
+        outputs = ['<bog>', '<eog>']
+
+    # Sanity check (optional)
+    if len(ordered_edges) != num_edges_original:
+         print(f"Warning (Deg Edge Seq): Number of selected edges ({len(ordered_edges)}) does not match original edge count ({num_edges_original}).")
+
+
+    # --- 4. Combine and Return ---
     return {"text": [" ".join(ctx + outputs)]}
 
 
 # --- Modified get_datasets function ---
 def get_datasets(dataset_name, tokenizer, order='bfs'):
+    """
+    Loads the specified dataset and prepares it for the model.
+
+    Args:
+        dataset_name (str): Name of the dataset ('aig', 'qm9', 'tree').
+        tokenizer: Pre-initialized tokenizer instance.
+        order (str): Node/edge ordering strategy ('bfs', 'topo', 'deg').
+
+    Returns:
+        tuple: (train_datasets, eval_datasets)
+    """
+    print(f"Loading dataset: {dataset_name} with ordering: {order}")
+
     # Select the sequence generation function based on dataset and order
-    if order == 'topo' and dataset_name == 'aig':  # Only use topo if explicitly requested for AIG
-        print(f"Using topological sequence generation logic for AIG dataset.")
+    if order == 'topo':
+        print(f"Using topological sequence generation logic.")
         order_function = to_seq_aig_topo
     elif order == 'bfs':
-        print(f"Using BFS sequence generation logic for {dataset_name} dataset.")  # NEW/MODIFIED PRINT
-        order_function = to_seq_by_bfs  # SELECT BFS
-    elif order == 'deg':
-        print(f"Using Degree-based sequence generation logic for {dataset_name} dataset.")  # NEW/MODIFIED PRINT
-        order_function = to_seq_by_deg
-        # Add back the 'aig' check for topo if needed, or handle default order differently
-    elif dataset_name == 'aig' and order != 'bfs' and order != 'deg':  # Fallback for AIG if invalid order given?
-        print(f"Warning: Unsupported order '{order}' for AIG. Defaulting to BFS.")
+        print(f"Using BFS sequence generation logic.")
         order_function = to_seq_by_bfs
+    elif order == 'deg':
+        print(f"Using Degree-based sequence generation logic.")
+        order_function = to_seq_by_deg
     else:
-        raise NotImplementedError(f"Order function {order} is not implemented or invalid for {dataset_name}")
+        # Default or fallback logic
+        print(f"Warning: Unsupported order '{order}'. Defaulting to BFS.")
+        order_function = to_seq_by_bfs # Default to BFS
+
 
     # --- Dataset Specific Setups ---
     train_datasets = None
@@ -737,56 +875,106 @@ def get_datasets(dataset_name, tokenizer, order='bfs'):
 
     # Define ATOM_TYPE, BOND_TYPE, shapes, and data_dir for each dataset
     if dataset_name == 'aig':
-        ATOM_TYPE = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO']
-        BOND_TYPE = ['EDGE_INV', 'EDGE_REG']
+        ATOM_TYPE = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO'] # IDs 97, 98, 99, 100
+        BOND_TYPE = ['EDGE_INV', 'EDGE_REG'] # IDs 101, 102
         meta_path = os.path.join(data_dir, 'data_meta.json')
         try:
+            # Ensure data_dir exists
+            if not os.path.isdir(data_dir):
+                 raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
+            if not os.path.exists(meta_path):
+                raise FileNotFoundError(f"AIG metadata file not found: {meta_path}. Did prepare_aig.py run?")
+
             with open(meta_path, 'r') as f:
                 data_meta = json.load(f)
+
+            # Check if required keys exist in meta file
+            if 'train_shape' not in data_meta or 'eval_shape' not in data_meta:
+                 raise KeyError("Missing 'train_shape' or 'eval_shape' in data_meta.json")
+
+            # Validate shape dictionary keys before tuple conversion
+            required_shape_keys = ['xs', 'edge_indices', 'edge_attrs']
+            for shape_dict in [data_meta['train_shape'], data_meta['eval_shape']]:
+                 for key in required_shape_keys:
+                      if key not in shape_dict:
+                           raise KeyError(f"Missing key '{key}' in shape dictionary within data_meta.json")
+
             train_shape = {k: tuple(v) for k, v in data_meta['train_shape'].items()}
             eval_shape = {k: tuple(v) for k, v in data_meta['eval_shape'].items()}
+        except FileNotFoundError as e:
+             raise FileNotFoundError(f"Error accessing AIG dataset files: {e}")
+        except KeyError as e:
+             raise KeyError(f"Error reading AIG metadata from {meta_path}: {e}")
         except Exception as e:
-            raise RuntimeError(f"Failed to load AIG meta {meta_path}: {e}")
+            raise RuntimeError(f"Failed to load or parse AIG meta {meta_path}: {e}")
 
     elif dataset_name == 'qm9':
-        ATOM_TYPE = ['ATOM_C', 'ATOM_N', 'ATOM_O', 'ATOM_F']
-        BOND_TYPE = ['BOND_SINGLE', 'BOND_DOUBLE', 'BOND_TRIPLE', 'BOND_AROMATIC']
+        # Note: QM9 might require different logic if node/edge IDs differ
+        print("Warning: QM9 dataset selected. Ensure atom/bond types and IDs match expectation if using.")
+        ATOM_TYPE = ['ATOM_C', 'ATOM_N', 'ATOM_O', 'ATOM_F'] # Example, verify IDs
+        BOND_TYPE = ['BOND_SINGLE', 'BOND_DOUBLE', 'BOND_TRIPLE', 'BOND_AROMATIC'] # Example, verify IDs
+        # Placeholder shapes - replace with actual QM9 shapes if loading from files
         train_shape = {'xs': (97732, 9), 'edge_indices': (97732, 2, 28), 'edge_attrs': (97732, 28)}
         eval_shape = {'xs': (20042, 9), 'edge_indices': (20042, 2, 26), 'edge_attrs': (20042, 26)}
+        # Need to ensure the processing functions handle QM9 IDs correctly
 
     elif dataset_name == 'tree':
-        ATOM_TYPE = ['NODE']
-        BOND_TYPE = ['EDGE']
+         # Note: Tree dataset might require different logic
+        print("Warning: Tree dataset selected. Ensure atom/bond types and IDs match expectation if using.")
+        ATOM_TYPE = ['NODE'] # Example
+        BOND_TYPE = ['EDGE'] # Example
+        # Placeholder shapes - replace with actual Tree shapes if loading from files
         train_shape = {'xs': (256, 64), 'edge_indices': (256, 2, 126), 'edge_attrs': (256, 126)}
         eval_shape = {'xs': (64, 64), 'edge_indices': (64, 2, 126), 'edge_attrs': (64, 126)}
+        # Need to ensure the processing functions handle Tree IDs correctly
 
     else:
-        raise NotImplementedError(f"Dataset {dataset_name} setup is not implemented.")
+        raise NotImplementedError(f"Dataset '{dataset_name}' setup is not implemented.")
 
     # --- Instantiate Datasets ---
     if ATOM_TYPE and BOND_TYPE and train_shape and eval_shape:
+        # Basic validation of shapes
+        if not all(k in train_shape for k in ['xs', 'edge_indices', 'edge_attrs']) or \
+           not all(k in eval_shape for k in ['xs', 'edge_indices', 'edge_attrs']):
+            raise ValueError("Train or eval shape dictionary is missing required keys ('xs', 'edge_indices', 'edge_attrs')")
+
         num_train = train_shape['xs'][0]
         num_eval = eval_shape['xs'][0]
         num_node_classes = len(ATOM_TYPE)
-        # +1 for padding/no-edge type implicitly handled by vocab size usually
-        num_edge_classes = len(BOND_TYPE) + 1
+        num_edge_classes = len(BOND_TYPE) # Note: Padding handling might differ based on vocab
 
         # Define the processing function using partial, binding the top-level pre_tokenize_function
-        # Pass tokenizer and order_function explicitly here
+        # Pass tokenizer, order_function, and types explicitly here
         process_fn = partial(pre_tokenize_function,
                              tokenizer=tokenizer,
-                             order_function=order_function,
+                             order_function=order_function, # The selected function (bfs, topo, deg)
                              atom_type=ATOM_TYPE,
                              bond_type=BOND_TYPE)
 
-        train_datasets = NumpyBinDataset(os.path.join(data_dir, 'train'),
-                                         num_train, num_node_classes, num_edge_classes,
-                                         shape=train_shape,
-                                         process_fn=process_fn)  # Pass the partial function
-        eval_datasets = NumpyBinDataset(os.path.join(data_dir, 'eval'),
-                                        num_eval, num_node_classes, num_edge_classes,
-                                        shape=eval_shape,
-                                        process_fn=process_fn)  # Pass the partial function
+        try:
+            train_path = os.path.join(data_dir, 'train')
+            eval_path = os.path.join(data_dir, 'eval')
+
+            # Check if dataset paths exist
+            if not os.path.isdir(train_path):
+                 raise FileNotFoundError(f"Training data directory not found: {train_path}")
+            if not os.path.isdir(eval_path):
+                 raise FileNotFoundError(f"Evaluation data directory not found: {eval_path}")
+
+
+            train_datasets = NumpyBinDataset(train_path,
+                                             num_train, num_node_classes, num_edge_classes,
+                                             shape=train_shape,
+                                             process_fn=process_fn)  # Pass the partial function
+            eval_datasets = NumpyBinDataset(eval_path,
+                                            num_eval, num_node_classes, num_edge_classes,
+                                            shape=eval_shape,
+                                            process_fn=process_fn)  # Pass the partial function
+        except FileNotFoundError as e:
+             raise FileNotFoundError(f"Error initializing dataset paths: {e}. Ensure data is correctly placed.")
+        except Exception as e:
+             raise RuntimeError(f"Error creating NumpyBinDataset instances: {e}")
+
     else:
         raise RuntimeError(f"Missing configuration (ATOM_TYPE, BOND_TYPE, shapes) for dataset {dataset_name}")
 
@@ -794,4 +982,5 @@ def get_datasets(dataset_name, tokenizer, order='bfs'):
     if train_datasets is None or eval_datasets is None:
         raise RuntimeError(f"Failed to initialize datasets for {dataset_name}")
 
+    print(f"Successfully loaded {dataset_name} - Train: {len(train_datasets)} samples, Eval: {len(eval_datasets)} samples.")
     return train_datasets, eval_datasets
