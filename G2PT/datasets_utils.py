@@ -382,7 +382,11 @@ class NumpyBinDataset(Dataset):
                  src_nodes_old = edge_index_filtered_by_attr[0, :].numpy(); dst_nodes_old = edge_index_filtered_by_attr[1, :].numpy()
                  src_nodes_new = new_indices_map[src_nodes_old]; dst_nodes_new = new_indices_map[dst_nodes_old]
                  valid_edge_mask = (src_nodes_new != -1) & (dst_nodes_new != -1)
-                 edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]], dtype=torch.long)
+                 # Combine the two numpy arrays into a single numpy array first
+                 # (Make sure numpy is imported as np)
+                 combined_edge_indices = np.vstack((src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]))
+                 # Then convert the single numpy array to a tensor efficiently
+                 edge_index_final = torch.from_numpy(combined_edge_indices).to(torch.long)
                  edge_attr_final = edge_attr_ids_filtered_by_attr[valid_edge_mask]
              else:
                  edge_index_final = torch.tensor([[], []], dtype=torch.long); edge_attr_final = torch.tensor([], dtype=torch.long)
