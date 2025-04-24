@@ -23,7 +23,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # I/O settings
 out_dir = 'out'  # Directory to save outputs
 eval_interval = 500  # Interval for evaluation
-log_interval = 10  # Interval for logging
+log_interval = 100  # Interval for logging
 eval_iters = 200  # Number of iterations for evaluation
 always_save_checkpoint = False  # Save checkpoint after each eval if True
 init_from = 'scratch'  # Options: 'scratch', 'resume', 'gpt2*'
