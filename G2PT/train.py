@@ -45,7 +45,7 @@ gradient_accumulation_steps = 5 * 8
 batch_size = 32
 block_size = 1024 # Ensure this is >= max sequence length found by check_seq_length.py
 vocab_size = None # Will be determined from tokenizer
-ordering = 'bfs' # Or 'topo', 'deg'
+ordering = 'topo' # Or 'topo', 'deg'
 n_layer = 12
 n_head = 12
 n_embd = 768

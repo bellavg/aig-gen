@@ -34,8 +34,8 @@ logger = logging.getLogger("check_max_len")
 
 # --- Configuration (Adapt these paths/values if needed) ---
 # Use relative paths or allow full paths via arguments
-DEFAULT_DATA_DIR = '/Users/bellavg/aig-gen/G2PT/datasets/real_aigs' # Example relative path
-DEFAULT_TOKENIZER_PATH = '/Users/bellavg/aig-gen/G2PT/tokenizers/aig' # Example relative path
+DEFAULT_DATA_DIR = '/G2PT/datasets/aigs'  # Example relative path
+DEFAULT_TOKENIZER_PATH = '/G2PT/tokenizers/aigs'  # Example relative path
 
 # --- Define Mappings/Types (Should match datasets_utils and prepare_aig_final) ---
 # These mappings convert the *feature index* (0, 1, 2, 3) from PyG data

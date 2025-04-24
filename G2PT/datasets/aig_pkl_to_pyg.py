@@ -17,7 +17,7 @@ from types import SimpleNamespace
 CFG = SimpleNamespace(
     # --- Paths ---
     input_pickle_path='epfl_aigs.pkl',     # Path to your input AIG pickle file
-    output_pyg_dir='real_aigs/',             # Base directory for PyG dataset output
+    output_pyg_dir='aig/',             # Base directory for PyG dataset output
 
     # --- Data Handling ---
     split_ratios=(0.7, 0.15, 0.15),
