@@ -41,6 +41,7 @@ block_size = 1024  # Block size for model input
 vocab_size = None  # Vocabulary size
 ordering = 'topo'
 num_augmentations = 5
+patience = 7
 
 # Model architecture settings
 n_layer = 12  # Number of layers
