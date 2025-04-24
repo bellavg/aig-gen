@@ -44,111 +44,154 @@ def pre_tokenize_function(examples, tokenizer, order_function, atom_type, bond_t
 
 
 # --- Modified to_seq_aig_topo ---
-def to_seq_aig_topo(data, atom_type, bond_type, aug_seed=None): # <-- Added aug_seed
+def to_seq_aig_topo(data, atom_type, bond_type, aug_seed=None):
     """
     Converts AIG data to sequence using topological ordering.
     Introduces randomness in tie-breaking if aug_seed is provided.
+    Uses CORRECTED vocabulary offsets.
     """
     # Initialize local random generator if seed is provided
     local_random = random.Random(aug_seed) if aug_seed is not None else random
 
-    # --- (Initial checks and graph building remain mostly the same) ---
+    # --- (Initial checks remain the same) ---
     if 'x' not in data or 'edge_index' not in data or 'edge_attr' not in data:
         print("Warning (Topo): Input data dictionary missing required keys ('x', 'edge_index', 'edge_attr').")
-        return {"text": ["<boc> <eoc> <bog> <eog>"]}
-    x_ids, edge_index, edge_attr_ids = data['x'], data['edge_index'], data['edge_attr']
-    num_nodes = x_ids.shape[0]
-    if num_nodes == 0: return {"text": ["<boc> <eoc> <bog> <eog>"]}
+        return {"text": ["<boc> <eoc> <bog> <eog>"]} # Return format expected by process_fn
 
+    # Ensure data tensors are on CPU for numpy conversion if needed by NetworkX
+    # (NetworkX usually works with standard Python numbers)
+    try:
+        x_ids = data['x'].cpu() if isinstance(data['x'], torch.Tensor) else torch.tensor(data['x'])
+        edge_index = data['edge_index'].cpu() if isinstance(data['edge_index'], torch.Tensor) else torch.tensor(data['edge_index'])
+        edge_attr_ids = data['edge_attr'].cpu() if isinstance(data['edge_attr'], torch.Tensor) else torch.tensor(data['edge_attr'])
+    except Exception as e:
+        print(f"Warning (Topo): Error converting input data to tensors/CPU: {e}")
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
+
+
+    num_nodes = x_ids.shape[0]
+    if num_nodes == 0:
+        return {"text": ["<boc> <eoc> <bog> <eog>"]}
+
+    # --- Graph Building ---
     G = nx.DiGraph()
     node_idx_map = {}
     node_id_to_token_map = {}
-    node_vocab_offset = 97
+    # *** CORRECTED Node Offset ***
+    # Node vocab IDs (71-74) map to atom_type list index (0-3)
+    node_vocab_offset = 71
     for node_idx in range(num_nodes):
         G.add_node(node_idx)
         node_idx_map[node_idx] = f'IDX_{node_idx}'
         node_id_val = x_ids[node_idx].item()
-        node_token_index = node_id_val - node_vocab_offset
-        node_id_to_token_map[node_idx] = atom_type[node_token_index] if 0 <= node_token_index < len(atom_type) else "[UNK]"
+        node_token_index = node_id_val - node_vocab_offset # Calculate index 0-3
+        # Check if index is valid for the provided atom_type list
+        if 0 <= node_token_index < len(atom_type):
+            node_id_to_token_map[node_idx] = atom_type[node_token_index]
+        else:
+            print(f"Warning (Topo): Invalid node vocab ID {node_id_val} or offset {node_vocab_offset} for node index {node_idx}. Mapping to [UNK].")
+            node_id_to_token_map[node_idx] = "[UNK]" # Fallback
 
     edge_id_to_token_map = {}
-    edge_vocab_offset = 101
+    # *** CORRECTED Edge Offset ***
+    # Edge vocab IDs (75-76) map to bond_type list index (0-1)
+    edge_vocab_offset = 75
     num_edges = edge_index.shape[1]
+    # Ensure edge_attr_ids has the same length as number of edges
+    if num_edges != edge_attr_ids.shape[0]:
+         print(f"Warning (Topo): Mismatch between number of edges ({num_edges}) and edge attributes ({edge_attr_ids.shape[0]}). Skipping edge processing.")
+         num_edges = 0 # Prevent processing edges if attributes are inconsistent
+
     for i in range(num_edges):
         src_node_idx, dst_node_idx = edge_index[0, i].item(), edge_index[1, i].item()
         edge_id_val = edge_attr_ids[i].item()
-        if src_node_idx in G and dst_node_idx in G:
+        # Check if source and destination nodes exist in the graph
+        if G.has_node(src_node_idx) and G.has_node(dst_node_idx):
             G.add_edge(src_node_idx, dst_node_idx)
-            edge_token_index = edge_id_val - edge_vocab_offset
-            edge_id_to_token_map[(src_node_idx, dst_node_idx)] = bond_type[edge_token_index] if 0 <= edge_token_index < len(bond_type) else "[UNK]"
+            edge_token_index = edge_id_val - edge_vocab_offset # Calculate index 0-1
+             # Check if index is valid for the provided bond_type list
+            if 0 <= edge_token_index < len(bond_type):
+                edge_id_to_token_map[(src_node_idx, dst_node_idx)] = bond_type[edge_token_index]
+            else:
+                print(f"Warning (Topo): Invalid edge vocab ID {edge_id_val} or offset {edge_vocab_offset} for edge ({src_node_idx}, {dst_node_idx}). Mapping to [UNK].")
+                edge_id_to_token_map[(src_node_idx, dst_node_idx)] = "[UNK]" # Fallback
+        else:
+             print(f"Warning (Topo): Edge ({src_node_idx}, {dst_node_idx}) references non-existent node. Skipping edge.")
 
-    # --- Topological Sort / BFS Fallback ---
+
+    # --- Topological Sort / BFS Fallback (Keep as is) ---
     try:
-        # NetworkX topological_sort doesn't easily expose tie-breaking control.
-        # For augmentation, we rely more on the edge ordering randomization below.
-        # If we *really* needed node order variations, we might implement a custom topo sort.
         topo_order = list(nx.topological_sort(G))
     except nx.NetworkXUnfeasible:
         print("Warning (Topo Sort): Graph contains a cycle. Falling back to BFS order for sequence generation.")
-        # Fallback uses BFS - use the augmented get_bfs_edge_order logic indirectly
-        # We need the node order from BFS here.
         roots = [n for n, d in G.in_degree() if d == 0]
-        if aug_seed is not None and len(roots) > 1:
+        if not roots: # Handle case with no clear roots (e.g., all nodes in cycles)
+             start_node = min(G.nodes()) if G.nodes() else -1 # Pick lowest index as arbitrary start
+        elif aug_seed is not None and len(roots) > 1:
             start_node = local_random.choice(roots)
-        elif roots:
+        else:
             start_node = min(roots) # Deterministic fallback
-        else: start_node = min(G.nodes()) if G.nodes() else -1
 
         if start_node != -1:
-            bfs_nodes_order = list(nx.bfs_tree(G, source=start_node)) # Node order from standard BFS
-            # Could potentially randomize neighbor order in nx.bfs_tree for more variation? Not standard.
-            if len(bfs_nodes_order) < G.number_of_nodes():
-                 remaining_nodes = list(set(G.nodes()) - set(bfs_nodes_order))
-                 if aug_seed is not None: local_random.shuffle(remaining_nodes) # Shuffle remaining for augmentation
-                 else: remaining_nodes.sort() # Deterministic order
-                 bfs_nodes_order.extend(remaining_nodes)
-            topo_order = bfs_nodes_order
-        else: topo_order = list(G.nodes())
+            try:
+                bfs_nodes_order = list(nx.bfs_tree(G, source=start_node))
+                # Add remaining nodes not reached by BFS (handles disconnected components/cycles)
+                if len(bfs_nodes_order) < G.number_of_nodes():
+                     remaining_nodes = list(set(G.nodes()) - set(bfs_nodes_order))
+                     if aug_seed is not None: local_random.shuffle(remaining_nodes)
+                     else: remaining_nodes.sort()
+                     bfs_nodes_order.extend(remaining_nodes)
+                topo_order = bfs_nodes_order
+            except Exception as bfs_e: # Catch potential errors during BFS itself
+                 print(f"Warning (Topo Sort): BFS fallback failed: {bfs_e}. Using arbitrary node order.")
+                 topo_order = sorted(list(G.nodes())) # Fallback to sorted node indices
+        else: # No nodes in graph (already handled earlier, but for safety)
+             topo_order = []
 
 
-    # --- Build Node Context (<boc>...<eoc>) ---
-    # Node context order depends on the determined topo_order (potentially randomized in cycle fallback)
+    # --- Build Node Context (<boc>...<eoc>) (Keep as is) ---
     ctx = ['<boc>']
     for node_idx in topo_order:
-        node_token = node_id_to_token_map.get(node_idx, "[UNK]")
-        node_idx_token = node_idx_map.get(node_idx, "IDX_?")
+        node_token = node_id_to_token_map.get(node_idx, "[UNK]") # Use get with fallback
+        node_idx_token = node_idx_map.get(node_idx, f"IDX_{node_idx}") # Use get with fallback
         ctx.extend(['<sepc>', node_token, node_idx_token])
     ctx.append('<eoc>')
 
-    # --- Build Edge Sequence (<bog>...<eog>) ---
+    # --- Build Edge Sequence (<bog>...<eog>) (Keep as is) ---
     outputs = ['<bog>']
     processed_edges = set()
-    # Iterate through nodes in the determined (potentially variable) topo_order
     for u in topo_order:
+        # Ensure node u exists before getting successors
+        if not G.has_node(u): continue
         successors = list(G.successors(u))
-        # !!! Randomize successor order if augmenting !!!
         if aug_seed is not None:
             local_random.shuffle(successors)
         else:
-            successors.sort() # Deterministic order
+            successors.sort()
 
         for v in successors:
+            # Ensure node v exists
+            if not G.has_node(v): continue
             edge_tuple = (u, v)
+            # Check if edge exists in the map (it should if added correctly)
             if edge_tuple in edge_id_to_token_map:
                 edge_token = edge_id_to_token_map[edge_tuple]
-                src_token_str = node_idx_map.get(u)
-                dst_token_str = node_idx_map.get(v)
-                if src_token_str and dst_token_str:
+                src_token_str = node_idx_map.get(u) # Should exist if u is in topo_order
+                dst_token_str = node_idx_map.get(v) # Should exist if v is successor
+                if src_token_str and dst_token_str: # Redundant check, but safe
                     outputs.extend(['<sepg>', src_token_str, dst_token_str, edge_token])
                     processed_edges.add(edge_tuple)
-            # else: (Handle warning if needed)
+            # else: # This case indicates an issue in graph building or map population
+            #    print(f"Warning (Topo): Edge {edge_tuple} present in graph but missing from edge_id_to_token_map.")
+
 
     outputs.append('<eog>')
-    if len(outputs) == 2: outputs = ['<bog>', '<eog>']
+    # Handle case where no edges were processed
+    if len(outputs) == 2: # Only contains <bog> and <eog>
+        outputs = ['<bog>', '<eog>'] # Keep it minimal
 
     # Return dict with list containing one sequence string
     return {"text": [" ".join(ctx + outputs)]}
-
 
 # --- Modified seq_to_nxgraph (no changes needed for augmentation) ---
 def seq_to_nxgraph(seq_str, parsing_mode='strict'):
