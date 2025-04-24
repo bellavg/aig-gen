@@ -20,7 +20,7 @@ module load Anaconda3/2024.06-1
 source activate g2pt-aig
 # f"{dataset}-{model_name}-{ordering}-{num_augmentations}"
 echo "Starting training script..."
-srun python -u train.py configs/datasets/aig.py \
+srun python -u train.py configs/aig.py configs/networks/base.py\
     --dataset=aig \
     --wandb_log=True \
     --ordering=topo \
