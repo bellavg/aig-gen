@@ -259,7 +259,7 @@ model_args = dict(
 if config['init_from'] == 'scratch':
     print("Initializing a new model from scratch")
     # *** IMPORTANT: Set vocab_size from the loaded tokenizer ***
-    model_args['vocab_size'] = tokenizer.vocab_size
+    model_args['vocab_size'] = vocab_size
     print(f"Model vocab size set to: {model_args['vocab_size']}")
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
