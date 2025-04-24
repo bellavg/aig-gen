@@ -1,0 +1,65 @@
+{
+  "train_shape": {
+    "xs": [
+      58216,
+      64
+    ],
+    "edge_indices": [
+      58216,
+      2,
+      105
+    ],
+    "edge_attrs": [
+      58216,
+      105
+    ],
+    "num_inputs": [
+      58216
+    ],
+    "num_outputs": [
+      58216
+    ]
+  },
+  "eval_shape": {
+    "xs": [
+      12475,
+      64
+    ],
+    "edge_indices": [
+      12475,
+      2,
+      105
+    ],
+    "edge_attrs": [
+      12475,
+      105
+    ],
+    "num_inputs": [
+      12475
+    ],
+    "num_outputs": [
+      12475
+    ]
+  },
+  "test_shape": {
+    "xs": [
+      12476,
+      62
+    ],
+    "edge_indices": [
+      12476,
+      2,
+      100
+    ],
+    "edge_attrs": [
+      12476,
+      100
+    ],
+    "num_inputs": [
+      12476
+    ],
+    "num_outputs": [
+      12476
+    ]
+  }
+}

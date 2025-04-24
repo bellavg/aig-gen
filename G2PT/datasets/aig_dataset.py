@@ -165,10 +165,10 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         # Corresponding Vocabulary IDs (Important!) - Matches vocab.json
         # This maps the index (0-3) used internally above to the actual vocab ID
         self.feature_index_to_vocab_id = {
-             0: 97, # CONST0
-             1: 98, # PI
-             2: 99, # AND
-             3: 100 # PO
+             0: 71, # CONST0
+             1: 72, # PI
+             2: 73, # AND
+             3: 74 # PO
         }
         # Reverse map might be useful sometimes
         self.vocab_id_to_feature_index = {v: k for k, v in self.feature_index_to_vocab_id.items()}
@@ -179,8 +179,8 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         self.num_bond_types = len(self.bond_decoder)
          # Maps edge feature index (0-1) to edge vocab ID
         self.edge_feature_index_to_vocab_id = {
-             0: 101, # INV
-             1: 102  # REG
+             0: 75, # INV
+             1: 76  # REG
         }
 
         # --- Statistics ---
@@ -190,7 +190,7 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         self.n_nodes = None         # Distribution of node counts per graph
         self.node_types = None      # Distribution of node type VOCAB IDs (e.g., counts for ID 97, 98, 99, 100)
         self.edge_types = None      # Distribution of edge type VOCAB IDs (e.g., counts for ID 101, 102 + no-edge)
-        self.max_n_nodes = 256      # Default max_n_nodes, will be updated from n_nodes distribution
+        self.max_n_nodes = 64     # Default max_n_nodes, will be updated from n_nodes distribution
 
         # Define path for potential pre-computed statistics
         # Assumes stats are saved relative to the *final* data dir (e.g., './aig/')
@@ -242,10 +242,10 @@ class AIGDatasetInfos(AbstractDatasetInfos):
                 print(f"Determined max_n_nodes from distribution: {self.max_n_nodes}")
             except Exception as e:
                 print(f"Warning: Could not determine max_n_nodes from distribution: {e}. Using default: {self.max_n_nodes}")
-                self.max_n_nodes = 256 # Fallback
+                self.max_n_nodes = 64 # Fallback
         else:
             print(f"Warning: n_nodes distribution not available or invalid. Using default max_n_nodes: {self.max_n_nodes}")
-            self.max_n_nodes = 256 # Fallback
+            self.max_n_nodes = 64 # Fallback
 
         # !!! Crucial: Call complete_infos from the base class !!!
         # It requires self.n_nodes and self.node_types.
@@ -275,7 +275,7 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         """Load placeholder statistics if files are missing or computation fails."""
         print("Loading default placeholder statistics for AIG.")
         # Default max_n_nodes if not determined otherwise
-        max_nodes = getattr(self, 'max_n_nodes', 256)
+        max_nodes = getattr(self, 'max_n_nodes', 64)
         self.n_nodes = torch.zeros(max_nodes + 1, dtype=torch.float)
         # Simple uniform distribution over assumed typical sizes
         if max_nodes >= 20:

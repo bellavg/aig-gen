@@ -10,6 +10,7 @@ import os
 import re
 from functools import partial
 import json
+import warnings
 import networkx as nx
 import random # <-- IMPORT RANDOM
 
@@ -204,8 +205,9 @@ class NumpyBinDataset(Dataset):
     """
     Loads graph data preprocessed into numpy memmap files (.bin).
     Handles data augmentation by multiplying dataset size.
+    Prepends PI/PO count tokens as context to the input sequence.
     """
-    def __init__(self, path, num_data, num_node_class, num_edge_class, shape, process_fn, num_augmentations=1): # <-- Added num_augmentations
+    def __init__(self, path, num_data, num_node_class, num_edge_class, shape, process_fn, tokenizer, num_augmentations=1): # <-- Added tokenizer parameter
         self.path = path
         self.original_num_data = num_data # Store original count
         self.num_augmentations = max(1, num_augmentations) # Ensure at least 1
@@ -213,20 +215,33 @@ class NumpyBinDataset(Dataset):
         self.num_node_class = num_node_class
         self.num_edge_class = num_edge_class
         self.process_fn = process_fn # This will be the partially filled pre_tokenize_function
+        self.tokenizer = tokenizer   # <-- Store tokenizer instance
+        self.ignore_index = -100     # <-- Define ignore index for labels
 
         local_shape = shape.copy()
         try: # Shape validation
-            required_keys = ['xs', 'edge_indices', 'edge_attrs']
-            for key in required_keys: local_shape[key] = tuple(local_shape[key])
-        except KeyError as e: raise KeyError(f"Missing key {e} in shape dict: {local_shape}")
-        except Exception as e: raise RuntimeError(f"Error processing shape dict {local_shape}: {e}")
+            # Ensure count shapes are present
+            required_keys = ['xs', 'edge_indices', 'edge_attrs', 'num_inputs', 'num_outputs']
+            for key in required_keys:
+                if key not in local_shape:
+                     raise KeyError(f"Missing key '{key}' in shape dictionary")
+                local_shape[key] = tuple(local_shape[key])
+        except KeyError as e:
+            raise KeyError(f"Missing required key {e} in shape dict: {local_shape}. Ensure data_meta.json includes shapes for num_inputs and num_outputs.")
+        except Exception as e:
+            raise RuntimeError(f"Error processing shape dict {local_shape}: {e}")
 
         try: # Memmap loading
             self.xs = np.memmap(os.path.join(path, 'xs.bin'), dtype=np.int16, mode='r', shape=local_shape['xs'])
             self.edge_indices = np.memmap(os.path.join(path, 'edge_indices.bin'), dtype=np.int16, mode='r', shape=local_shape['edge_indices'])
             self.edge_attrs = np.memmap(os.path.join(path, 'edge_attrs.bin'), dtype=np.int16, mode='r', shape=local_shape['edge_attrs'])
-        except FileNotFoundError as e: raise FileNotFoundError(f"Error opening memmap files in {path}: {e}")
-        except Exception as e: raise RuntimeError(f"Error setting up memmap in {path} with shapes {local_shape}: {e}")
+            # Load count data
+            self.num_inputs = np.memmap(os.path.join(path, 'num_inputs.bin'), dtype=np.int16, mode='r', shape=local_shape['num_inputs'])
+            self.num_outputs = np.memmap(os.path.join(path, 'num_outputs.bin'), dtype=np.int16, mode='r', shape=local_shape['num_outputs'])
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Error opening memmap files in {path} (including num_inputs.bin/num_outputs.bin): {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error setting up memmap in {path} with shapes {local_shape}: {e}")
 
     def __len__(self):
         # Return augmented length
@@ -241,58 +256,125 @@ class NumpyBinDataset(Dataset):
         aug_idx = idx % self.num_augmentations # Use this as the seed for this augmentation
         aug_seed = aug_idx # Pass augmentation index as the seed
 
-        # Load raw data for the original graph index
+        # --- Get Context Tokens ---
+        try:
+            pi_count = self.num_inputs[graph_idx].item()
+            po_count = self.num_outputs[graph_idx].item()
+
+            # Convert counts to token strings
+            pi_token_str = f"PI_COUNT_{pi_count}"
+            po_token_str = f"PO_COUNT_{po_count}"
+
+            # Get token IDs, fallback to UNK token if specific count token doesn't exist
+            pi_token_id = self.tokenizer.encode(pi_token_str, add_special_tokens=False)[0] \
+                if pi_token_str in self.tokenizer.vocab else self.tokenizer.unk_token_id
+            po_token_id = self.tokenizer.encode(po_token_str, add_special_tokens=False)[0] \
+                if po_token_str in self.tokenizer.vocab else self.tokenizer.unk_token_id
+
+            if pi_token_id == self.tokenizer.unk_token_id:
+                 warnings.warn(f"Token '{pi_token_str}' not found in vocab for graph_idx {graph_idx}. Using UNK token.")
+            if po_token_id == self.tokenizer.unk_token_id:
+                 warnings.warn(f"Token '{po_token_str}' not found in vocab for graph_idx {graph_idx}. Using UNK token.")
+
+            context_token_ids = torch.tensor([pi_token_id, po_token_id], dtype=torch.long)
+
+        except IndexError:
+            # This might happen if original_num_data used for counts was wrong
+            print(f"Error: Original graph index {graph_idx} (from augmented index {idx}) out of bounds for num_inputs/num_outputs arrays.")
+            context_token_ids = torch.tensor([self.tokenizer.unk_token_id, self.tokenizer.unk_token_id], dtype=torch.long) # Fallback
+        except Exception as e:
+            print(f"Error processing counts or getting token IDs for graph_idx {graph_idx}: {e}")
+            context_token_ids = torch.tensor([self.tokenizer.unk_token_id, self.tokenizer.unk_token_id], dtype=torch.long) # Fallback
+        # --- End Context Token Section ---
+
+
+        # Load raw graph data for the original graph index
         try:
             raw_x = np.array(self.xs[graph_idx]).astype(np.int64)
             raw_edge_index = np.array(self.edge_indices[graph_idx]).astype(np.int64)
             raw_edge_attr = np.array(self.edge_attrs[graph_idx]).astype(np.int64)
         except IndexError:
-            # This might happen if original_num_data was wrong
-            print(f"Error: Original graph index {graph_idx} (derived from augmented index {idx}) out of bounds for memmap arrays (original num_data={self.original_num_data}).")
+            # This might happen if original_num_data was wrong for graph data
+            print(f"Error: Original graph index {graph_idx} (from augmented index {idx}) out of bounds for graph memmap arrays.")
             empty_data = {'x': torch.tensor([], dtype=torch.long), 'edge_index': torch.tensor([[], []], dtype=torch.long), 'edge_attr': torch.tensor([], dtype=torch.long)}
-            # Process empty data, passing aug_seed (though it won't be used)
-            return self.process_fn(empty_data, aug_seed=aug_seed) # <-- Pass aug_seed here
+            # Process empty data, still prepend context tokens
+            tokenized_output = self.process_fn(empty_data, aug_seed=aug_seed)
+            # Fall through to the prepending logic below
         except Exception as e:
-            print(f"Error accessing memmap data at original index {graph_idx}: {e}")
+            print(f"Error accessing graph memmap data at original index {graph_idx}: {e}")
             empty_data = {'x': torch.tensor([], dtype=torch.long), 'edge_index': torch.tensor([[], []], dtype=torch.long), 'edge_attr': torch.tensor([], dtype=torch.long)}
-            return self.process_fn(empty_data, aug_seed=aug_seed) # <-- Pass aug_seed here
+            # Process empty data, still prepend context tokens
+            tokenized_output = self.process_fn(empty_data, aug_seed=aug_seed)
+            # Fall through to the prepending logic below
 
 
         # --- Preprocessing (filtering padding, remapping indices) ---
-        # (This logic remains the same as before)
         node_padding_mask = raw_x != -100
         x_ids = torch.from_numpy(raw_x[node_padding_mask])
         num_valid_nodes = len(x_ids)
-        old_indices = np.arange(len(raw_x)); new_indices_map = -np.ones_like(old_indices)
-        new_indices_map[node_padding_mask] = np.arange(num_valid_nodes)
-        if num_valid_nodes == 0:
+
+        if num_valid_nodes == 0: # Handle completely empty graph after filtering
             empty_data = {'x': x_ids, 'edge_index': torch.tensor([[], []], dtype=torch.long), 'edge_attr': torch.tensor([], dtype=torch.long)}
-            return self.process_fn(empty_data, aug_seed=aug_seed) # <-- Pass aug_seed here
+            tokenized_output = self.process_fn(empty_data, aug_seed=aug_seed)
+            # Fall through to the prepending logic below
+        else:
+             old_indices = np.arange(len(raw_x)); new_indices_map = -np.ones_like(old_indices)
+             new_indices_map[node_padding_mask] = np.arange(num_valid_nodes)
 
-        if raw_edge_attr.ndim > 1: raw_edge_attr = raw_edge_attr.flatten()
-        edge_padding_mask = raw_edge_attr != -100
-        edge_attr_ids_filtered_by_attr = torch.from_numpy(raw_edge_attr[edge_padding_mask])
-        if edge_padding_mask.shape[0] != raw_edge_index.shape[1]:
-             edge_index_filtered_by_attr = torch.tensor([[], []], dtype=torch.long)
-             edge_attr_ids_filtered_by_attr = torch.tensor([], dtype=torch.long)
-        else: edge_index_filtered_by_attr = torch.from_numpy(raw_edge_index[:, edge_padding_mask])
+             if raw_edge_attr.ndim > 1: raw_edge_attr = raw_edge_attr.flatten()
+             edge_padding_mask = raw_edge_attr != -100
+             edge_attr_ids_filtered_by_attr = torch.from_numpy(raw_edge_attr[edge_padding_mask])
 
-        if edge_index_filtered_by_attr.numel() > 0:
-             src_nodes_old = edge_index_filtered_by_attr[0, :].numpy(); dst_nodes_old = edge_index_filtered_by_attr[1, :].numpy()
-             src_nodes_new = new_indices_map[src_nodes_old]; dst_nodes_new = new_indices_map[dst_nodes_old]
-             valid_edge_mask = (src_nodes_new != -1) & (dst_nodes_new != -1)
-             edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]], dtype=torch.long)
-             edge_attr_final = edge_attr_ids_filtered_by_attr[valid_edge_mask]
-        else: edge_index_final = torch.tensor([[], []], dtype=torch.long); edge_attr_final = torch.tensor([], dtype=torch.long)
-        # --- End Preprocessing ---
+             # Ensure shapes match before filtering edge indices
+             if edge_padding_mask.shape[0] == raw_edge_index.shape[1]:
+                 edge_index_filtered_by_attr = torch.from_numpy(raw_edge_index[:, edge_padding_mask])
+             else:
+                 # Handle mismatch if needed, e.g., by assuming no valid edges
+                 warnings.warn(f"Shape mismatch between edge_padding_mask ({edge_padding_mask.shape[0]}) and edge_index ({raw_edge_index.shape[1]}) for graph {graph_idx}. Assuming no edges.")
+                 edge_index_filtered_by_attr = torch.tensor([[], []], dtype=torch.long)
+                 edge_attr_ids_filtered_by_attr = torch.tensor([], dtype=torch.long)
 
-        # Prepare the final data dictionary for the sequence generation function
-        data_dict = {'x': x_ids, 'edge_index': edge_index_final, 'edge_attr': edge_attr_final}
 
-        # Pass the dictionary AND the aug_seed to the processing function
-        # The process_fn is partial(pre_tokenize_function, tokenizer=..., order_function=...)
-        # We need to add the aug_seed to the arguments passed by partial
-        return self.process_fn(data_dict, aug_seed=aug_seed) # <-- Pass aug_seed here
+             if edge_index_filtered_by_attr.numel() > 0:
+                 src_nodes_old = edge_index_filtered_by_attr[0, :].numpy(); dst_nodes_old = edge_index_filtered_by_attr[1, :].numpy()
+                 src_nodes_new = new_indices_map[src_nodes_old]; dst_nodes_new = new_indices_map[dst_nodes_old]
+                 valid_edge_mask = (src_nodes_new != -1) & (dst_nodes_new != -1)
+                 edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]], dtype=torch.long)
+                 edge_attr_final = edge_attr_ids_filtered_by_attr[valid_edge_mask]
+             else:
+                 edge_index_final = torch.tensor([[], []], dtype=torch.long); edge_attr_final = torch.tensor([], dtype=torch.long)
+             # --- End Preprocessing ---
+
+             # Prepare the final data dictionary for the sequence generation function
+             data_dict = {'x': x_ids, 'edge_index': edge_index_final, 'edge_attr': edge_attr_final}
+
+             # Pass the dictionary AND the aug_seed to the processing function
+             tokenized_output = self.process_fn(data_dict, aug_seed=aug_seed)
+
+        # --- Prepend context tokens and adjust tensors ---
+        # This block runs even if graph data loading failed or graph was empty,
+        # prepending context to whatever tokenized_output was generated.
+        original_input_ids = tokenized_output['input_ids']
+        original_attn_mask = tokenized_output['attention_mask']
+        original_labels = tokenized_output['labels']
+
+        # Prepend context token IDs
+        new_input_ids = torch.cat((context_token_ids, original_input_ids), dim=0)
+
+        # Prepend 1s to attention mask for context tokens
+        context_attn_mask = torch.ones_like(context_token_ids)
+        new_attn_mask = torch.cat((context_attn_mask, original_attn_mask), dim=0)
+
+        # Prepend padding values (-100) to labels to ignore context tokens during loss calculation
+        context_labels = torch.full_like(context_token_ids, self.ignore_index)
+        new_labels = torch.cat((context_labels, original_labels), dim=0)
+
+        # Return the modified dictionary
+        return {
+            'input_ids': new_input_ids,
+            'attention_mask': new_attn_mask,
+            'labels': new_labels
+        }
 
 
 # --- Modified get_bfs_edge_order ---
@@ -545,13 +627,15 @@ def get_datasets(dataset_name, tokenizer, order='bfs', num_augmentations=1): # <
                                              num_train_original, num_node_classes, num_edge_classes,
                                              shape=train_shape,
                                              process_fn=process_fn,
-                                             num_augmentations=num_augmentations) # <-- Pass augmentation count
+                                             num_augmentations=num_augmentations,
+                                             tokenizer=tokenizer) # <-- Pass augmentation count
             # Typically, augmentation is only applied to the training set
             eval_datasets = NumpyBinDataset(eval_path,
                                             num_eval_original, num_node_classes, num_edge_classes,
                                             shape=eval_shape,
                                             process_fn=process_fn,
-                                            num_augmentations=1) # <-- Eval set usually has no augmentation (num_augmentations=1)
+                                            num_augmentations=1,
+                                            tokenizer=tokenizer) # <-- Eval set usually has no augmentation (num_augmentations=1)
 
         except FileNotFoundError as e: raise FileNotFoundError(f"Error initializing dataset paths: {e}")
         except Exception as e: raise RuntimeError(f"Error creating NumpyBinDataset instances: {e}")
