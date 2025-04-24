@@ -281,7 +281,8 @@ if __name__ == '__main__':
 
     t0 = time.time()
     local_iter_num = 0
-    raw_model = model.module if isinstance(model, (DDP, torch.compile)) else model # Get raw model
+    raw_model = model.module if isinstance(model, DDP) else model  # Get raw model
+
     running_mfu = -1.0
     current_iter = iter_num # Start from loaded iter_num
 
@@ -343,7 +344,7 @@ if __name__ == '__main__':
                 if current_iter % config['log_interval'] == 0 and master_process:
                     lossf = loss.item() * gradient_accumulation_steps
                     if local_iter_num >= 5:
-                         current_raw_model = model.module if isinstance(model, (DDP, torch.compile)) else model
+                         current_raw_model = model.module if isinstance(model, DDP) else model
                          try: # Add try-except for MFU estimation
                               mfu = current_raw_model.estimate_mfu(gradient_accumulation_steps * ddp_world_size * config['batch_size'], dt)
                               running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
@@ -390,7 +391,7 @@ if __name__ == '__main__':
                         elif config['always_save_checkpoint']:
                              evals_no_improve += 1
 
-                        current_raw_model = model.module if isinstance(model, (DDP, torch.compile)) else model
+                        current_raw_model = model.module if isinstance(model, DDP) else model
                         checkpoint = {
                             'model': current_raw_model.state_dict(), 'optimizer': optimizer.state_dict(),
                             'model_args': model_args, 'iter_num': current_iter,
