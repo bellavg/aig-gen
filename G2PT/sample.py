@@ -11,24 +11,32 @@ from transformers import AutoTokenizer
 from datasets_utils import seq_to_nxgraph
 import argparse
 import pickle
+import itertools
 import networkx as nx # Keep nx import if seq_to_nxgraph returns nx objects
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Sample from a trained model')
-    parser.add_argument('--out_dir', type=str, required=True, # Make required
+    parser = argparse.ArgumentParser(description='Sample from a trained model for multiple PI/PO combinations')
+    parser.add_argument('--out_dir', type=str, required=True,
                         help='Directory containing model checkpoint (e.g., results/aig-small-topo)')
-    parser.add_argument('--tokenizer_path', type=str, required=True, # Make required
+    parser.add_argument('--tokenizer_path', type=str, required=True,
                         help='Path to tokenizer (e.g., tokenizers/aig)')
-    parser.add_argument('--batch_size', type=int, default=256, # Adjusted default
-                        help='Batch size for generation')
-    parser.add_argument('--num_samples', type=int, default=1000, # Adjusted default
-                        help='Number of samples to generate')
+    # --- Modified PI/PO arguments ---
+    parser.add_argument('--num_pis', type=int, nargs='+', required=True,
+                        help='List of primary input counts for generated AIGs (e.g., --num_pis 2 3 4)')
+    parser.add_argument('--num_pos', type=int, nargs='+', required=True,
+                        help='List of primary output counts for generated AIGs (e.g., --num_pos 1 2)')
+    # --- Modified num_samples argument ---
+    parser.add_argument('--num_samples_per_combo', type=int, default=100, # Renamed and adjusted default
+                        help='Number of samples to generate *for each* PI/PO combination')
+    # --- End of modified arguments ---
+    parser.add_argument('--batch_size', type=int, default=256,
+                        help='Batch size for generation within each combination')
     parser.add_argument('--seed', type=int, default=1337,
                         help='Random seed')
     parser.add_argument('--temperature', type=float, default=1.0,
                         help='Sampling temperature (1.0 = standard)')
-    parser.add_argument('--output_filename', type=str, default='generated_aigs.pkl',
-                        help='Name for the output pickle file')
+    parser.add_argument('--output_filename', type=str, default='generated_aigs_multi.pkl', # Adjusted default name
+                        help='Name for the output pickle file containing all graphs')
     parser.add_argument('--parsing_mode', type=str, default='strict', choices=['strict', 'robust'],
                         help='Edge sequence parsing mode: strict (fail on non-triplet length) or robust (skip malformed parts)')
 
@@ -168,7 +176,7 @@ def generate_sequences(model, tokenizer, batch_size, num_samples, device, prefix
 
 if __name__ == '__main__':
     args = parse_args()
-    print("--- Starting AIG Sampling Script ---")
+    print("--- Starting AIG Sampling Script for Multiple Combinations ---")
     print(f"Arguments: {args}")
 
     # Ensure the output directory exists
@@ -180,56 +188,92 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
     model = load_model(args.out_dir, device) # Loads the ckpt.pt from out_dir
 
-    # --- Sequence Generation ---
-    prefix = None # AIG usually starts from <boc>
-    with ctx: # Use autocast context if on GPU
-        generated_sequences = generate_sequences(
-            model,
-            tokenizer,
-            args.batch_size,
-            args.num_samples,
-            device,
-            prefix=prefix,
-            temperature=args.temperature,
-        )
-    print(f"Finished generating {len(generated_sequences)} sequences.")
+    # --- Create PI/PO combinations ---
+    pi_po_combinations = list(itertools.product(args.num_pis, args.num_pos))
+    print(f"Found {len(pi_po_combinations)} PI/PO combinations to generate for:")
+    print(pi_po_combinations)
 
-    # --- Convert Sequences to AIG DiGraphs ---
-    print("Converting generated sequences to AIG DiGraphs...")
-    generated_graphs = []
-    num_processed = 0
-    num_errors = 0
+    all_generated_graphs = [] # List to store graphs from all combinations
+    total_sequences_generated = 0
+    total_conversion_errors = 0
+    start_token_str = "<boc>" # Start of the actual graph context
 
-    for i, seq_str in enumerate(generated_sequences):
-        try:
-            # Convert sequence to graph using the function from datasets_utils
-            graph = seq_to_nxgraph(seq_str, parsing_mode=args.parsing_mode)  #  # Should return nx.DiGraph
-            # Basic check: Ensure it's a NetworkX graph object
-            if isinstance(graph, nx.Graph): # Check base class (DiGraph inherits from Graph)
-                generated_graphs.append(graph)
-                num_processed += 1
-            else:
-                print(f"Warning: seq_to_nxgraph did not return a NetworkX graph for sequence {i}. Got {type(graph)}.")
-                num_errors += 1
-        except Exception as e:
-            # Catch errors during seq_to_nxgraph conversion
-            print(f"Error processing sequence {i} to AIG: {e}\nSequence sample: {seq_str[:150]}...")
-            num_errors += 1
+    # --- Loop over each combination ---
+    for combo_idx, (num_pi, num_po) in enumerate(pi_po_combinations):
+        print(f"\n--- Generating for Combination {combo_idx+1}/{len(pi_po_combinations)}: PI={num_pi}, PO={num_po} ---")
 
-    # --- Reporting ---
-    print("\n--- AIG Generation Summary ---")
-    print(f"Total sequences generated   : {len(generated_sequences)}")
-    print(f"Successfully converted    : {num_processed}")
-    print(f"Errors during conversion  : {num_errors}")
-    print("------------------------------")
+        # --- Construct the conditional prefix for this combination ---
+        pi_token_str = f"PI_COUNT_{num_pi}"
+        po_token_str = f"PO_COUNT_{num_po}"
 
-    # --- Saving Results ---
+        # Validate PI/PO tokens exist in tokenizer vocabulary
+        if pi_token_str not in tokenizer.vocab:
+            print(f"Warning: Token '{pi_token_str}' for PI={num_pi} not found in vocab. Skipping this combination.")
+            continue # Skip to the next combination
+        if po_token_str not in tokenizer.vocab:
+            print(f"Warning: Token '{po_token_str}' for PO={num_po} not found in vocab. Skipping this combination.")
+            continue # Skip to the next combination
+
+        # Combine tokens to form the prefix for generation
+        prefix = f"{pi_token_str} {po_token_str} {start_token_str}"
+        print(f"Using generation prefix: '{prefix}'")
+
+        # --- Sequence Generation for this combination ---
+        with ctx: # Use autocast context if on GPU
+            generated_sequences_combo = generate_sequences(
+                model,
+                tokenizer,
+                args.batch_size,
+                args.num_samples_per_combo, # Use the per-combo count
+                device,
+                prefix=prefix, # Pass the constructed prefix for this combo
+                temperature=args.temperature,
+            )
+        print(f"Finished generating {len(generated_sequences_combo)} sequences for PI={num_pi}, PO={num_po}.")
+        total_sequences_generated += len(generated_sequences_combo)
+
+        # --- Convert Sequences to AIG DiGraphs for this combination ---
+        print(f"Converting sequences for PI={num_pi}, PO={num_po}...")
+        num_processed_combo = 0
+        num_errors_combo = 0
+        for i, seq_str in enumerate(generated_sequences_combo):
+            try:
+                graph = seq_to_nxgraph(seq_str, parsing_mode=args.parsing_mode)
+                if isinstance(graph, nx.Graph):
+                    # Optionally add PI/PO info to the graph object itself
+                    graph.graph['num_pis'] = num_pi
+                    graph.graph['num_pos'] = num_po
+                    all_generated_graphs.append(graph) # Add to the main list
+                    num_processed_combo += 1
+                else:
+                    print(f"Warning: seq_to_nxgraph did not return a NetworkX graph for sequence {i} (PI={num_pi}, PO={num_po}). Got {type(graph)}.")
+                    num_errors_combo += 1
+            except Exception as e:
+                print(f"Error processing sequence {i} (PI={num_pi}, PO={num_po}) to AIG: {e}\nSequence sample: {seq_str[:150]}...")
+                num_errors_combo += 1
+        total_conversion_errors += num_errors_combo
+        print(f"Converted {num_processed_combo}/{len(generated_sequences_combo)} sequences for this combination.")
+
+    # --- End of combination loop ---
+
+
+    # --- Final Reporting ---
+    print("\n" + "="*30)
+    print("--- Overall AIG Generation Summary ---")
+    print(f"Combinations processed    : {len(pi_po_combinations)}")
+    print(f"Total sequences generated : {total_sequences_generated}")
+    print(f"Total graphs converted    : {len(all_generated_graphs)}")
+    print(f"Total conversion errors : {total_conversion_errors}")
+    print("="*30 + "\n")
+
+    # --- Saving Combined Results ---
     output_file_path = os.path.join(args.out_dir, args.output_filename)
-    print(f"Saving {len(generated_graphs)} generated AIG DiGraphs to {output_file_path}")
+    print(f"Saving {len(all_generated_graphs)} generated AIG DiGraphs (from all combinations) to {output_file_path}")
     try:
         with open(output_file_path, 'wb') as f:
-            pickle.dump(generated_graphs, f)
+            # Save the list containing graphs from all combinations
+            pickle.dump(all_generated_graphs, f)
     except Exception as e:
-        print(f"Error saving pickle file: {e}")
+        print(f"Error saving combined pickle file: {e}")
 
     print("\n--- AIG Sampling Script Finished ---")
