@@ -194,7 +194,7 @@ def to_seq_aig_topo(data, atom_type, bond_type, aug_seed=None):
     return {"text": [" ".join(ctx + outputs)]}
 
 # --- Modified seq_to_nxgraph (no changes needed for augmentation) ---
-def seq_to_nxgraph(seq_str, parsing_mode='strict'):
+def seq_to_nxgraph(seq_str, parsing_mode='robust'):
     # (This function remains the same)
     # ... (previous implementation) ...
     tokens = seq_str.split()
