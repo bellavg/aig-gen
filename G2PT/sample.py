@@ -81,7 +81,7 @@ def setup_device(seed):
 
 def load_model(out_dir, device):
     # (Loading remains the same as your original code)
-    ckpt_path = os.path.join(out_dir, 'ckpt.pt')
+    ckpt_path = os.path.join(out_dir, 'best.pt')
     print(f"Loading checkpoint from: {ckpt_path}")
     try:
         checkpoint = torch.load(ckpt_path, map_location=device)
@@ -283,40 +283,52 @@ if __name__ == '__main__':
         num_processed_combo = 0
         num_errors_combo = 0
         for i, seq_str in enumerate(generated_sequences_combo):
-             # **Crucial Check:** Ensure the sequence starts correctly after generation
-             # The model should have generated <boc> after the initial prompt tokens.
-             # We need to decode the *full* sequence from model.generate()
-             # and then potentially pass only the <boc>...<eog> part to seq_to_nxgraph if needed,
-             # OR ensure seq_to_nxgraph can handle the prepended tokens (it should ignore them).
-             # Based on seq_to_nxgraph implementation, it looks for <boc>, <eoc> etc.
-             # so passing the full sequence string `seq_str` should be fine.
+            # --- START MODIFICATION ---
+            # Print the raw generated sequence for debugging
+            # print(f"DEBUG (Graph {i}, PI={num_pi}, PO={num_po}): Full generated sequence prefix: {seq_str[:200]}...")
+
+            # Find the start of the actual graph sequence (<boc>)
+            try:
+                # Find the index where the graph structure begins
+                start_graph_idx = seq_str.index("<boc>")
+                # Extract the part of the sequence relevant for graph parsing
+                graph_seq_str = seq_str[start_graph_idx:]
+                # print(f"DEBUG (Graph {i}): Passing to seq_to_nxgraph: {graph_seq_str[:150]}...") # Optional debug print
+            except ValueError:
+                print(
+                    f"Warning (Graph {i}, PI={num_pi}, PO={num_po}): '<boc>' token not found in generated sequence. Cannot parse graph.")
+                print(f"Sequence sample: {seq_str[:150]}...")  # Print sample on error
+                num_errors_combo += 1
+                continue  # Skip this sequence
 
             try:
-                # Make sure seq_to_nxgraph is properly imported or defined
                 if seq_to_nxgraph is None:
                     print("Error: seq_to_nxgraph not available. Cannot convert sequences.")
-                    num_errors_combo = len(generated_sequences_combo) # Mark all as errors
-                    break # Exit inner loop
+                    num_errors_combo = len(generated_sequences_combo)  # Mark all as errors
+                    break  # Exit inner loop
 
-                graph = seq_to_nxgraph(seq_str, parsing_mode=args.parsing_mode)
+                # Pass the *corrected* sequence string (without prepended tokens)
+                graph = seq_to_nxgraph(graph_seq_str, parsing_mode=args.parsing_mode)  # Use graph_seq_str
 
-                if isinstance(graph, nx.DiGraph): # Changed from nx.Graph to nx.DiGraph
-                    # Optionally add PI/PO info to the graph object itself
-                    # (This info is useful for later analysis/debugging)
+                if isinstance(graph, nx.DiGraph) and graph.number_of_nodes() > 0:  # Added check for non-empty graph
                     graph.graph['target_num_pis'] = num_pi
                     graph.graph['target_num_pos'] = num_po
-                    graph.graph['generated_sequence_sample'] = seq_str[:200] # Store prefix for debugging
+                    # Store the *original* full sequence for debugging if needed
+                    graph.graph['full_generated_sequence_sample'] = seq_str[:200]
 
-                    all_generated_graphs.append(graph) # Add to the main list
+                    all_generated_graphs.append(graph)  # Add to the main list
                     num_processed_combo += 1
                 else:
-                    print(f"Warning: seq_to_nxgraph did not return a NetworkX DiGraph for sequence {i} (PI={num_pi}, PO={num_po}). Got {type(graph)}.")
-                    print(f"Sequence sample: {seq_str[:150]}...") # Print sample on conversion failure
+                    # This handles cases where seq_to_nxgraph returns None or an empty graph after parsing
+                    print(
+                        f"Warning: seq_to_nxgraph did not return a valid NetworkX DiGraph for sequence {i} (PI={num_pi}, PO={num_po}).")
+                    # graph_seq_str was already printed if <boc> was found, otherwise seq_str was printed.
                     num_errors_combo += 1
             except Exception as e:
-                print(f"Error processing sequence {i} (PI={num_pi}, PO={num_po}) to AIG: {e}")
-                print(f"Sequence sample: {seq_str[:150]}...") # Print sample on error
+                print(f"Error processing sequence {i} (PI={num_pi}, PO={num_po}) with seq_to_nxgraph: {e}")
+                print(f"Original Sequence sample: {seq_str[:150]}...")  # Print original sequence sample on error
                 num_errors_combo += 1
+
         total_conversion_errors += num_errors_combo
         print(f"Successfully converted {num_processed_combo}/{len(generated_sequences_combo)} sequences for this combination.")
 
