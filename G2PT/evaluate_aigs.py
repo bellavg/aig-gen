@@ -31,6 +31,7 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     """
     Calculates structural AIG validity metrics based on assigned types.
     Counts violations across the graph instead of breaking early.
+    *** MODIFIED: Ignores ALL isolated nodes of type NODE_CONST0. ***
     Returns a dictionary of detailed metrics and violation counts.
     """
     metrics = {
@@ -39,14 +40,14 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         'num_pi': 0, 'num_po': 0, 'num_and': 0, 'num_const0': 0,
         'num_unknown_nodes': 0,
         'num_unknown_edges': 0,
-        'pi_indegree_violations': 0,      # PIs (not node 0) with in-degree != 0
-        'const0_indegree_violations': 0,  # Node 0 (if exists) with in-degree != 0
-        'and_indegree_violations': 0,     # ANDs with in-degree != 2
-        'po_outdegree_violations': 0,     # POs with out-degree != 0
-        'po_indegree_violations': 0,      # POs with in-degree == 0
-        'isolated_nodes': 0,
-        'is_structurally_valid': False, # Overall flag based on critical checks
-        'constraints_failed': [] # List of reasons for failure
+        'pi_indegree_violations': 0,
+        'const0_indegree_violations': 0, # Still check degree for non-isolated const0
+        'and_indegree_violations': 0,
+        'po_outdegree_violations': 0,
+        'po_indegree_violations': 0,
+        'isolated_nodes': 0, # Will count relevant isolates now
+        'is_structurally_valid': False,
+        'constraints_failed': []
     }
 
     num_nodes = G.number_of_nodes()
@@ -54,15 +55,15 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
 
     if not isinstance(G, nx.DiGraph) or num_nodes == 0:
         metrics['constraints_failed'].append("Empty or Invalid Graph Object")
-        return metrics # Return early for invalid input
+        return metrics
 
     # 1. Check DAG property (Critical)
     metrics['is_dag'] = nx.is_directed_acyclic_graph(G)
     if not metrics['is_dag']:
         metrics['constraints_failed'].append("Not a DAG")
-        # Don't return early, continue checking other properties if possible
 
-    # 2. Check Node Types and Basic Degrees
+    # 2. Check Node Types and Basic Degrees (Keep this section as is)
+    # We still need to know the type of each node for the isolation check later
     node_type_counts = Counter()
     unknown_node_indices = []
     for node, data in G.nodes(data=True):
@@ -80,6 +81,8 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         # Check degrees based on assigned type
         if node_type == 'NODE_CONST0':
             metrics['num_const0'] += 1
+            # Still check in-degree for CONST0, as even if isolated,
+            # a connected CONST0 should have in-degree 0.
             if in_deg != 0:
                 metrics['const0_indegree_violations'] += 1
         elif node_type == 'NODE_PI':
@@ -94,12 +97,13 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
             metrics['num_po'] += 1
             if out_deg != 0:
                  metrics['po_outdegree_violations'] += 1
+            # An unconnected PO (in_deg==0) is structurally invalid, even if isolated
             if in_deg == 0:
                  metrics['po_indegree_violations'] += 1
 
+    # Add failure reasons based on type/degree checks (Keep as is)
     if metrics['num_unknown_nodes'] > 0:
         metrics['constraints_failed'].append(f"Found {metrics['num_unknown_nodes']} unknown node types")
-
     if metrics['const0_indegree_violations'] > 0:
         metrics['constraints_failed'].append(f"Found {metrics['const0_indegree_violations']} CONST0 nodes with incorrect in-degree")
     if metrics['pi_indegree_violations'] > 0:
@@ -112,17 +116,15 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         metrics['constraints_failed'].append(f"Found {metrics['po_indegree_violations']} PO nodes with incorrect in-degree (0)")
 
 
-    # 3. Check Edge Types
+    # 3. Check Edge Types (Keep as is)
     for u, v, data in G.edges(data=True):
         edge_type = data.get('type')
-        if edge_type not in VALID_AIG_EDGE_TYPES:
+        if edge_type is not None and edge_type not in VALID_AIG_EDGE_TYPES:
             metrics['num_unknown_edges'] += 1
-
     if metrics['num_unknown_edges'] > 0:
         metrics['constraints_failed'].append(f"Found {metrics['num_unknown_edges']} unknown edge types")
 
-    # 4. Check Basic AIG Requirements
-    # Note: num_pi here includes node 0 if it was typed as PI
+    # 4. Check Basic AIG Requirements (Keep as is)
     if metrics['num_pi'] == 0 and metrics['num_const0'] == 0 :
          metrics['constraints_failed'].append("No Primary Inputs or Const0 found")
     if metrics['num_and'] < MIN_AND_COUNT :
@@ -130,14 +132,27 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     if metrics['num_po'] < MIN_PO_COUNT:
         metrics['constraints_failed'].append(f"Insufficient POs ({metrics['num_po']} < {MIN_PO_COUNT})")
 
-    # 5. Check isolated nodes
-    isolates = list(nx.isolates(G))
-    metrics['isolated_nodes'] = len(isolates)
+    # --- 5. Check isolated nodes MODIFIED ---
+    all_isolates = list(nx.isolates(G))
+    relevant_isolates = []
+    for node_idx in all_isolates:
+        # Get the type of the isolated node
+        isolated_node_type = G.nodes[node_idx].get('type')
+        # Check if the type is NODE_CONST0
+        if isolated_node_type == 'NODE_CONST0':
+            # It's an isolated CONST0 node, ignore it.
+            continue
+        else:
+            # It's an isolated node of another type (PI, PO, AND, Unknown), count it.
+            relevant_isolates.append(node_idx)
+
+    metrics['isolated_nodes'] = len(relevant_isolates) # Count only relevant isolates
     if metrics['isolated_nodes'] > 0:
-        metrics['constraints_failed'].append(f"Found {metrics['isolated_nodes']} isolated nodes")
+        metrics['constraints_failed'].append(f"Found {metrics['isolated_nodes']} relevant isolated nodes (non-CONST0)")
+    # --- End isolated nodes modification ---
+
 
     # Determine overall structural validity based on critical failures
-    # Requires DAG, no unknown types, and no critical degree violations.
     critical_degree_violations = (
         metrics['const0_indegree_violations'] +
         metrics['pi_indegree_violations'] +
@@ -146,17 +161,19 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         metrics['po_indegree_violations']
     ) > 0
 
+    # Use the modified metrics['isolated_nodes'] count here
     if (metrics['is_dag'] and
         metrics['num_unknown_nodes'] == 0 and
         metrics['num_unknown_edges'] == 0 and
         not critical_degree_violations and
-        metrics['num_pi'] + metrics['num_const0'] > 0 and # Must have at least one input source
+        metrics['num_pi'] + metrics['num_const0'] > 0 and
         metrics['num_and'] >= MIN_AND_COUNT and
         metrics['num_po'] >= MIN_PO_COUNT and
-        metrics['isolated_nodes'] == 0):
+        metrics['isolated_nodes'] == 0): # Check uses the filtered count now
         metrics['is_structurally_valid'] = True
 
     return metrics
+
 
 
 def count_pi_po_paths(G: nx.DiGraph) -> Dict[str, Any]:

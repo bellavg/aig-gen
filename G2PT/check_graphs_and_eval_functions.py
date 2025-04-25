@@ -37,7 +37,9 @@ except ImportError:
     exit(1)
 
 # --- Logger Setup ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+# logger = logging.getLogger("validate_input")
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s: %(message)s') # <-- CHANGE HERE
 logger = logging.getLogger("validate_input")
 
 # --- Helper Function (pyg_data_to_nx) ---
@@ -45,10 +47,11 @@ logger = logging.getLogger("validate_input")
 def pyg_data_to_nx(data):
     if not hasattr(data, 'x') or data.x is None: return None
     G = nx.DiGraph(); num_nodes = data.x.size(0)
-    # Assumes data.x stores feature indices 0-3
+    # Assumes data.x stores feature indices 0-3 for node types
     node_feature_idx_to_type = {0: 'NODE_CONST0', 1: 'NODE_PI', 2: 'NODE_AND', 3: 'NODE_PO'}
-    node_types = []
-    if data.x.numel() == 0: return G
+
+    # --- Node Processing (Remains the same) ---
+    if data.x.numel() == 0: return G # Handle empty node features case
 
     if data.x.dim() > 1 and data.x.shape[1] > 1 and data.x.dtype == torch.float:
         type_indices = torch.argmax(data.x, dim=1).tolist()
@@ -64,18 +67,81 @@ def pyg_data_to_nx(data):
             node_type_str = node_feature_idx_to_type.get(node_type_idx, 'UNKNOWN')
             if node_type_str == 'UNKNOWN': logger.warning(f"Unknown node feature index {node_type_idx}.")
             G.add_node(i, type=node_type_str)
-            node_types.append(node_type_str)
         else:
             logger.error(f"Node index mismatch: {num_nodes} vs {len(type_indices)}")
             G.add_node(i, type='UNKNOWN')
+    # --- End Node Processing ---
 
-    # Add edges (no attributes needed for validity check)
-    if hasattr(data, 'edge_index') and data.edge_index is not None and data.edge_index.numel() > 0:
-        edge_index = data.edge_index.cpu().numpy(); num_edges = edge_index.shape[1]
-        for i in range(num_edges):
-            u, v = int(edge_index[0, i]), int(edge_index[1, i])
-            if u in G and v in G: G.add_edge(u, v)
-            else: logger.warning(f"Invalid edge index in PyG data: ({u}, {v}) for max node {num_nodes-1}. Skipping.")
+
+    # --- Edge Processing MODIFIED ---
+    # Check if edge_index and edge_attr exist and are not empty
+    if (hasattr(data, 'edge_index') and data.edge_index is not None and data.edge_index.numel() > 0 and
+        hasattr(data, 'edge_attr') and data.edge_attr is not None and data.edge_attr.numel() > 0):
+
+        edge_index = data.edge_index.cpu() # Keep as tensor
+        edge_attr = data.edge_attr.cpu()   # Keep as tensor
+        num_edges = edge_index.shape[1]
+
+        # Verify that the number of edges matches the number of attributes
+        if num_edges != edge_attr.shape[0]:
+            logger.warning(f"PyG Graph: Mismatch between edge_index ({num_edges} edges) and edge_attr ({edge_attr.shape[0]} attrs). Skipping edge processing.")
+        else:
+            # Define mapping from edge feature index to edge type string
+            # Assumes index 0 is INV, index 1 is REG based on aig_pkl_to_pyg.py logic
+            edge_feature_idx_to_type = {0: 'EDGE_INV', 1: 'EDGE_REG'}
+
+            # Determine edge types from edge_attr (expecting one-hot vectors)
+            try:
+                if edge_attr.dim() > 1 and edge_attr.shape[1] > 1:
+                    # If edge_attr is one-hot (e.g., [1.0, 0.0] or [0.0, 1.0])
+                    edge_type_indices = torch.argmax(edge_attr, dim=1).tolist()
+                elif edge_attr.dim() == 1:
+                     # If edge_attr already contains indices (0 or 1)
+                     edge_type_indices = edge_attr.long().tolist()
+                else:
+                     logger.warning(f"PyG Graph: Unexpected edge_attr shape {edge_attr.shape}. Cannot determine edge types.")
+                     edge_type_indices = [] # Fallback to empty list
+
+            except Exception as e:
+                 logger.error(f"PyG Graph: Error processing edge_attr to get indices: {e}")
+                 edge_type_indices = [] # Fallback
+
+            if len(edge_type_indices) == num_edges:
+                edge_index_np = edge_index.numpy() # Convert index to numpy for iteration
+                for i in range(num_edges):
+                    u, v = int(edge_index_np[0, i]), int(edge_index_np[1, i])
+                    edge_type_idx = edge_type_indices[i]
+                    # Map index to string type
+                    edge_type_str = edge_feature_idx_to_type.get(edge_type_idx, 'UNKNOWN_EDGE')
+
+                    if edge_type_str == 'UNKNOWN_EDGE':
+                        logger.warning(f"PyG Graph: Unknown edge feature index {edge_type_idx} for edge ({u}, {v}).")
+
+                    # Add edge WITH the type attribute
+                    if u in G and v in G:
+                        G.add_edge(u, v, type=edge_type_str) # Assign type here
+                    else:
+                        logger.warning(f"Invalid edge index in PyG data: ({u}, {v}) for max node {num_nodes-1}. Skipping edge.")
+            else:
+                 logger.warning(f"PyG Graph: Could not determine edge type indices correctly. Skipping edge attribute assignment.")
+                 # Fallback: Add edges without type if index determination failed
+                 edge_index_np = edge_index.numpy()
+                 for i in range(num_edges):
+                     u, v = int(edge_index_np[0, i]), int(edge_index_np[1, i])
+                     if u in G and v in G: G.add_edge(u, v) # No type attribute
+                     else: logger.warning(f"Invalid edge index in PyG data: ({u}, {v}). Skipping edge.")
+
+    elif hasattr(data, 'edge_index') and data.edge_index is not None and data.edge_index.numel() > 0:
+         # Case: Edges exist, but edge_attr is missing or empty
+         logger.warning("PyG Graph: edge_index present but edge_attr missing or empty. Adding edges without type attributes.")
+         edge_index_np = data.edge_index.cpu().numpy()
+         num_edges = edge_index_np.shape[1]
+         for i in range(num_edges):
+             u, v = int(edge_index_np[0, i]), int(edge_index_np[1, i])
+             if u in G and v in G: G.add_edge(u, v) # No type attribute
+             else: logger.warning(f"Invalid edge index in PyG data: ({u}, {v}). Skipping edge.")
+    # --- End Edge Processing MODIFIED ---
+
     return G
 
 # --- Helper Function (bin_data_to_nx) ---
@@ -150,8 +216,15 @@ def main(args):
                 if validity_metrics.get('is_structurally_valid', False):
                     pyg_valid_count += 1
                 else:
-                    logger.warning(f"PyG Graph {i}: FAILED structural validity.")
-                    logger.debug(f"  -> Reasons: {validity_metrics.get('constraints_failed', ['Unknown reason'])}")
+                    logger.warning(f"Bin Graph {i}: FAILED structural validity.")
+                    reasons = validity_metrics.get('constraints_failed', [])
+                    print(f"  Bin Graph {i} Failure Reasons: {reasons}")
+                    # --- ADD THIS CHECK ---
+                    if any("isolated nodes" in reason for reason in reasons):
+                        isolates = list(nx.isolates(nx_graph))
+                        print(f"    Bin Graph {i} Isolated Node Indices: {isolates}")
+                    # --- END ADD ---
+                    logger.debug(f"  -> Reasons: {reasons}")
 
             except Exception as e:
                 logger.error(f"Error processing PyG graph index {i}: {e}", exc_info=True)
@@ -245,7 +318,14 @@ def main(args):
                     bin_valid_count += 1
                 else:
                     logger.warning(f"Bin Graph {i}: FAILED structural validity.")
-                    logger.debug(f"  -> Reasons: {validity_metrics.get('constraints_failed', ['Unknown reason'])}")
+                    reasons = validity_metrics.get('constraints_failed', [])
+                    print(f"  Bin Graph {i} Failure Reasons: {reasons}")
+                    # --- ADD THIS CHECK ---
+                    if any("isolated nodes" in reason for reason in reasons):
+                        isolates = list(nx.isolates(nx_graph))
+                        print(f"    Bin Graph {i} Isolated Node Indices: {isolates}")
+                    # --- END ADD ---
+                    logger.debug(f"  -> Reasons: {reasons}")
 
             except Exception as e:
                 logger.error(f"Error processing Bin graph index {i}: {e}", exc_info=True)
