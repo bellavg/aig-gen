@@ -36,7 +36,7 @@ srun python -u sample.py \
     --num_pis 2 3 4 5 6 7 8 \
     --num_pos 1 2 3 4 5 6 7 8 \
     --parsing_mode='robust' \
-    --num_samples_per_combo 447 \
+    --num_samples_per_combo 512 \
     --seed 1337 \
     --output_filename cond_generated_uniform.pkl \
     --batch_size 256
