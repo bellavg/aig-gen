@@ -31,7 +31,7 @@ GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/cond_generated_uniform.pkl"
 # Check if the generated file exists before running evaluation
 if [ -f "$GENERATED_PICKLE_PATH" ]; then
     # Run the evaluation script on the generated pickle file
-    srun python -u evaluate_aigs.py "$GENERATED_PICKLE_PATH"
+    srun python -u thorough_eval.py "$GENERATED_PICKLE_PATH"
 else
     echo "Error: Generated pickle file not found at $GENERATED_PICKLE_PATH. Skipping evaluation."
 fi
