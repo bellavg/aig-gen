@@ -2,7 +2,7 @@
 #SBATCH --job-name=eval_base
 #SBATCH --partition=gpu_h100     # Or another suitable GPU partition
 #SBATCH --gpus=1
-#SBATCH --time=04:00:00          # Adjust time as needed for sampling
+#SBATCH --time=00:59:00          # Adjust time as needed for sampling
 #SBATCH --output=../slurm_logs/eval_thorough_%j.out
 
 # Optional: Load API key if needed by sample/eval scripts (usually not)
