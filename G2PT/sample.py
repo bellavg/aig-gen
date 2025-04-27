@@ -65,7 +65,7 @@ def setup_device(seed):
     return device, ctx
 
 def load_model(out_dir, device):
-    ckpt_path = os.path.join(out_dir, 'ckpt.pt')
+    ckpt_path = os.path.join(out_dir, 'best.pt')
     print(f"Loading checkpoint from: {ckpt_path}")
     try:
         checkpoint = torch.load(ckpt_path, map_location=device)

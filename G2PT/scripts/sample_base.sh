@@ -13,7 +13,7 @@ cd ..
 
 # Ensure output directories exist (sample.py saves inside --out_dir)
 # The evaluation script reads from this directory.
-MODEL_OUT_DIR="results/aig-base-topo-5"
+MODEL_OUT_DIR="results/aig-base-topo"
 mkdir -p slurm_logs
 mkdir -p $MODEL_OUT_DIR # Ensure the model output dir exists
 
