@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100     # Or another suitable GPU partition
 #SBATCH --gpus=1
 #SBATCH --time=04:00:00          # Adjust time as needed for sampling
-#SBATCH --output=../slurm_logs/eval_base_%j.out
+#SBATCH --output=../slurm_logs/eval_thorough_%j.out
 
 # Optional: Load API key if needed by sample/eval scripts (usually not)
 # export WANDB_API_KEY="YOUR_API_KEY"
@@ -26,7 +26,7 @@ source activate g2pt-aig # Use the correct environment name
 
 echo "--- Starting Evaluation Script ---"
 # Define the path to the generated pickle file
-GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/generated_base_robust_aigs.pkl"
+GENERATED_PICKLE_PATH="$MODEL_OUT_DIR/cond_generated_uniform.pkl"
 
 # Check if the generated file exists before running evaluation
 if [ -f "$GENERATED_PICKLE_PATH" ]; then
