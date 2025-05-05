@@ -489,7 +489,7 @@ def main():
                 checkpoint_data = {'model': raw_model.state_dict(), 'optimizer': optimizer.state_dict(),
                                    'model_args': model_args, 'iter_num': iter_num, 'best_val_loss': best_val_loss,
                                    'best_val_validity': best_val_validity, 'evals_no_improve': evals_no_improve,
-                                   'eval_counter': eval_counter, 'config': config}
+                                   'eval_counter': eval_counter}
                 ckpt_path = os.path.join(out_dir, 'ckpt.pt'); best_ckpt_path = os.path.join(out_dir, 'best.pt')
                 temp_ckpt_path = ckpt_path + ".tmp"; temp_best_ckpt_path = best_ckpt_path + ".tmp"
                 try:

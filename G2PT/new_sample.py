@@ -6,6 +6,7 @@ from contextlib import nullcontext
 import torch
 import numpy as np
 from model import GPTConfig, GPT
+import networkx as nx
 from transformers import AutoTokenizer
 from datasets_utils import seq_to_nxgraph
 import argparse
@@ -95,10 +96,31 @@ def get_graphs(model, tokenizer, seed, temperature,
         )
 
     nx_graphs = []
+    num_processed = 0
+    num_errors = 0
 
-    for seq_str in generated_sequences:
-        graph = seq_to_nxgraph(seq_str, parsing_mode)
-        nx_graphs.append(graph)
+    for i, seq_str in enumerate(generated_sequences):
+        try:
+            # Convert sequence to graph using the function from datasets_utils
+            graph = seq_to_nxgraph(seq_str, parsing_mode=parsing_mode)  # # Should return nx.DiGraph
+            # Basic check: Ensure it's a NetworkX graph object
+            if isinstance(graph, nx.Graph):  # Check base class (DiGraph inherits from Graph)
+                nx_graphs.append(graph)
+                num_processed += 1
+            else:
+                print(f"Warning: seq_to_nxgraph did not return a NetworkX graph for sequence {i}. Got {type(graph)}.")
+                num_errors += 1
+        except Exception as e:
+            # Catch errors during seq_to_nxgraph conversion
+            print(f"Error processing sequence {i} to AIG: {e}\nSequence sample: {seq_str[:150]}...")
+            num_errors += 1
+            # --- Reporting ---
+
+    print("\n--- AIG Generation Summary ---")
+    print(f"Total sequences generated   : {len(generated_sequences)}")
+    print(f"Successfully converted    : {num_processed}")
+    print(f"Errors during conversion  : {num_errors}")
+    print("------------------------------")
 
     if save and out_dir is not None:
         import pickle

@@ -103,7 +103,7 @@ def to_seq_aig_topo(data, atom_type, bond_type, aug_seed=None):
     return {"text": [" ".join(ctx + outputs)]}
 
 # --- seq_to_nxgraph ---
-def seq_to_nxgraph(seq_str, parsing_mode='strict'):
+def seq_to_nxgraph(seq_str, parsing_mode='robust'):
     """
     Parses a sequence string back into a NetworkX DiGraph.
     Assigns node/edge types based on the tokens found.
@@ -114,7 +114,7 @@ def seq_to_nxgraph(seq_str, parsing_mode='strict'):
         ctx_start = tokens.index('<boc>') + 1; ctx_end = tokens.index('<eoc>')
         bog_start = tokens.index('<bog>') + 1; eog_end = tokens.index('<eog>')
     except ValueError: return nx.DiGraph() # Malformed
-    ctx_tokens = tokens[ctx_start:ctx_end]
+    ctx_tokens = tokens[ctx_start:ctx_end+1]
     edge_tokens = [t for t in tokens[bog_start:eog_end] if t != '<sepg>']
     G = nx.DiGraph(); node_map = {}; node_data = {}
     idx_pattern = re.compile(r'^IDX_(\d+)$') # Stricter IDX pattern
@@ -243,9 +243,9 @@ def get_datasets(dataset_name, tokenizer, order='topo', num_augmentations=1):
     train_datasets = None; eval_datasets = None; ATOM_TYPE = None; BOND_TYPE = None
     train_shape = None; eval_shape = None
 
-    #dataset_specific_dir = "/Users/bellavg/aig-gen/G2PT/datasets/aig"
+    dataset_specific_dir = "/Users/bellavg/aig-gen/G2PT/datasets/aig"
     # Construct the path to the specific dataset directory (e.g., /path/to/project/datasets/aig/)
-    dataset_specific_dir = os.path.join(aig_cfg.data_dir)
+    #dataset_specific_dir = os.path.join(aig_cfg.data_dir)
     # Construct the path to the metadata file *within* the specific dataset directory
     meta_path = os.path.join(dataset_specific_dir, 'data_meta.json')
     # --- End Path Change ---

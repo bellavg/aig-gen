@@ -13,6 +13,26 @@ import argparse
 import pickle
 import networkx as nx # Keep nx import if seq_to_nxgraph returns nx objects
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Sample from a trained model')
+    parser.add_argument('--out_dir', type=str, required=True, # Make required
+                        help='Directory containing model checkpoint (e.g., results/aig-small-topo)')
+    parser.add_argument('--tokenizer_path', type=str, required=True, # Make required
+                        help='Path to tokenizer (e.g., tokenizers/aig)')
+    parser.add_argument('--batch_size', type=int, default=256, # Adjusted default
+                        help='Batch size for generation')
+    parser.add_argument('--num_samples', type=int, default=1000, # Adjusted default
+                        help='Number of samples to generate')
+    parser.add_argument('--seed', type=int, default=1337,
+                        help='Random seed')
+    parser.add_argument('--temperature', type=float, default=1.0,
+                        help='Sampling temperature (1.0 = standard)')
+    parser.add_argument('--output_filename', type=str, default='generated_aigs.pkl',
+                        help='Name for the output pickle file')
+    parser.add_argument('--parsing_mode', type=str, default='strict', choices=['strict', 'robust'],
+                        help='Edge sequence parsing mode: strict (fail on non-triplet length) or robust (skip malformed parts)')
+
+    return parser.parse_args()
 
 def setup_device(seed):
     # Automatically detect device
@@ -146,22 +166,34 @@ def generate_sequences(model, tokenizer, batch_size, num_samples, device, prefix
     return generated_sequences[:num_samples]
 
 
-def get_graphs(model, tokenizer, seed, batch_size, num_samples,
-               temperature, parsing_mode, save=False, output_file_path=None):
-    # Ensure the output directory exists
-    device, ctx = setup_device(seed)
+if __name__ == '__main__':
+    args = parse_args()
+    print("--- Starting AIG Sampling Script ---")
+    print(f"Arguments: {args}")
 
-    prefix = None  # AIG usually starts from <boc>
-    with ctx:  # Use autocast context if on GPU
+    # Ensure the output directory exists
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    device, ctx = setup_device(args.seed)
+
+    # Load Tokenizer and Model
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
+    model = load_model(args.out_dir, device) # Loads the ckpt.pt from out_dir
+
+    # --- Sequence Generation ---
+    prefix = None # AIG usually starts from <boc>
+    with ctx: # Use autocast context if on GPU
         generated_sequences = generate_sequences(
             model,
             tokenizer,
-            batch_size,
-            num_samples,
+            args.batch_size,
+            args.num_samples,
             device,
             prefix=prefix,
-            temperature=temperature,
+            temperature=args.temperature,
         )
+    print(f"Finished generating {len(generated_sequences)} sequences.")
+
     # --- Convert Sequences to AIG DiGraphs ---
     print("Converting generated sequences to AIG DiGraphs...")
     generated_graphs = []
@@ -171,7 +203,7 @@ def get_graphs(model, tokenizer, seed, batch_size, num_samples,
     for i, seq_str in enumerate(generated_sequences):
         try:
             # Convert sequence to graph using the function from datasets_utils
-            graph = seq_to_nxgraph(seq_str, parsing_mode=parsing_mode)  #  # Should return nx.DiGraph
+            graph = seq_to_nxgraph(seq_str, parsing_mode=args.parsing_mode)  #  # Should return nx.DiGraph
             # Basic check: Ensure it's a NetworkX graph object
             if isinstance(graph, nx.Graph): # Check base class (DiGraph inherits from Graph)
                 generated_graphs.append(graph)
@@ -191,15 +223,13 @@ def get_graphs(model, tokenizer, seed, batch_size, num_samples,
     print(f"Errors during conversion  : {num_errors}")
     print("------------------------------")
 
-    if save and output_file_path is not None:
-        print(f"Saving {len(generated_graphs)} generated AIG DiGraphs to {output_file_path}")
-        try:
-            with open(output_file_path, 'wb') as f:
-                pickle.dump(generated_graphs, f)
-        except Exception as e:
-            print(f"Error saving pickle file: {e}")
+    # --- Saving Results ---
+    output_file_path = os.path.join(args.out_dir, args.output_filename)
+    print(f"Saving {len(generated_graphs)} generated AIG DiGraphs to {output_file_path}")
+    try:
+        with open(output_file_path, 'wb') as f:
+            pickle.dump(generated_graphs, f)
+    except Exception as e:
+        print(f"Error saving pickle file: {e}")
 
-    return generated_graphs
-
-
-
+    print("\n--- AIG Sampling Script Finished ---")

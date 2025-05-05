@@ -277,6 +277,12 @@ def validate_aig_structures(graphs: List[nx.DiGraph]) -> float:
     return validity_fraction
 # --- END FUNCTION ---
 
+# TODO add novelty and uniqueness
+"""Subsequently, we evaluate the generated graphs using dataset-specific metrics under the V.U.N. framework, which measures
+the proportions of valid (V), unique (U), and novel (N) graphs. Validity is determined by dataset-specific criteria: graphs
+must be planar, tree-structured, or statistically consistent with a Stochastic Block Model (SBM) for the planar, tree, and
+SBM datasets, respectively. Uniqueness evaluates the proportion of non-isomorphic graphs among the generated samples,
+while novelty quantifies the proportion of generated graphs that are non-isomorphic to any graph in the training set."""
 
 # --- Main Evaluation Logic (for standalone script execution) ---
 def run_standalone_evaluation(args):
