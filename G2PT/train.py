@@ -23,6 +23,7 @@ logger = logging.getLogger("G2PT_Trainer")
 import configs.aig as aig_cfg
 import  configs.base as net_cfg
 import  configs.train_aig as train_cfg
+import configs.sample_aig as sample_cfg
 from  datasets_utils import get_datasets, seq_to_nxgraph
 from  model import GPT, GPTConfig
 from  evaluate_aigs import validate_aig_structures # Import the validation function
@@ -42,6 +43,7 @@ config = {}
 config.update({k: v for k, v in vars(aig_cfg).items() if not k.startswith('_')})
 config.update({k: v for k, v in vars(net_cfg).items() if not k.startswith('_')})
 config.update({k: v for k, v in vars(train_cfg).items() if not k.startswith('_')})
+config.update({k: v for k, v in vars(sample_cfg).items() if not k.startswith('_')})
 
 # Apply overrides from configurator.py (command line args)
 # This modifies the 'config' dictionary directly.
@@ -115,7 +117,7 @@ dropout = config['dropout']
 bias = config['bias']
 model_name = config['model_name']
 
-# --- NEW: Validity Check Configuration ---
+# --- Validity Check Configuration ---
 # How often to run the validity check (e.g., 2 means every 2nd eval interval)
 validity_check_interval_multiplier = config.get('validity_check_interval_multiplier', 2)
 # Number of graphs to sample for validity check
@@ -231,13 +233,6 @@ try:
     # Use legacy=False if your tokenizer files support it
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_base_path)
     logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.vocab_size}, Max length: {tokenizer.model_max_length}")
-    # --- Vocab Size Check ---
-    if vocab_size is not None and tokenizer.vocab_size != vocab_size:
-         logger.warning(f"Config vocab size ({vocab_size}) does not match tokenizer's ({tokenizer.vocab_size}). Using tokenizer's size.")
-         vocab_size = tokenizer.vocab_size # Prioritize tokenizer's actual size
-    elif vocab_size is None:
-         logger.info(f"Setting vocab_size from tokenizer: {tokenizer.vocab_size}")
-         vocab_size = tokenizer.vocab_size # Set vocab size if not in config
 except Exception as e:
     logger.error(f"Error loading tokenizer from {tokenizer_base_path}: {e}", exc_info=True)
     sys.exit(1)
