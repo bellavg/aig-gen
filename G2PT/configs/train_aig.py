@@ -16,7 +16,7 @@ ordering = 'topo'
 # This will often be combined with run-specific names.
 out_dir_base = 'results'
 # Interval (in iterations) for running evaluation
-eval_interval = 1
+eval_interval = 2
 # Interval (in iterations) for logging training progress
 log_interval = 10
 # Number of iterations to run for evaluation to estimate loss
