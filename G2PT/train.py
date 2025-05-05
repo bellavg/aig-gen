@@ -478,10 +478,13 @@ def main():
             val_loss_improved = not np.isnan(val_loss) and val_loss < best_val_loss
             validity_improved = run_validity_check and current_validity >= 0.0 and current_validity > best_val_validity
             should_save = False; save_reason = []
-            if val_loss_improved:
+            if val_loss_improved and save_on_validity_improve and validity_improved:
                 save_reason.append(f"Loss improved ({best_val_loss:.4f}->{val_loss:.4f})"); best_val_loss = val_loss; evals_no_improve = 0; should_save = True
+                save_reason.append(f"Validity improved ({best_val_validity:.4f}->{current_validity:.4f})"); best_val_validity = current_validity; should_save = True
             elif not val_loss_improved and save_on_validity_improve and validity_improved:
                 save_reason.append(f"Validity improved ({best_val_validity:.4f}->{current_validity:.4f})"); best_val_validity = current_validity; should_save = True
+            elif val_loss_improved:
+                logger.info(f"Loss improved ({best_val_loss:.4f}->{val_loss:.4f})")
             if always_save_checkpoint and not should_save: save_reason.append("Always save"); should_save = True
 
             if should_save and iter_num > 0:

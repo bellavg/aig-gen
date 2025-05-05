@@ -36,54 +36,36 @@ bin_data_exists = os.path.isdir(os.path.join(TEST_DATA_DIR, TEST_SPLIT_NAME)) an
 
 
 # --- Attempt to Import Required Modules ---
-
-# Import from evaluate_aigs (original dependency)
-evaluate_aigs_loaded = False
-# Define dummy functions/vars initially in case import fails
-def calculate_structural_aig_metrics(G): return {'is_structurally_valid': False, 'constraints_failed': ['Import Failed']}
-def count_pi_po_paths(G): return {'error': 'Import Failed'}
-VALID_AIG_NODE_TYPES = {}; VALID_AIG_EDGE_TYPES = {}; NODE_CONST0 = ""; NODE_PI = ""; NODE_AND = ""; NODE_PO = ""; MIN_AND_COUNT_CONFIG = 1; MIN_PO_COUNT_CONFIG = 1
-try:
-    # Assuming evaluate_aigs.py is in G2PT root
-    from evaluate_aigs import (
-        calculate_structural_aig_metrics,
-        count_pi_po_paths,
-        VALID_AIG_NODE_TYPES, VALID_AIG_EDGE_TYPES,
-        NODE_CONST0, NODE_PI, NODE_AND, NODE_PO,
-        MIN_AND_COUNT_CONFIG, MIN_PO_COUNT_CONFIG
-    )
-    evaluate_aigs_loaded = True
-    print("Imported from evaluate_aigs successfully.")
-except ImportError as e:
-    print(f"WARNING: Could not import from evaluate_aigs: {e}. Structural tests will be skipped.")
-    # Dummy functions/vars defined above will be used
-
-# Import from validate_input_data and dataset classes (new dependencies for data tests)
-data_utils_loaded = False # Default to False
-# *** FIX: Define dummy classes/functions BEFORE the try block ***
-def pyg_data_to_nx(data): return None
-def bin_data_to_nx(x, ei, ea): return None
-class AIGPygDataset: pass
-class NumpyBinDataset: pass
+from ..evaluate_aigs import (
+    calculate_structural_aig_metrics,
+    count_pi_po_paths
+)
+from ..configs.aig import (NODE_TYPE_KEYS, EDGE_TYPE_KEYS,
+                           MIN_AND_COUNT, MIN_PO_COUNT, NODE_TYPE_VOCAB)
 
 # Assuming validate_input_data.py is in G2PT root
-from graph_utils import pyg_data_to_nx, bin_data_to_nx
+from .graph_utils import pyg_data_to_nx, bin_data_to_nx
 print("Imported from validate_input_data successfully.")
 
 # Assuming aig_dataset.py is in G2PT/datasets/
-from G2PT.datasets.aig_dataset import AIGPygDataset
+from ..datasets.aig_dataset import AIGPygDataset
 print("Imported AIGPygDataset successfully.")
 
-from G2PT.datasets_utils import NumpyBinDataset
+from ..datasets_utils import NumpyBinDataset
 
-data_utils_loaded = True # Set to True only if all imports succeed without raising ImportError
-
-
+# === REPLACE with ===
+NODE_PI = "NODE_PI"
+NODE_AND = "NODE_AND"
+NODE_PO = "NODE_PO"
+NODE_CONST0 = "NODE_CONST0" # Define it consistently as a string
+# Define edge types if needed for clarity, though your helper uses the string directly
+EDGE_REG = "EDGE_REG"
+EDGE_INV = "EDGE_INV"
 
 
 # --- Unit Test Classes ---
 
-@unittest.skipIf(not evaluate_aigs_loaded, "Skipping structural tests: evaluate_aigs failed to import.")
+
 class TestEvaluateAIGs(unittest.TestCase):
     """Contains unit tests for the core evaluation logic using manually created graphs."""
 
@@ -94,7 +76,7 @@ class TestEvaluateAIGs(unittest.TestCase):
     # --- Helper Methods (Use constants if evaluate_aigs loaded) ---
     def _add_node(self, G, node_id, node_type):
         # Use actual constants if loaded, otherwise use placeholder strings
-        node_type_to_use = node_type if evaluate_aigs_loaded else f"DUMMY_{node_type}"
+        node_type_to_use = node_type
         G.add_node(node_id, type=node_type_to_use)
 
     def _add_edge(self, G, u, v, edge_type="EDGE_REG"):
@@ -192,20 +174,20 @@ class TestEvaluateAIGs(unittest.TestCase):
         self.assertIn("No Primary Inputs or Const0 found", metrics['constraints_failed'])
 
     def test_invalid_missing_and(self):
-        if MIN_AND_COUNT_CONFIG > 0:
+        if MIN_AND_COUNT > 0:
             G = nx.DiGraph(); self._add_node(G, 0, NODE_PI); self._add_node(G, 1, NODE_PO); self._add_edge(G, 0, 1)
             metrics = calculate_structural_aig_metrics(G)
             self.assertFalse(metrics['is_structurally_valid'])
-            self.assertIn(f"Insufficient AND gates (0 < {MIN_AND_COUNT_CONFIG})", "".join(metrics['constraints_failed']))
+            self.assertIn(f"Insufficient AND gates (0 < {MIN_AND_COUNT})", "".join(metrics['constraints_failed']))
         else: self.skipTest("Skipping test because MIN_AND_COUNT_CONFIG is 0.")
 
     def test_invalid_missing_po(self):
-        if MIN_PO_COUNT_CONFIG > 0:
+        if MIN_PO_COUNT > 0:
             G = nx.DiGraph(); self._add_node(G, 0, NODE_PI); self._add_node(G, 1, NODE_PI); self._add_node(G, 2, NODE_AND)
             self._add_edge(G, 0, 2); self._add_edge(G, 1, 2)
             metrics = calculate_structural_aig_metrics(G)
             self.assertFalse(metrics['is_structurally_valid'])
-            self.assertIn(f"Insufficient POs (0 < {MIN_PO_COUNT_CONFIG})", "".join(metrics['constraints_failed']))
+            self.assertIn(f"Insufficient POs (0 < {MIN_PO_COUNT})", "".join(metrics['constraints_failed']))
         else: self.skipTest("Skipping test because MIN_PO_COUNT_CONFIG is 0.")
 
     def test_isolated_node_does_not_invalidate(self):
@@ -273,9 +255,7 @@ class TestEvaluateAIGs(unittest.TestCase):
 
 # --- Data Validation Tests ---
 
-# Use skipIf decorator to skip the whole class if imports failed
-@unittest.skipIf(not data_utils_loaded, "Skipping data validation tests: dataset/validation utils failed to import.")
-@unittest.skipIf(not evaluate_aigs_loaded, "Skipping data validation tests: evaluate_aigs failed to import.")
+
 class TestDataValidation(unittest.TestCase):
     """Contains tests to validate actual dataset files (.pt, .bin) against evaluation logic."""
 
