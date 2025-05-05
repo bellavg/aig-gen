@@ -28,7 +28,7 @@ init_from = 'scratch'
 
 # --- Weights & Biases Logging ---
 # Enable wandb logging if True
-wandb_log = False
+wandb_log = True
 # Wandb project name
 wandb_project = 'real-g2pt'
 # Default Wandb run name (can be None, will be constructed later if logging)

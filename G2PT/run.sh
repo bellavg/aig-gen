@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=g2pt_base_deg
+#SBATCH --job-name=g2pt_real
 #SBATCH --partition=gpu_h100     # Specify the appropriate partition here
 #SBATCH --gpus=1
-#SBATCH --time=00:59:00
-#SBATCH --output=./slurm_logs/g2pt_base_real_%j.out
+#SBATCH --time=12:00:00
+#SBATCH --output=./slurm_logs/real_%j.out
 
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83"
 
