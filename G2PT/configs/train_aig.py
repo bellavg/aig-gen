@@ -40,9 +40,9 @@ wandb_run_name = None
 #TODO think about this?
 
 # total batch size = gradient_accumulation_steps * ddp_world_size * batch_size
-gradient_accumulation_steps = 5 * 8
+gradient_accumulation_steps = 15
 # Micro-batch size (batch size per GPU per forward/backward pass)
-batch_size = 12
+batch_size = 32
 # Total number of training iterations
 max_iters = 60000
 # Early stopping patience (number of evaluations without improvement before stopping)

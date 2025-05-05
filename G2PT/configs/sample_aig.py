@@ -1,7 +1,7 @@
 
-validity_num_samples = 100
+validity_num_samples = 1000
 validity_temperature = 0.6
-validity_gen_batch_size = 100
+validity_gen_batch_size = 256
 seed = 127
 validity_check_interval_multiplier = 2
 save_on_validity_improve = True
