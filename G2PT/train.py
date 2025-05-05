@@ -492,10 +492,10 @@ def estimate_loss(data_loader, split_name):
                 # Pass mask only if the model signature expects it
                 # Adjust this call based on your model's forward method
                 try:
-                     logits, loss = model(X, targets=Y, target_mask=Y_mask) # Example signature
+                     logits, loss = model(X, targets=Y, target_masks=Y_mask) # Example signature
                 except TypeError:
                      # Fallback if model doesn't accept target_mask
-                     logger.debug("Model forward doesn't accept target_mask, calling without it.")
+                     logger.debug("Model forward doesn't accept target_masks, calling without it.")
                      logits, loss = model(X, targets=Y)
 
             losses[k] = loss.item()
@@ -806,7 +806,7 @@ if __name__ == '__main__':
                       with ctx: # Autocast context
                            # Adjust forward call based on model signature
                            try:
-                                logits, loss = model(X, targets=Y, target_mask=Y_mask)
+                                logits, loss = model(X, targets=Y, target_masks=Y_mask)
                            except TypeError:
                                 logits, loss = model(X, targets=Y)
 
