@@ -1,5 +1,6 @@
 """
 Sample from a trained model - AIG Generation Only Version
+Uses Hugging Face generate method after converting the custom model.
 Refactored for use in training script.
 """
 import os
@@ -7,13 +8,14 @@ from contextlib import nullcontext
 import torch
 import numpy as np
 import networkx as nx # Needed for type hint and checking return type
-from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase # For type hints
-from typing import List, Optional # For type hints
+# Use HF types for model and tokenizer
+from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase, GenerationConfig
+from typing import List, Optional, Tuple # For type hints
 
 # --- Module Imports ---
 # Assume model.py and datasets_utils.py are in the same G2PT directory or accessible via PYTHONPATH
 try:
-    from model import GPTConfig, GPT
+    from model import GPTConfig, GPT # Still needed to load the original model config/weights
     # Ensure seq_to_nxgraph is available (it creates DiGraphs)
     from datasets_utils import seq_to_nxgraph
     MODULE_IMPORTS_OK = True
@@ -29,29 +31,29 @@ import logging # Use logging for better feedback
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("g2pt_sampler")
+logger = logging.getLogger("g2pt_sampler_hf_reverted") # Updated logger name
 
 
 def parse_args():
     """Parses command-line arguments for standalone execution."""
-    parser = argparse.ArgumentParser(description='Sample from a trained G2PT model for AIGs')
+    parser = argparse.ArgumentParser(description='Sample from a trained G2PT model for AIGs using HF generate')
     parser.add_argument('--out_dir', type=str, required=True,
                         help='Directory containing model checkpoint (e.g., results/aig-small-topo/ckpt.pt)')
     parser.add_argument('--tokenizer_path', type=str, required=True,
                         help='Path to the trained tokenizer directory (e.g., G2PT/datasets/aig/tokenizer)')
-    parser.add_argument('--batch_size', type=int, default=64, # Smaller default might be safer for varied GPUs
+    parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for generation')
-    parser.add_argument('--num_samples', type=int, default=100, # Smaller default for quicker testing
+    parser.add_argument('--num_samples', type=int, default=100,
                         help='Number of samples to generate')
     parser.add_argument('--seed', type=int, default=1337,
                         help='Random seed for reproducibility')
-    parser.add_argument('--temperature', type=float, default=0.8, # Often better than 1.0 for structured data
+    parser.add_argument('--temperature', type=float, default=0.8,
                         help='Sampling temperature (e.g., 0.8 for less randomness, 1.0 for standard)')
-    parser.add_argument('--top_k', type=int, default=None, # Add top_k option
+    parser.add_argument('--top_k', type=int, default=None,
                         help='Top-k sampling parameter (optional)')
-    parser.add_argument('--max_new_tokens', type=int, default=512, # Control generation length
+    parser.add_argument('--max_new_tokens', type=int, default=512,
                         help='Maximum number of new tokens to generate per sequence')
-    parser.add_argument('--output_filename', type=str, default='generated_aigs.pkl',
+    parser.add_argument('--output_filename', type=str, default='generated_aigs_hf_reverted.pkl', # Changed default name
                         help='Name for the output pickle file (saved in out_dir)')
     parser.add_argument('--parsing_mode', type=str, default='strict', choices=['strict', 'robust'],
                         help='Edge sequence parsing mode for seq_to_nxgraph: strict or robust')
@@ -75,32 +77,21 @@ def setup_device_and_ctx(seed, requested_device=None):
 
     # Determine appropriate dtype based on chosen device
     if 'cuda' in device:
-        # Note: Autocast context handles dtype selection based on device capability
-        # We still set torch defaults for potential non-autocast operations
-        if torch.cuda.is_bf16_supported():
-            dtype_str = 'bfloat16'
-            torch.set_default_dtype(torch.bfloat16)
-        else:
-            dtype_str = 'float16'
-            torch.set_default_dtype(torch.float16)
-        # Enable TF32 for CUDA acceleration if available
+        if torch.cuda.is_bf16_supported(): dtype_str = 'bfloat16'
+        else: dtype_str = 'float16'
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
     else:
         dtype_str = 'float32'
-        torch.set_default_dtype(torch.float32) # Set default for CPU/MPS
-
     logger.info(f"Selected precision mode: {dtype_str}")
 
     # Seed setting
     torch.manual_seed(seed)
-    np.random.seed(seed) # Seed numpy if used indirectly
-    if 'cuda' in device:
-        torch.cuda.manual_seed_all(seed) # Seed all GPUs if applicable
+    np.random.seed(seed)
+    if 'cuda' in device: torch.cuda.manual_seed_all(seed)
 
     # Autocast context
     device_type = 'cuda' if 'cuda' in device else ('mps' if device == 'mps' else 'cpu')
-    # Use the determined dtype for autocast on GPU, float32 otherwise
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype_str]
     ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype, enabled=(device_type != 'cpu'))
     logger.info(f"Autocast context: enabled={device_type != 'cpu'}, device_type='{device_type}', dtype='{ptdtype}'")
@@ -108,71 +99,56 @@ def setup_device_and_ctx(seed, requested_device=None):
     return device, ctx
 
 def load_model_and_tokenizer(out_dir, tokenizer_path, device):
-    """Loads the model checkpoint and tokenizer."""
+    """Loads the model checkpoint, tokenizer, and converts model to HF format."""
     # --- Load Tokenizer ---
     try:
         logger.info(f"Loading tokenizer from: {tokenizer_path}")
-        # Use legacy=False if your tokenizer files support it and were created with it
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True, legacy=False)
-        logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.vocab_size}, Max length: {tokenizer.model_max_length}")
+        # --- Add PAD token if missing ---
+        if tokenizer.pad_token is None:
+             logger.warning("Tokenizer missing PAD token. Adding '<|pad|>' as pad_token.")
+             tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
+        logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.vocab_size}, PAD ID: {tokenizer.pad_token_id}")
     except Exception as e:
         logger.error(f"Error loading tokenizer from {tokenizer_path}: {e}", exc_info=True)
         return None, None
 
     # --- Load Model Checkpoint ---
-    # Allow loading from either ckpt.pt or best.pt for flexibility
     ckpt_path_options = [os.path.join(out_dir, 'ckpt.pt'), os.path.join(out_dir, 'best.pt')]
-    ckpt_path = None
-    for path in ckpt_path_options:
-        if os.path.exists(path):
-            ckpt_path = path
-            break
+    ckpt_path = next((path for path in ckpt_path_options if os.path.exists(path)), None)
 
     if ckpt_path is None:
         logger.error(f"Error: No checkpoint file (ckpt.pt or best.pt) found in {out_dir}")
-        return None, tokenizer # Return tokenizer if loaded
+        return None, tokenizer
 
     logger.info(f"Loading checkpoint from: {ckpt_path}")
     try:
         checkpoint = torch.load(ckpt_path, map_location=device)
-    except FileNotFoundError: # Should be caught above, but double-check
-        logger.error(f"Error: Checkpoint file not found at {ckpt_path}")
-        return None, tokenizer
     except Exception as e:
         logger.error(f"Error loading checkpoint: {e}", exc_info=True)
         return None, tokenizer
 
-    # --- Initialize Model ---
+    # --- Initialize Original Model ---
     try:
-        # Ensure config from checkpoint is used
-        if 'config' in checkpoint and 'model_args' not in checkpoint:
-             # Handle checkpoints saved with older format (config dict)
+        if 'model_args' in checkpoint: model_args = checkpoint['model_args']
+        elif 'config' in checkpoint:
              logger.warning("Loading model args from 'config' dictionary in checkpoint.")
-             cfg = checkpoint['config']
-             # Map relevant keys from config dict to model_args dict
-             model_args = {
-                 'n_layer': cfg.get('n_layer'), 'n_head': cfg.get('n_head'), 'n_embd': cfg.get('n_embd'),
-                 'block_size': cfg.get('block_size'), 'bias': cfg.get('bias', False), # Add default for bias
-                 'vocab_size': cfg.get('vocab_size'), 'dropout': cfg.get('dropout', 0.0) # Add default for dropout
-             }
-             # Ensure critical args are present
-             if None in model_args.values():
+             cfg_dict = vars(checkpoint['config']) if not isinstance(checkpoint['config'], dict) else checkpoint['config']
+             model_args = {'n_layer': cfg_dict.get('n_layer'), 'n_head': cfg_dict.get('n_head'), 'n_embd': cfg_dict.get('n_embd'),
+                           'block_size': cfg_dict.get('block_size'), 'bias': cfg_dict.get('bias', False),
+                           'vocab_size': cfg_dict.get('vocab_size'), 'dropout': cfg_dict.get('dropout', 0.0)}
+             if None in [model_args['n_layer'], model_args['n_head'], model_args['n_embd'], model_args['block_size'], model_args['vocab_size']]:
                  raise ValueError(f"Missing critical model args in checkpoint 'config': {model_args}")
-        elif 'model_args' in checkpoint:
-             logger.info("Loading model args from 'model_args' dictionary in checkpoint.")
-             model_args = checkpoint['model_args']
-        else:
-             raise KeyError("'model_args' or 'config' dictionary not found in checkpoint.")
+        else: raise KeyError("'model_args' or 'config' dictionary not found in checkpoint.")
 
-        # --- Vocab Size Check ---
-        # Ensure model's vocab size matches tokenizer's
+        # --- Vocab Size Check/Update ---
+        # Use tokenizer vocab size for model init if different from checkpoint
         if model_args.get('vocab_size') != tokenizer.vocab_size:
-             logger.warning(f"Checkpoint vocab size ({model_args.get('vocab_size')}) differs from tokenizer ({tokenizer.vocab_size}). Using tokenizer's size.")
+             logger.warning(f"Checkpoint vocab size ({model_args.get('vocab_size')}) differs from tokenizer ({tokenizer.vocab_size}). Initializing model with tokenizer's size.")
              model_args['vocab_size'] = tokenizer.vocab_size
 
         gptconf = GPTConfig(**model_args)
-        model = GPT(gptconf)
-        logger.info(f"Model structure created with {model.get_num_params()/1e6:.2f}M parameters.")
+        model = GPT(gptconf) # Initialize original model structure
 
     except (KeyError, ValueError, TypeError) as e:
         logger.error(f"Error recreating model structure from checkpoint args: {e}", exc_info=True)
@@ -181,74 +157,56 @@ def load_model_and_tokenizer(out_dir, tokenizer_path, device):
         logger.error(f"Unexpected error creating model structure: {e}", exc_info=True)
         return None, tokenizer
 
-
-    # --- Load Model State Dict ---
+    # --- Load State Dict into Original Model ---
     try:
         state_dict = checkpoint['model']
-        # Clean up potential DDP/compile prefixes
         unwanted_prefixes = ['_orig_mod.', '_module.', 'module.']
         cleaned_state_dict = {}
         for k, v in state_dict.items():
-            original_k = k
+            original_k = k; key_modified = False
             for prefix in unwanted_prefixes:
-                if k.startswith(prefix):
-                    k = k[len(prefix):]
-                    break
-            cleaned_state_dict[k] = v
-            # if original_k != k:
-            #     logger.debug(f"Removed prefix from state dict key: {original_k} -> {k}")
+                if k.startswith(prefix): cleaned_state_dict[k[len(prefix):]] = v; key_modified = True; break
+            if not key_modified: cleaned_state_dict[k] = v
 
-        # Adjust for potential size mismatches (e.g., vocab expansion)
-        model.load_state_dict(cleaned_state_dict, strict=False) # Use strict=False initially
-        logger.info("Model state_dict loaded successfully (strict=False).")
+        # Load cleaned state dict into the original model structure
+        load_result = model.load_state_dict(cleaned_state_dict, strict=False)
+        logger.info("Original model state_dict loaded.")
+        if load_result.missing_keys: logger.warning(f"State dict check (Original Model): Missing keys: {load_result.missing_keys}")
+        if load_result.unexpected_keys: logger.warning(f"State dict check (Original Model): Unexpected keys: {load_result.unexpected_keys}")
 
-        # Perform a stricter check afterwards if needed, logging mismatches
-        missing_keys, unexpected_keys = model.load_state_dict(cleaned_state_dict, strict=True)
-        if missing_keys:
-             logger.warning(f"State dict check: Missing keys: {missing_keys}")
-        if unexpected_keys:
-             logger.warning(f"State dict check: Unexpected keys: {unexpected_keys}")
-
-
-    except KeyError:
-        logger.error("Error: 'model' state dict not found in checkpoint.")
-        return None, tokenizer
     except Exception as e:
-        logger.error(f"Error loading model state_dict: {e}", exc_info=True)
+        logger.error(f"Error loading state_dict into original model: {e}", exc_info=True)
         return None, tokenizer
 
-    model.eval() # Set to evaluation mode
-    model.to(device) # Move model to the target device
-    logger.info(f"Model loaded to {device} and set to eval mode.")
+    # --- Convert to Hugging Face Model ---
+    try:
+        logger.info("Converting model to Hugging Face format...")
+        hf_model = model.to_hf()
+        # --- Resize Embeddings if PAD token was added ---
+        if hf_model.config.vocab_size != tokenizer.vocab_size:
+             logger.warning(f"Resizing HF model embeddings from {hf_model.config.vocab_size} to {tokenizer.vocab_size} due to added PAD token.")
+             hf_model.resize_token_embeddings(len(tokenizer))
+             # Ensure the underlying config also reflects this
+             hf_model.config.vocab_size = len(tokenizer)
 
-    # Compile the model (optional, PyTorch 2.0+)
-    # Note: Compilation might add overhead for single/few batch generation
-    # Consider disabling compilation if sampling speed is critical and batches are small
-    # if torch.__version__.startswith("2."):
-    #     logger.info("Compiling the model...")
-    #     try:
-    #         model = torch.compile(model)
-    #         logger.info("Model compiled.")
-    #     except Exception as e:
-    #         logger.warning(f"Model compilation failed: {e}. Proceeding without compilation.")
-    # else:
-    #     logger.info("Torch version < 2.0, skipping model compilation.")
+        logger.info("Successfully converted model to Hugging Face format.")
+    except Exception as e:
+        logger.error(f"Error converting model to Hugging Face format: {e}", exc_info=True)
+        return None, tokenizer # Return None for model if conversion fails
 
+    hf_model.eval() # Set HF model to evaluation mode
+    hf_model.to(device) # Move HF model to the target device
+    logger.info(f"HF Model loaded to {device} and set to eval mode.")
 
-    # Note: The original script converted to Hugging Face format.
-    # This is generally NOT needed if using the original model's generate method.
-    # If the model class itself doesn't have a .generate(), you might need a HF wrapper.
-    # Assuming the provided GPT model class *does* have a .generate() method compatible
-    # with the arguments used below.
-
-    return model, tokenizer
+    # Return the Hugging Face model and the tokenizer
+    return hf_model, tokenizer
 
 
 # --- REFACTORED FUNCTION for Train Script ---
 @torch.no_grad() # Ensure no gradients are calculated during generation/parsing
 def generate_and_parse_aigs(
-    model: torch.nn.Module, # Use base Module type hint
-    tokenizer: PreTrainedTokenizerBase, # Use base Tokenizer type hint
+    model: PreTrainedModel, # Expect HF PreTrainedModel
+    tokenizer: PreTrainedTokenizerBase,
     device: torch.device,
     num_samples: int,
     batch_size: int,
@@ -256,64 +214,64 @@ def generate_and_parse_aigs(
     top_k: Optional[int] = None,
     max_new_tokens: int = 512,
     parsing_mode: str = 'strict',
-    seed: int = 1337 # Allow passing seed for reproducibility within the function
+    seed: int = 1337
     ) -> List[nx.DiGraph]:
     """
-    Generates sequences using the model and parses them into AIG NetworkX graphs.
+    Generates sequences using the HF model and parses them into AIG NetworkX graphs.
 
     Args:
-        model: The trained PyTorch model (must have a .generate method).
+        model: The trained model in Hugging Face format.
         tokenizer: The tokenizer.
         device: The torch device to run generation on.
         num_samples: Total number of AIGs to attempt generating and parsing.
         batch_size: Batch size for the generation process.
         temperature: Sampling temperature.
         top_k: Top-k sampling parameter (optional).
-        max_new_tokens: Maximum number of tokens to generate *after* the start token.
+        max_new_tokens: Maximum number of new tokens to generate *after* the start token.
         parsing_mode: 'strict' or 'robust' for seq_to_nxgraph.
         seed: Random seed for generation reproducibility.
 
     Returns:
         A list of successfully parsed NetworkX DiGraph objects.
-        The list might be shorter than num_samples if parsing errors occur.
     """
     if not MODULE_IMPORTS_OK:
         logger.error("Cannot generate AIGs because module imports failed.")
         return []
-    if not hasattr(model, 'generate'):
-         logger.error("The provided model object does not have a 'generate' method.")
-         return []
+    # No need to check for model.generate, HF models have it
 
-    # Set seed for this specific generation call
-    torch.manual_seed(seed)
-    if 'cuda' in str(device):
-        torch.cuda.manual_seed_all(seed)
+    # Set seed for this specific generation call using a Generator object
+    generator = torch.Generator(device=device).manual_seed(seed)
 
     model.eval() # Ensure model is in eval mode
 
     # --- Determine Start and End Tokens ---
     start_token = "<boc>" # Begin of Circuit token
-    eos_token = "<eog>"   # End of Graph token
+    eos_token_str = "<eog>"   # End of Graph token string
 
     try:
         start_token_id = tokenizer.convert_tokens_to_ids(start_token)
-        input_ids_start = torch.tensor([[start_token_id]], dtype=torch.long, device=device)
+        # Prepare inputs for HF model generate
+        inputs = tokenizer([start_token], return_tensors="pt").to(device) # Prepare prompt for one sample
+        input_ids = inputs["input_ids"]
+        # attention_mask = inputs["attention_mask"] # Usually inferred by HF generate
     except KeyError:
         logger.error(f"Start token '{start_token}' not found in tokenizer vocab! Cannot generate.")
         return []
+    except Exception as e:
+         logger.error(f"Error preparing generation inputs: {e}")
+         return []
 
+    # Get EOS token ID for stopping criteria
     try:
-        eos_token_id = tokenizer.convert_tokens_to_ids(eos_token)
-        logger.info(f"Using EOS token '{eos_token}' (ID: {eos_token_id}).")
+        eos_token_id = tokenizer.convert_tokens_to_ids(eos_token_str)
+        logger.info(f"Using EOS token '{eos_token_str}' (ID: {eos_token_id}) for generation stop.")
     except KeyError:
-        logger.warning(f"EOS token '{eos_token}' not found in tokenizer. Using tokenizer's default EOS or PAD.")
-        # Fallback to tokenizer's default eos_token_id if available, otherwise pad_token_id
-        eos_token_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else tokenizer.pad_token_id
-        if eos_token_id is None:
-             logger.error("Neither specific EOS token nor tokenizer default EOS/PAD token found. Generation might not terminate.")
-             # Consider raising an error or returning empty list if EOS is critical
-             return []
-        logger.warning(f"Using fallback EOS/PAD token ID: {eos_token_id}")
+        logger.warning(f"EOS token '{eos_token_str}' not found in tokenizer. Relying on max_new_tokens or PAD.")
+        eos_token_id = tokenizer.pad_token_id # Use pad as fallback stop ID
+
+    if tokenizer.pad_token_id is None:
+         logger.error("Tokenizer does not have a PAD token ID, which is required by HF generate.")
+         return []
 
 
     # --- Generation Loop ---
@@ -321,35 +279,50 @@ def generate_and_parse_aigs(
     num_batches = (num_samples + batch_size - 1) // batch_size
     logger.info(f"Starting generation for {num_samples} samples in {num_batches} batches (batch size: {batch_size})...")
 
+    # Calculate max_length for HF generate
+    prompt_length = input_ids.shape[1]
+    max_length = prompt_length + max_new_tokens
+
+    # Configure generation parameters using GenerationConfig for clarity
+    generation_config = GenerationConfig(
+        max_length=max_length,
+        eos_token_id=eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+        do_sample=True, # Enable sampling
+        temperature=temperature,
+        top_k=top_k,
+        # top_p=None, # Add top_p if needed
+        # num_return_sequences=1, # Default is 1
+    )
+
     for i in range(num_batches):
-        current_batch_size = min(batch_size, num_samples - len(generated_sequences_text))
-        if current_batch_size <= 0:
-            break # Should not happen with correct loop logic, but safe check
+        current_batch_target = min(batch_size, num_samples - len(generated_sequences_text))
+        if current_batch_target <= 0: break
 
-        logger.info(f"Generating batch {i+1}/{num_batches} (size {current_batch_size})...")
-        batch_start_ids = input_ids_start.repeat(current_batch_size, 1)
+        logger.info(f"Generating batch {i+1}/{num_batches} (target size {current_batch_target})...")
 
-        # Generate sequence IDs
-        # Note: model.generate needs to handle attention mask implicitly or explicitly if needed
-        # The base GPT model's generate might not use attention_mask in the same way as HF's
-        # Ensure the model's generate method signature matches these arguments.
+        # Repeat the prompt for the current batch size
+        batch_input_ids = input_ids.repeat(current_batch_target, 1)
+        # batch_attention_mask = attention_mask.repeat(current_batch_target, 1) # If needed
+
+        # --- Call Hugging Face model's generate method ---
+        # Pass the generator object for reproducibility
         output_ids = model.generate(
-            batch_start_ids,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            eos_token_id=eos_token_id
-            # Removed pad_token_id, let generate handle padding/stopping via eos_token_id
-            # Removed do_sample=True, assuming model.generate does sampling by default if temp > 0
-        ) # Shape: (batch_size, sequence_length)
+            inputs=batch_input_ids, # Use 'inputs' argument
+            # attention_mask=batch_attention_mask, # Can often be omitted
+            generation_config=generation_config,
+            generator=generator # Pass generator for reproducibility
+        ) # Shape: (current_batch_target, sequence_length)
+        # --- End HF Call ---
 
         # Decode the generated IDs into strings
-        # Slice generated IDs to remove the input start token ID: output_ids[:, input_ids_start.shape[1]:]
-        # Decode, skipping special tokens like padding *during decoding* if desired,
-        # but keep BOC/EOG for parsing if seq_to_nxgraph expects them.
-        # Let's keep special tokens for now as seq_to_nxgraph might need them.
-        seq_strs = tokenizer.batch_decode(output_ids, skip_special_tokens=False)
-        generated_sequences_text.extend(seq_strs)
+        # Keep special tokens as seq_to_nxgraph might need them
+        # Skip prompt tokens during decoding
+        seq_strs = tokenizer.batch_decode(output_ids[:, prompt_length:], skip_special_tokens=False)
+        # Prepend the start token back manually if seq_to_nxgraph needs it
+        full_seq_strs = [start_token + " " + s for s in seq_strs]
+
+        generated_sequences_text.extend(full_seq_strs)
         logger.info(f"Batch {i+1} generated {len(seq_strs)} sequences.")
 
     logger.info(f"Finished generating {len(generated_sequences_text)} raw sequences.")
@@ -361,11 +334,7 @@ def generate_and_parse_aigs(
 
     for i, seq_str in enumerate(generated_sequences_text):
         try:
-            # Remove potential padding tokens before parsing, but keep BOC/EOG etc.
-            # This depends heavily on what seq_to_nxgraph expects.
             # Assuming seq_to_nxgraph handles the full string including special tokens.
-            # clean_seq = seq_str.replace(tokenizer.pad_token, "").strip() # Example cleaning
-
             graph = seq_to_nxgraph(seq_str, parsing_mode=parsing_mode)
 
             if isinstance(graph, nx.DiGraph): # Check specifically for DiGraph
@@ -391,31 +360,27 @@ if __name__ == '__main__':
         exit(1) # Exit if imports failed
 
     args = parse_args()
-    logger.info("--- Starting AIG Sampling Script (Standalone) ---")
-    logger.info(f"Arguments: {vars(args)}") # Log arguments as dict
+    logger.info("--- Starting AIG Sampling Script (Using HF Generate) ---")
+    logger.info(f"Arguments: {vars(args)}")
 
-    # Ensure the output directory exists (relative to the script's execution path)
-    # If out_dir is intended to be relative to the script location, fine.
-    # If it's absolute, this is also fine.
-    # If it's relative to *data*, adjust path construction.
+    # Ensure the output directory exists
     abs_out_dir = os.path.abspath(args.out_dir)
     os.makedirs(abs_out_dir, exist_ok=True)
     logger.info(f"Output directory: {abs_out_dir}")
 
-
     device, ctx = setup_device_and_ctx(args.seed, args.device)
 
-    # Load Tokenizer and Model
-    model, tokenizer = load_model_and_tokenizer(args.out_dir, args.tokenizer_path, device)
+    # Load Tokenizer and HF Model
+    hf_model, tokenizer = load_model_and_tokenizer(args.out_dir, args.tokenizer_path, device)
 
-    if model is None or tokenizer is None:
+    if hf_model is None or tokenizer is None:
         logger.error("Failed to load model or tokenizer. Exiting.")
         exit(1)
 
     # --- Generate and Parse ---
-    with ctx: # Use autocast context for generation
+    with ctx: # Use autocast context if on GPU
         generated_graphs = generate_and_parse_aigs(
-            model=model,
+            model=hf_model, # Pass the HF model
             tokenizer=tokenizer,
             device=device,
             num_samples=args.num_samples,
