@@ -243,9 +243,9 @@ def get_datasets(dataset_name, tokenizer, order='topo', num_augmentations=1):
     train_datasets = None; eval_datasets = None; ATOM_TYPE = None; BOND_TYPE = None
     train_shape = None; eval_shape = None
 
-    dataset_specific_dir = "/Users/bellavg/aig-gen/G2PT/datasets/aig"
+    #dataset_specific_dir = "/Users/bellavg/aig-gen/G2PT/datasets/aig"
     # Construct the path to the specific dataset directory (e.g., /path/to/project/datasets/aig/)
-    #dataset_specific_dir = os.path.join(aig_cfg.data_dir)
+    dataset_specific_dir = os.path.join(aig_cfg.data_dir)
     # Construct the path to the metadata file *within* the specific dataset directory
     meta_path = os.path.join(dataset_specific_dir, 'data_meta.json')
     # --- End Path Change ---
