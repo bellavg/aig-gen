@@ -1,3 +1,5 @@
+
+
 """
 Full definition of a GPT Language Model, all of it in this single file.
 References:
@@ -166,7 +168,7 @@ class GPT(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            
+
     def log_probs(self, idx):
         device = idx.device
         b, t = idx.size()
@@ -182,7 +184,7 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
         return logits
-    
+
     def forward(self, idx, targets=None, target_masks=None, return_all_logits=False):
         device = idx.device
         b, t = idx.size()
@@ -193,7 +195,7 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
-      
+
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -205,7 +207,7 @@ class GPT(nn.Module):
             # print(loss.shape, target_masks.shape)
             target_masks = target_masks.reshape(-1)
             loss = (loss * target_masks.float()).sum() / target_masks.sum()
-            
+
         else:
             if return_all_logits:
                 logits = self.lm_head(x)
@@ -248,11 +250,11 @@ class GPT(nn.Module):
                 sd[k] = torch.zeros_like(hf_state_dict[k])
             if any(n in k for n in ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']):
                 sd[k] = sd[k].T
-                
+
         hf_model.load_state_dict(sd)
         return hf_model
 
-    
+
     @classmethod
     def from_pretrained(cls, model_type, override_args=None):
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}

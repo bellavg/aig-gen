@@ -1,0 +1,211 @@
+Loaded processed PyG data for split 'train' from ../datasets/aig/processed/aig_processed_train.pt
+2025-04-28 12:30:42,398 - INFO - Dataset loaded successfully. Split 'train' contains 58216 graphs.
+2025-04-28 12:30:42,398 - INFO - Will iterate through up to 1000 graphs to find 5 examples smaller than 10 nodes.
+2025-04-28 12:30:42,398 - INFO - Using Topological ordering for sequence generation.
+2025-04-28 12:30:42,398 - INFO - Testing 5 augmentations per small graph found.
+2025-04-28 12:30:42,411 - INFO - Graph 95: Found potential small graph with 8 nodes. Processing...
+2025-04-28 12:30:42,422 - INFO - Successfully processed and printed small graph 95. (1/5 examples found).
+--- Example Sequence (Small Graph) ---
+Graph Index: 95
+Node Count: 8
+Augmentation Index (Seed): 0
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_3 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 95
+Node Count: 8
+Augmentation Index (Seed): 1
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 95
+Node Count: 8
+Augmentation Index (Seed): 2
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 95
+Node Count: 8
+Augmentation Index (Seed): 3
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 95
+Node Count: 8
+Augmentation Index (Seed): 4
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_3 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+2025-04-28 12:30:42,437 - INFO - Graph 321: Found potential small graph with 10 nodes. Processing...
+2025-04-28 12:30:42,439 - INFO - Successfully processed and printed small graph 321. (2/5 examples found).
+2025-04-28 12:30:42,440 - INFO - Graph 345: Found potential small graph with 10 nodes. Processing...
+2025-04-28 12:30:42,441 - INFO - Successfully processed and printed small graph 345. (3/5 examples found).
+2025-04-28 12:30:42,442 - INFO - Graph 357: Found potential small graph with 8 nodes. Processing...
+2025-04-28 12:30:42,443 - INFO - Successfully processed and printed small graph 357. (4/5 examples found).
+--- Example Sequence (Small Graph) ---
+Graph Index: 321
+Node Count: 10
+Augmentation Index (Seed): 0
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_3 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <sepc> NODE_PO IDX_9 <eoc> <bog> <sepg> IDX_2 IDX_4 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_1 IDX_5 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_4 IDX_7 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_5 IDX_8 EDGE_REG <sepg> IDX_6 IDX_9 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 321
+Node Count: 10
+Augmentation Index (Seed): 1
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <sepc> NODE_PO IDX_8 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_9 <eoc> <bog> <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_1 IDX_5 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_4 IDX_7 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_5 IDX_8 EDGE_REG <sepg> IDX_6 IDX_9 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 321
+Node Count: 10
+Augmentation Index (Seed): 2
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <sepc> NODE_PO IDX_9 <eoc> <bog> <sepg> IDX_1 IDX_5 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_4 IDX_7 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_5 IDX_8 EDGE_REG <sepg> IDX_6 IDX_9 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 321
+Node Count: 10
+Augmentation Index (Seed): 3
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <sepc> NODE_PO IDX_9 <eoc> <bog> <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_REG <sepg> IDX_1 IDX_5 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_4 IDX_7 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_5 IDX_8 EDGE_REG <sepg> IDX_6 IDX_9 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 321
+Node Count: 10
+Augmentation Index (Seed): 4
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_3 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <sepc> NODE_PO IDX_9 <eoc> <bog> <sepg> IDX_2 IDX_4 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_1 IDX_5 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_4 IDX_7 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_8 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_9 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 345
+Node Count: 10
+Augmentation Index (Seed): 0
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_3 <sepc> NODE_AND IDX_7 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_9 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_INV <sepg> IDX_2 IDX_7 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_7 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_7 IDX_9 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_8 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 345
+Node Count: 10
+Augmentation Index (Seed): 1
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_9 <sepc> NODE_PO IDX_8 <eoc> <bog> <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_2 IDX_5 EDGE_INV <sepg> IDX_2 IDX_7 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_7 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_7 IDX_9 EDGE_REG <sepg> IDX_6 IDX_8 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 345
+Node Count: 10
+Augmentation Index (Seed): 2
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_7 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_9 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_8 <eoc> <bog> <sepg> IDX_1 IDX_7 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_2 IDX_5 EDGE_INV <sepg> IDX_2 IDX_7 EDGE_INV <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_7 IDX_9 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_8 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 345
+Node Count: 10
+Augmentation Index (Seed): 3
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_9 <sepc> NODE_PO IDX_8 <eoc> <bog> <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_2 IDX_7 EDGE_INV <sepg> IDX_2 IDX_5 EDGE_INV <sepg> IDX_1 IDX_7 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_7 IDX_9 EDGE_REG <sepg> IDX_6 IDX_8 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 345
+Node Count: 10
+Augmentation Index (Seed): 4
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_3 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_7 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_9 <sepc> NODE_PO IDX_8 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_INV <sepg> IDX_2 IDX_7 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_INV <sepg> IDX_1 IDX_7 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_7 IDX_9 EDGE_REG <sepg> IDX_6 IDX_8 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 357
+Node Count: 8
+Augmentation Index (Seed): 0
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_3 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 357
+Node Count: 8
+Augmentation Index (Seed): 1
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_3 IDX_4 EDGE_REG <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 357
+Node Count: 8
+Augmentation Index (Seed): 2
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_5 EDGE_REG <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_REG <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 357
+Node Count: 8
+Augmentation Index (Seed): 3
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_3 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_3 IDX_4 EDGE_REG <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_5 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 357
+Node Count: 8
+Augmentation Index (Seed): 4
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_3 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_AND IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_5 EDGE_REG <sepg> IDX_3 IDX_4 EDGE_REG <sepg> IDX_1 IDX_4 EDGE_INV <sepg> IDX_1 IDX_5 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_INV <sepg> IDX_5 IDX_6 EDGE_INV <sepg> IDX_6 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 651
+Node Count: 8
+Augmentation Index (Seed): 0
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_CONST0 IDX_0 <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_3 <sepc> NODE_PO IDX_6 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_3 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_INV <sepg> IDX_1 IDX_3 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_4 IDX_5 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_INV <sepg> IDX_5 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 651
+Node Count: 8
+Augmentation Index (Seed): 1
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_3 <sepc> NODE_AND IDX_4 <sepc> NODE_PO IDX_6 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_1 IDX_3 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_2 IDX_3 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_INV <sepg> IDX_4 IDX_5 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_REG <sepg> IDX_5 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 651
+Node Count: 8
+Augmentation Index (Seed): 2
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_3 <sepc> NODE_PO IDX_6 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_1 IDX_3 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_INV <sepg> IDX_2 IDX_3 EDGE_REG <sepg> IDX_4 IDX_5 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_INV <sepg> IDX_5 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 651
+Node Count: 8
+Augmentation Index (Seed): 3
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_1 <sepc> NODE_PI IDX_2 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_3 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_6 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_1 IDX_3 EDGE_INV <sepg> IDX_2 IDX_4 EDGE_INV <sepg> IDX_2 IDX_3 EDGE_REG <sepg> IDX_3 IDX_5 EDGE_INV <sepg> IDX_4 IDX_5 EDGE_INV <sepg> IDX_4 IDX_6 EDGE_REG <sepg> IDX_5 IDX_7 EDGE_REG <eog>
+------------------------------------
+--- Example Sequence (Small Graph) ---
+Graph Index: 651
+Node Count: 8
+Augmentation Index (Seed): 4
+Ordering: Topological
+Sequence: <boc> <sepc> NODE_PI IDX_2 <sepc> NODE_PI IDX_1 <sepc> NODE_CONST0 IDX_0 <sepc> NODE_AND IDX_4 <sepc> NODE_AND IDX_3 <sepc> NODE_PO IDX_6 <sepc> NODE_AND IDX_5 <sepc> NODE_PO IDX_7 <eoc> <bog> <sepg> IDX_2 IDX_3 EDGE_REG <sepg> IDX_2 IDX_4 EDGE_INV <sepg> IDX_1 IDX_3 EDGE_INV <sepg> IDX_1 IDX_4 EDGE_REG <sepg> IDX_4 IDX_6 EDGE_REG <sepg> IDX_4 IDX_5 EDGE_INV <sepg> IDX_3 IDX_5 EDGE_INV <sepg> IDX_5 IDX_7 EDGE_REG <eog>
+------------------------------------
+
+--- Augmentation & Conversion Check Summary (Topological Ordering) ---
+Graphs Iterated Through:           1000
+Small Graphs Found & Processed:    5
+Target Small Graph Examples:       5
+Augmentations Requested per Graph: 5
+---------------------------------------------
+Sequence->Graph Warnings:          0
+Graphs Failing Validity/Iso Check: 0
+Graphs Passing All Checks:         5
+---------------------------------------------
+Graphs Producing >1 Sequence:      5 / 5
+Avg. Unique Sequences per Graph:   4.80
+---------------------------------------------
+Overall Success Rate (Validity/Iso): 100.00% (Based on processed small graphs)
+Total Time:                        22.41 seconds
+-----------------------------------------------------------
+2025-04-28 12:30:42,460 - INFO - Graph 651: Found potential small graph with 8 nodes. Processing...
+2025-04-28 12:30:42,461 - INFO - Successfully processed and printed small graph 651. (5/5 examples found).
+2025-04-28 12:30:42,461 - INFO - Found desired number of small graph examples (5). Stopping search.
+2025-04-28 12:30:42,461 - INFO - Finished searching for small graphs with Topological ordering.
+
+Process finished with exit code 0

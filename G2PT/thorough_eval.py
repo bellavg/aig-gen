@@ -13,15 +13,7 @@ import math # For histogram bins
 import copy
 
 
-# --- Constants ---
-# (Keep existing constants)
-VALID_AIG_NODE_TYPES = {'NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO'}
-VALID_AIG_EDGE_TYPES = {'EDGE_INV', 'EDGE_REG'}
-MAX_PI_COUNT = 14
-MIN_PI_COUNT = 2
-MIN_AND_COUNT = 1
-MIN_PO_COUNT = 1
-MAX_PO_COUNT = 30
+
 
 # --- Logger Setup ---
 # (Keep existing logger setup)

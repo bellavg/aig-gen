@@ -1,10 +1,10 @@
-from .utils import *
+from G2PT.datasets.utils import *
 import torch
 from torch_geometric.data.lightning import LightningDataset
-
+from G2PT.configs.aig import MAX_NODE_COUNT
 class AbstractDataModule(LightningDataset):
     def __init__(self, cfg, datasets):
-        super().__init__(train_dataset=datasets['train'], val_dataset=datasets['val'], test_dataset=datasets['test'],
+        super().__init__(train_dataset=datasets['train'], val_dataset=datasets['val'],
                          batch_size=cfg.train.batch_size if 'debug' not in cfg.general.name else 2,
                          num_workers=cfg.train.num_workers,
                          pin_memory=getattr(cfg.dataset, "pin_memory", False))
@@ -19,8 +19,8 @@ class AbstractDataModule(LightningDataset):
         self.dataloaders = {}
         self.dataloaders["train"] = self.train_dataloader()
         self.dataloaders["val"] = self.val_dataloader()
-        self.dataloaders["test"] = self.test_dataloader()
-    def node_counts(self, max_nodes_possible=300):
+        #self.dataloaders["test"] = self.test_dataloader()
+    def node_counts(self, max_nodes_possible=MAX_NODE_COUNT):
         all_counts = torch.zeros(max_nodes_possible)
         for loader in [self.train_dataloader(), self.val_dataloader()]:
             for data in loader:
@@ -138,23 +138,23 @@ class AbstractDataModule(LightningDataset):
 #         return d
 
 
-class MolecularDataModule(AbstractDataModule):
-    def valency_count(self, max_n_nodes):
-        valencies = torch.zeros(3 * max_n_nodes - 2)   # Max valency possible if everything is connected
-
-        # No bond, single bond, double bond, triple bond, aromatic bond
-        multiplier = torch.tensor([0, 1, 2, 3, 1.5])
-
-        for data in self.train_dataloader():
-            n = data.x.shape[0]
-
-            for atom in range(n):
-                edges = data.edge_attr[data.edge_index[0] == atom]
-                edges_total = edges.sum(dim=0)
-                valency = (edges_total * multiplier).sum()
-                valencies[valency.long().item()] += 1
-        valencies = valencies / valencies.sum()
-        return valencies
+# class MolecularDataModule(AbstractDataModule):
+#     def valency_count(self, max_n_nodes):
+#         valencies = torch.zeros(3 * max_n_nodes - 2)   # Max valency possible if everything is connected
+#
+#         # No bond, single bond, double bond, triple bond, aromatic bond
+#         multiplier = torch.tensor([0, 1, 2, 3, 1.5])
+#
+#         for data in self.train_dataloader():
+#             n = data.x.shape[0]
+#
+#             for atom in range(n):
+#                 edges = data.edge_attr[data.edge_index[0] == atom]
+#                 edges_total = edges.sum(dim=0)
+#                 valency = (edges_total * multiplier).sum()
+#                 valencies[valency.long().item()] += 1
+#         valencies = valencies / valencies.sum()
+#         return valencies
 
 
 class AbstractDatasetInfos:

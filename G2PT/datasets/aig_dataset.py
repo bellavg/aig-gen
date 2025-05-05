@@ -1,70 +1,100 @@
-# G2PT/datasets/aig_pyg_dataset.py
-# Defines Dataset and DataModule for loading pre-processed AIG PyG .pt files
+# G2PT/datasets/aig_dataset.py
+# Defines Dataset and DataModule for loading pre-processed AIG PyG .pt files.
+# Expects single raw files (train.pt, val.pt, test.pt) per split.
+# MODIFIED: Only initializes datasets for splits where the raw file exists,
+#           assigns None to missing splits before passing to the base class.
 
 import os
 import pathlib
 import torch
 import numpy as np
 from torch_geometric.data import Data, InMemoryDataset
-# Adjust import path based on your directory structure
-# If aig_pyg_dataset.py is inside 'datasets', this should work:
-from .abstract_dataset import AbstractDataModule, AbstractDatasetInfos
+import sys # Added sys import for path adjustment if needed
+import gc # Added gc import
+from G2PT.datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
+
+# Import the AIG configuration directly (needed for stats info and vocab details)
+try:
+    import G2PT.configs.aig as aig_cfg
+    print(f"Successfully imported G2PT.configs.aig.")
+except ImportError as e:
+    print(f"Error importing G2PT.configs.aig: {e}")
+    print("Ensure G2PT/configs/aig.py exists and G2PT is in the Python path.")
+    sys.exit(1)
+
 
 class AIGPygDataset(InMemoryDataset):
     """
     Loads pre-processed PyTorch Geometric Data objects for AIGs
     from saved .pt files (train.pt, val.pt, test.pt).
-    Assumes files are located in root/raw/.
+    Assumes raw files are located in root/raw/.
+    Processed data is saved in root/processed/.
     """
     def __init__(self, split, root, transform=None, pre_transform=None, pre_filter=None):
+        """
+        Initializes the dataset for a specific split.
+
+        Args:
+            split (str): The dataset split ('train', 'val', or 'test').
+            root (str): The root directory where 'raw/' and 'processed/' subfolders reside or will be created.
+            transform: PyG transforms applied after loading.
+            pre_transform: PyG transforms applied before saving processed data.
+            pre_filter: PyG pre-filtering applied before saving processed data.
+        """
         self.split = split
-        # root should be './aig_pyg/' (the directory containing 'raw' and 'processed')
+        print(f"AIGPygDataset '{split}': Initializing with root='{root}'")
         super().__init__(root, transform, pre_transform, pre_filter)
-        # Load processed data
+        # Load the single processed data file (if it exists)
         try:
+            # self.processed_paths[0] points to root/processed/aig_processed_{split}.pt
             self.data, self.slices = torch.load(self.processed_paths[0])
             print(f"Loaded processed PyG data for split '{split}' from {self.processed_paths[0]}")
         except FileNotFoundError:
-            print(f"Processed file not found for split '{split}'. Need to run process() first.")
-            # If you want it to automatically process if file not found:
-            # print("Processing raw data...")
-            # self.process()
-            # self.data, self.slices = torch.load(self.processed_paths[0])
-            # print(f"Loaded processed PyG data for split '{split}' after processing.")
-            raise # Or raise error requiring explicit processing call
+            print(f"Processed file not found for split '{split}' at {self.processed_paths[0]}. Will run process().")
+            # PyG's InMemoryDataset handles calling self.process() automatically.
         except Exception as e:
             print(f"Error loading processed file for split '{split}': {e}")
-            raise e
+            raise e # Re-raise other unexpected errors
 
     @property
     def raw_file_names(self):
-        # Files expected in root/raw/ relative to the root specified in DataModule
+        """Specifies the name of the single raw file expected for this split."""
+        # Expects root/raw/train.pt, root/raw/val.pt, etc.
+        # NOTE: If you created train2.pt, this needs adjustment to handle it during process().
+        #       Keeping it simple for now, assuming only train.pt is used for 'train'.
         return [f'{self.split}.pt']
 
     @property
     def processed_file_names(self):
-        # Files saved in root/processed/ relative to the root specified in DataModule
-        # Using a different name to distinguish from raw files
+        """Specifies the name of the single processed file for the current split."""
+        # Saves to root/processed/aig_processed_train.pt, etc.
         return [f'aig_processed_{self.split}.pt']
 
     def download(self):
-        # No download needed, assumes raw files are created by prepare_aig_pyg.py
-        print(f"AIGPygDataset: Download step skipped for split '{self.split}', expects raw .pt files.")
-        raw_path = os.path.join(self.raw_dir, f'{self.split}.pt')
+        """Checks if the raw file exists. No actual download."""
+        print(f"AIGPygDataset: Download step called for split '{self.split}'. Checking for raw file.")
+        raw_path = self.raw_paths[0] # Path to the single raw file (e.g., root/raw/train.pt)
+        print(f"AIGPygDataset '{self.split}': Checking for raw file at '{raw_path}'")
         if not os.path.exists(raw_path):
-             # Provide a more helpful error message if the file is missing.
              raise FileNotFoundError(
                  f"Raw file not found: {raw_path}. "
-                 f"Ensure you have run the script to generate PyG .pt files first (e.g., prepare_aig_pyg.py) "
-                 f"and that the 'datadir' in CFG points to the correct base directory ('./aig_pyg/')."
+                 f"This file ({self.raw_file_names[0]}) should be created by the 'aig_pkl_to_pyg.py' script "
+                 f"(the version that saves combined train.pt/val.pt). "
+                 f"Ensure that script ran successfully and the 'root' path ('{self.root}') is correct."
              )
+        print(f"AIGPygDataset '{self.split}': Raw file found at '{raw_path}'")
+
 
     def process(self):
-        # Read data from raw files
-        raw_path = self.raw_paths[0] # Will be root/raw/train.pt etc.
-        print(f"Processing raw PyG data from: {raw_path}")
+        """
+        Loads raw data from the single raw file (e.g., train.pt), applies transformations/filters,
+        and saves a single processed data file (e.g., aig_processed_train.pt).
+        """
+        raw_path = self.raw_paths[0]
+        print(f"AIGPygDataset '{self.split}': Processing raw PyG data from: {raw_path}")
         try:
-            data_list = torch.load(raw_path)
+            # Load the list of Data objects from the raw .pt file
+            data_list = torch.load(raw_path, weights_only=False) # Use weights_only=False for Data objects
         except FileNotFoundError:
              print(f"Raw file not found during process(): {raw_path}")
              raise
@@ -73,235 +103,200 @@ class AIGPygDataset(InMemoryDataset):
              raise
 
         if not isinstance(data_list, list):
-             print(f"Error: Expected a list of Data objects from {raw_path}, got {type(data_list)}. Creating empty dataset.")
-             data_list = [] # Process empty list
+             print(f"Error: Expected a list of Data objects from {raw_path}, got {type(data_list)}. Processing empty dataset.")
+             data_list = []
 
-        # Apply pre-filtering and pre-transformations if specified
+        print(f"Total graphs loaded from raw file for split '{self.split}': {len(data_list)}")
+
         if self.pre_filter is not None:
-             print(f"Applying pre-filter...")
+             num_before_filter = len(data_list)
+             print(f"Applying pre-filter to {num_before_filter} graphs...")
              data_list = [data for data in data_list if self.pre_filter(data)]
              print(f"Data count after filter: {len(data_list)}")
-
 
         if self.pre_transform is not None:
              print(f"Applying pre-transform...")
              data_list = [self.pre_transform(data) for data in data_list]
              print(f"Data transformed.")
 
-
-        # Collate the list of Data objects into a single large Data object
+        # This step might still require significant memory if the combined data_list is huge.
+        print(f"Collating {len(data_list)} graphs for split '{self.split}'...")
         data, slices = self.collate(data_list)
-        save_path = self.processed_paths[0] # Will be root/processed/aig_processed_train.pt etc.
+        print("Collation complete.")
+
+        save_path = self.processed_paths[0]
         print(f"Saving processed {self.split} data ({len(data_list)} graphs) to {save_path}...")
-        torch.save((data, slices), save_path)
-        print("Processing complete.")
+        try:
+            # Use _use_new_zipfile_serialization=False if you encounter issues saving large files
+            torch.save((data, slices), save_path, _use_new_zipfile_serialization=False)
+            print(f"AIGPygDataset '{self.split}': Processing complete.")
+        except Exception as e:
+             print(f"Error saving processed file {save_path}: {e}")
+             raise e # Re-raise the error
 
 
 class AIGPygDataModule(AbstractDataModule):
     """
     DataModule for loading the AIG dataset stored as PyG .pt files.
+    Uses the root path provided via cfg.dataset.datadir.
+    Initializes the standard AIGPygDataset (expecting single raw files).
+    MODIFIED: Only initializes datasets for splits where raw files exist,
+              and assigns None to missing splits before passing to the base class.
     """
-    def __init__(self, cfg):
-        self.cfg = cfg
-        # datadir in CFG should point to the base directory where 'raw' and 'processed' live
-        # e.g., './aig_pyg/'
-        self.datadir = cfg.dataset.datadir
-        # Assumes this script is in 'datasets', so parent is 'G2PT/'
-        base_path = pathlib.Path(os.path.realpath(__file__)).parent.parent
-        root_path = os.path.join(base_path, 'datasets', self.datadir) # Construct full path
+    def __init__(self, cfg): # cfg should contain dataset.datadir and train params like batch_size
+        self.train_cfg = cfg
+        self.aig_cfg = aig_cfg
 
-        print(f"Initializing AIGPygDataModule with root path: {root_path}")
-        if not os.path.exists(root_path):
-            print(f"Warning: Root path does not exist: {root_path}")
-            # Decide if you want to create it or raise error
-            # os.makedirs(root_path)
+        # --- Get the dataset root path ---
+        try:
+            root_path = cfg.dataset.datadir
+            if not root_path or not isinstance(root_path, str): raise ValueError("datadir invalid")
+            root_path = os.path.abspath(root_path)
+            print(f"AIGPygDataModule: Using root path from cfg: {root_path}")
+        except (AttributeError, ValueError) as e:
+            print(f"Error getting root path from cfg: {e}")
+            raise
+        # --- Root path determined ---
 
-        datasets = {}
-        for split in ['train', 'val', 'test']:
-            try:
-                # Initialize the dataset for each split
-                # This will trigger download (checking raw files) and process (if processed not found)
-                datasets[split] = AIGPygDataset(split=split, root=root_path)
-            except FileNotFoundError as e:
-                print(f"Error initializing AIGPygDataset for split '{split}': {e}")
-                print(f"Make sure the raw file '{split}.pt' exists in '{os.path.join(root_path, 'raw')}'")
-                raise # Re-raise the error to stop execution if raw files are missing
-            except Exception as e:
-                print(f"Unexpected error initializing AIGPygDataset for split '{split}': {e}")
-                raise
+        # --- Ensure directory structure exists ---
+        print(f"AIGPygDataModule: Final root path: {root_path}")
+        processed_path = os.path.join(root_path, 'processed')
+        raw_path_dir = os.path.join(root_path, 'raw')
+        try:
+            os.makedirs(root_path, exist_ok=True)
+            os.makedirs(raw_path_dir, exist_ok=True)
+            os.makedirs(processed_path, exist_ok=True)
+        except OSError as e:
+            print(f"Error creating directory structure at {root_path}: {e}")
+            raise
+        # --- Directories ensured ---
 
-        print(f"Dataset sizes: Train={len(datasets.get('train',[]))}, Val={len(datasets.get('val',[]))}, Test={len(datasets.get('test',[]))}")
-        # Initialize the AbstractDataModule with the PyG datasets
-        # Note: batch_size, num_workers from cfg.train are used by the DataLoader later
-        super().__init__(cfg, datasets)
+        # --- Initialize only EXISTING splits, assign None otherwise ---
+        # *** FIX: Ensure all keys ('train', 'val', 'test') exist in the dict ***
+        initialized_datasets = {}
+        for split in ['train', 'val', 'test']: # Iterate through ALL expected splits
+            raw_file_path = os.path.join(raw_path_dir, f"{split}.pt")
+            if os.path.exists(raw_file_path):
+                print(f"Found raw file for split '{split}', initializing dataset...")
+                try:
+                    # Initialize the dataset for this existing split
+                    initialized_datasets[split] = AIGPygDataset(split=split, root=root_path)
+                except Exception as e:
+                    # Catch errors during dataset initialization itself (e.g., loading processed file)
+                    print(f"Error initializing AIGPygDataset for existing split '{split}': {e}")
+                    # Assign None if initialization fails for an existing raw file
+                    initialized_datasets[split] = None
+                    # Optionally re-raise if this failure is critical
+                    # raise
+            else:
+                # If the raw file doesn't exist, add None to the dictionary for this key
+                print(f"Raw file for split '{split}' not found at '{raw_file_path}'. Setting dataset to None.")
+                initialized_datasets[split] = None # <-- Assign None for missing splits
+        # --- End split initialization loop ---
 
-# G2PT/datasets/aig_pyg_dataset.py (Add this class)
+        # Check if at least train or val was initialized (optional, but good practice)
+        if initialized_datasets.get('train') is None and initialized_datasets.get('val') is None:
+             print("Warning: Neither train nor val datasets could be initialized. Check raw file paths.")
+             # Depending on downstream code, this might be acceptable or an error.
 
+        # Print final initialized dataset sizes (using len on the actual dataset object or 0 if None)
+        print(f"Final Initialized Dataset sizes: Train={len(initialized_datasets.get('train',[]))}, Val={len(initialized_datasets.get('val',[]))}, Test=0")
 
-# (Keep AIGPygDataset and AIGPygDataModule definitions from the previous step here)
+        # --- Initialize the AbstractDataModule base class ---
+        # Pass the dictionary which now *always* contains 'train', 'val', 'test' keys (value might be None)
+        super().__init__(self.train_cfg, initialized_datasets)
+        print("AIGPygDataModule initialization complete.")
 
 
 class AIGDatasetInfos(AbstractDatasetInfos):
     """
     Provides metadata and statistics for the AIG dataset,
-    assuming data might be loaded via AIGPygDataModule.
-    Statistics (like n_nodes, node_types, edge_types distributions)
-    are expected to be loaded from files or computed elsewhere,
-    similar to the non-Pyg version.
+    using definitions from the imported aig_cfg.
+    (No changes needed in this class)
     """
-    def __init__(self, datamodule: AbstractDataModule, cfg, recompute_statistics=False):
-        # datamodule is passed but might not be directly used if loading pre-computed stats
+    def __init__(self, datamodule: AbstractDataModule, cfg=None, recompute_statistics=False):
         self.datamodule = datamodule
-        self.name = 'aig'
-        self.input_dims = None # Will be set by compute_input_output_dims if called later
-        self.output_dims = None # Will be set by compute_input_output_dims if called later
-
-        # --- AIG Specific Type Definitions ---
-        # Node types based on vocabulary
-        self.atom_decoder = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO'] # Order matters if mapping index->name
-        self.atom_encoder = {name: i for i, name in enumerate(self.atom_decoder)} # Maps name->index (0-3)
+        self.name = aig_cfg.dataset
+        self.input_dims = None; self.output_dims = None
+        self.atom_decoder = list(aig_cfg.NODE_TYPE_KEYS)
+        self.atom_encoder = {name: i for i, name in enumerate(self.atom_decoder)}
         self.num_atom_types = len(self.atom_decoder)
-
-        # Corresponding Vocabulary IDs (Important!) - Matches vocab.json
-        # This maps the index (0-3) used internally above to the actual vocab ID
-        self.feature_index_to_vocab_id = {
-             0: 97, # CONST0
-             1: 98, # PI
-             2: 99, # AND
-             3: 100 # PO
-        }
-        # Reverse map might be useful sometimes
+        self.feature_index_to_vocab_id = aig_cfg.NODE_FEATURE_INDEX_TO_VOCAB
         self.vocab_id_to_feature_index = {v: k for k, v in self.feature_index_to_vocab_id.items()}
-
-        # Edge types based on vocabulary
-        self.bond_decoder = ['EDGE_INV', 'EDGE_REG'] # Order matters
-        self.bond_encoder = {name: i for i, name in enumerate(self.bond_decoder)} # Maps name->index (0-1)
+        self.bond_decoder = list(aig_cfg.EDGE_TYPE_KEYS)
+        self.bond_encoder = {name: i for i, name in enumerate(self.bond_decoder)}
         self.num_bond_types = len(self.bond_decoder)
-         # Maps edge feature index (0-1) to edge vocab ID
-        self.edge_feature_index_to_vocab_id = {
-             0: 101, # INV
-             1: 102  # REG
-        }
-
-        # --- Statistics ---
-        # These should ideally represent distributions over the final VOCAB IDs (97-100 for nodes)
-        # and the number of nodes per graph.
-        # We will attempt to load them from a standard location or use defaults.
-        self.n_nodes = None         # Distribution of node counts per graph
-        self.node_types = None      # Distribution of node type VOCAB IDs (e.g., counts for ID 97, 98, 99, 100)
-        self.edge_types = None      # Distribution of edge type VOCAB IDs (e.g., counts for ID 101, 102 + no-edge)
-        self.max_n_nodes = 256      # Default max_n_nodes, will be updated from n_nodes distribution
-
-        # Define path for potential pre-computed statistics
-        # Assumes stats are saved relative to the *final* data dir (e.g., './aig/')
-        final_data_dir = cfg.dataset.get('final_output_dir', '../aig') # Get from cfg or default
-        stats_dir = os.path.join(final_data_dir, 'stats')
-        os.makedirs(stats_dir, exist_ok=True) # Ensure stats dir exists
-
-        meta_files = {
-            "n_nodes": os.path.join(stats_dir, f'{self.name}_n_counts.txt'),
-            "node_types": os.path.join(stats_dir, f'{self.name}_node_types_vocab_dist.txt'), # Indicate vocab ID dist
-            "edge_types": os.path.join(stats_dir, f'{self.name}_edge_types_vocab_dist.txt'), # Indicate vocab ID dist
-        }
-
-        # --- Load or Compute Statistics ---
-        # Option 1: Load pre-computed stats if they exist
+        self.edge_feature_index_to_vocab_id = aig_cfg.EDGE_FEATURE_INDEX_TO_VOCAB
+        self.n_nodes = None; self.node_types = None; self.edge_types = None
+        self.max_n_nodes = aig_cfg.MAX_NODE_COUNT
+        try:
+            # Determine stats dir based on available datasets in datamodule
+            # Check train, then val, then test for a valid root path
+            # Use getattr for safer access to potentially missing dataset attributes
+            if hasattr(datamodule, 'train_dataset') and datamodule.train_dataset and hasattr(datamodule.train_dataset, 'root'):
+                 abs_data_dir = datamodule.train_dataset.root
+            elif hasattr(datamodule, 'val_dataset') and datamodule.val_dataset and hasattr(datamodule.val_dataset, 'root'):
+                 abs_data_dir = datamodule.val_dataset.root
+            # elif hasattr(datamodule, 'test_dataset') and datamodule.test_dataset and hasattr(datamodule.test_dataset, 'root'): # Check test too
+            #      abs_data_dir = datamodule.test_dataset.root
+            else:
+                 # Fallback: Try getting from module directly (requires DataModule to store root_path)
+                 if hasattr(datamodule, 'root_path'): abs_data_dir = datamodule.root_path
+                 else: raise ValueError("Could not determine data directory from datamodule.")
+            if not abs_data_dir: raise ValueError("Determined data directory is empty or None.")
+        except (AttributeError, ValueError) as e:
+             print(f"Warning: Could not reliably get root path from datamodule: {e}. Falling back.")
+             script_dir = os.path.dirname(os.path.realpath(__file__)); g2pt_root = os.path.dirname(script_dir)
+             abs_data_dir = os.path.abspath(os.path.join(g2pt_root, os.path.normpath(aig_cfg.data_dir)))
+        stats_dir = os.path.join(abs_data_dir, 'stats')
+        print(f"AIGDatasetInfos: Looking for/saving statistics files in: {stats_dir}")
+        os.makedirs(stats_dir, exist_ok=True)
+        meta_files = { "n_nodes": os.path.join(stats_dir, f'{self.name}_n_counts.txt'),
+                       "node_types": os.path.join(stats_dir, f'{self.name}_node_types_vocab_dist.txt'),
+                       "edge_types": os.path.join(stats_dir, f'{self.name}_edge_types_vocab_dist.txt'), }
         stats_loaded = False
         if not recompute_statistics and all(os.path.exists(p) for p in meta_files.values()):
              try:
                  self.n_nodes = torch.from_numpy(np.loadtxt(meta_files["n_nodes"])).float()
                  self.node_types = torch.from_numpy(np.loadtxt(meta_files["node_types"])).float()
                  self.edge_types = torch.from_numpy(np.loadtxt(meta_files["edge_types"])).float()
-                 print(f"Loaded pre-computed statistics for AIG from {stats_dir}")
-                 stats_loaded = True
-             except Exception as e:
-                 print(f"Warning: Failed to load statistics files from {stats_dir}: {e}. Will try to compute or use defaults.")
-                 stats_loaded = False
-
-        # Option 2: Compute stats from datamodule (if not loaded and possible)
-        # Note: This requires dataloaders to be ready and might be slow.
-        # Also, the default node_types()/edge_counts() compute stats based on *features*,
-        # which would need re-mapping to vocab IDs. We skip direct computation here
-        # and rely on pre-computed files or defaults for simplicity, like the original AIGinfos.
-        if not stats_loaded:
-            print("Statistics files not found or failed to load. Using default placeholders.")
-            print(f"(To compute stats, ensure files exist in {stats_dir} or implement computation logic)")
-            # Load Default Stats (Placeholder)
-            self._load_default_stats() # Ensure self.n_nodes, self.node_types are set
-
-        # --- Finalize Basic Info ---
-        # Update max_n_nodes based on the distribution
+                 print(f"Loaded pre-computed statistics for AIG from {stats_dir}"); stats_loaded = True
+             except Exception as e: print(f"Warning: Failed to load statistics files from {stats_dir}: {e}."); stats_loaded = False
+        if not stats_loaded: print("Statistics files not found or failed to load. Using default placeholder statistics."); self._load_default_stats()
         if self.n_nodes is not None and len(self.n_nodes) > 1:
             try:
                 nz_indices = torch.nonzero(self.n_nodes).squeeze()
                 if nz_indices.numel() > 0:
-                    # Find the index of the last non-zero count, which corresponds to max_n_nodes
-                    self.max_n_nodes = nz_indices.max().item()
-                else:
-                    self.max_n_nodes = 32 # Fallback if distribution is empty/zero
-                print(f"Determined max_n_nodes from distribution: {self.max_n_nodes}")
-            except Exception as e:
-                print(f"Warning: Could not determine max_n_nodes from distribution: {e}. Using default: {self.max_n_nodes}")
-                self.max_n_nodes = 256 # Fallback
-        else:
-            print(f"Warning: n_nodes distribution not available or invalid. Using default max_n_nodes: {self.max_n_nodes}")
-            self.max_n_nodes = 256 # Fallback
-
-        # !!! Crucial: Call complete_infos from the base class !!!
-        # It requires self.n_nodes and self.node_types.
-        # self.node_types MUST represent the distribution over VOCAB IDs (97-100).
-        if self.n_nodes is None or self.node_types is None:
-             print("ERROR: n_nodes or node_types distribution is None. Cannot complete infos.")
-             # Handle error appropriately, maybe raise exception or load defaults again
-             self._load_default_stats() # Ensure they are tensors
-
-        # Ensure node_types tensor length matches vocab size if loaded from file
-        expected_node_vocab_size = max(self.feature_index_to_vocab_id.values()) + 1 # Assumes dense IDs up to max
-        if self.node_types.shape[0] < expected_node_vocab_size:
-             print(f"Warning: Loaded node_types distribution length ({self.node_types.shape[0]}) is smaller than expected vocab size ({expected_node_vocab_size}). Padding with zeros.")
-             # Pad the tensor if loaded distribution doesn't cover full vocab range
-             padding_size = expected_node_vocab_size - self.node_types.shape[0]
-             self.node_types = torch.cat((self.node_types, torch.zeros(padding_size, dtype=self.node_types.dtype)), dim=0)
-
-
-        # This needs the distribution of node counts and the distribution over node *types*
-        # Make sure self.node_types represents the distribution over vocab IDs 97-100 correctly.
+                    derived_max_nodes = nz_indices.max().item()
+                    if derived_max_nodes > self.max_n_nodes: print(f"Updating max_n_nodes based on loaded distribution ({self.max_n_nodes} -> {derived_max_nodes})"); self.max_n_nodes = derived_max_nodes
+                    elif derived_max_nodes < self.max_n_nodes: print(f"Note: Max node count from distribution ({derived_max_nodes}) is less than config ({self.max_n_nodes}). Using config value.")
+                else: print(f"Warning: n_nodes distribution is all zeros. Using config max_n_nodes: {self.max_n_nodes}")
+            except Exception as e: print(f"Warning: Could not determine max_n_nodes from distribution: {e}.")
+        else: print(f"Using max_n_nodes from config: {self.max_n_nodes}")
+        if self.n_nodes is None or self.node_types is None: raise ValueError("Failed to load or generate n_nodes/node_types statistics.")
+        expected_vocab_size = aig_cfg.vocab_size
+        if self.node_types.shape[0] < expected_vocab_size:
+             print(f"Warning: Loaded/default node_types distribution length ({self.node_types.shape[0]}) < expected vocab size ({expected_vocab_size}). Padding.")
+             padding_size = expected_vocab_size - self.node_types.shape[0]; self.node_types = torch.cat((self.node_types, torch.zeros(padding_size, dtype=self.node_types.dtype)), dim=0)
+        elif self.node_types.shape[0] > expected_vocab_size:
+             print(f"Warning: Loaded/default node_types distribution length ({self.node_types.shape[0]}) > expected vocab size ({expected_vocab_size}). Truncating."); self.node_types = self.node_types[:expected_vocab_size]
         self.complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
-
         print(f"AIGDatasetInfos initialized: max_n_nodes={self.max_n_nodes}, num_node_types={self.num_atom_types}")
 
-
     def _load_default_stats(self):
-        """Load placeholder statistics if files are missing or computation fails."""
         print("Loading default placeholder statistics for AIG.")
-        # Default max_n_nodes if not determined otherwise
-        max_nodes = getattr(self, 'max_n_nodes', 256)
-        self.n_nodes = torch.zeros(max_nodes + 1, dtype=torch.float)
-        # Simple uniform distribution over assumed typical sizes
-        if max_nodes >= 20:
-            self.n_nodes[16:min(21, max_nodes+1)].fill_(1.0 / 5.0) # Fill range [16, 20]
-        elif max_nodes > 0:
-            self.n_nodes[1:max_nodes+1].fill_(1.0 / max_nodes)
-
-        # Default node type distribution (uniform over vocab IDs 97-100)
-        # Need a tensor representing counts/probs for *all* vocab IDs up to max AIG ID
-        max_node_vocab_id = max(self.feature_index_to_vocab_id.values())
-        self.node_types = torch.zeros(max_node_vocab_id + 1, dtype=torch.float)
-        # Assign uniform probability to the actual AIG node IDs
-        num_aig_node_types = len(self.feature_index_to_vocab_id)
+        max_nodes = self.max_n_nodes; self.n_nodes = torch.zeros(max_nodes + 1, dtype=torch.float)
+        if max_nodes > 0: self.n_nodes[1:].fill_(1.0 / max_nodes)
+        self.node_types = torch.zeros(aig_cfg.vocab_size, dtype=torch.float)
+        num_aig_node_types = len(aig_cfg.NODE_TYPE_VOCAB)
         if num_aig_node_types > 0:
-             uniform_prob = 1.0 / num_aig_node_types
-             for vocab_id in self.feature_index_to_vocab_id.values():
-                 self.node_types[vocab_id] = uniform_prob
-
-        # Default edge type distribution (uniform over vocab IDs 101-102 + maybe 0 for no-edge)
-        # The structure depends on how edge_counts() would format it.
-        # Let's assume it creates entries up to max vocab ID.
-        max_edge_vocab_id = max(self.edge_feature_index_to_vocab_id.values())
-        self.edge_types = torch.zeros(max_edge_vocab_id + 1, dtype=torch.float)
-        # Simple default: assume equal probability for INV and REG edges, ignore no-edge for now.
-        num_aig_edge_types = len(self.edge_feature_index_to_vocab_id)
+             uniform_prob = 1.0 / num_aig_node_types; valid_node_vocab_ids = [v for v in aig_cfg.NODE_TYPE_VOCAB.values() if v < aig_cfg.vocab_size]
+             if valid_node_vocab_ids: self.node_types[valid_node_vocab_ids] = uniform_prob
+             else: print("Warning: No valid node vocab IDs found in config within vocab size range.")
+        self.edge_types = torch.zeros(aig_cfg.vocab_size, dtype=torch.float)
+        num_aig_edge_types = len(aig_cfg.EDGE_TYPE_VOCAB)
         if num_aig_edge_types > 0:
-            uniform_prob = 1.0 / num_aig_edge_types
-            for vocab_id in self.edge_feature_index_to_vocab_id.values():
-                 self.edge_types[vocab_id] = uniform_prob
+            uniform_prob = 1.0 / num_aig_edge_types; valid_edge_vocab_ids = [v for v in aig_cfg.EDGE_TYPE_VOCAB.values() if v < aig_cfg.vocab_size]
+            if valid_edge_vocab_ids: self.edge_types[valid_edge_vocab_ids] = uniform_prob
+            else: print("Warning: No valid edge vocab IDs found in config within vocab size range.")
+

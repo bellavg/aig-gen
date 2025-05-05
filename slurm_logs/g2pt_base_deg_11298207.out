@@ -1,0 +1,61 @@
+============================================================================================== 
+Warning! Mixing Conda and module environments may lead to corruption of the
+user environment. 
+We do not recommend users mixing those two environments unless absolutely
+necessary. Note that 
+SURF does not provide any support for Conda environment.
+For more information, please refer to our software policy page:
+https://servicedesk.surf.nl/wiki/display/WIKI/Software+policy+Snellius#SoftwarepolicySnellius-UseofAnacondaandMinicondaenvironmentsonSnellius 
+
+Remember that many packages have already been installed on the system and can
+be loaded using 
+the 'module load <package__name>' command. If you are uncertain if a package is
+already available 
+on the system, please use 'module avail' or 'module spider' to search for it.
+============================================================================================== 
+Starting training script...
+Overriding config with configs/datasets/aig.py:
+dataset = 'aig'
+vocab_size = 112 # Or use 106 if you prefer the exact count
+block_size = 1024
+data_dir = '../../datasets/aig/'
+tokenizer_path = '../../tokenizers/aig/'
+
+Overriding: dataset = aig
+Overriding: wandb_log = True
+Overriding: ordering = deg
+Overriding: num_augmentations = 5
+CUDA available. Using device: cuda
+tokens per iteration will be: 491520,40,1
+Using dtype: bfloat16
+Autocast context type: cuda, ptdtype: torch.bfloat16
+Loading dataset: aig with ordering: deg (Num augmentations: 5)
+DataLoader num_workers: 0
+Initializing a new model from scratch
+number of parameters: 85.04M
+num decayed parameter tensors: 50, with 85,807,104 parameters
+num non-decayed parameter tensors: 25, with 19,200 parameters
+using fused AdamW: True
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: isabella-v-gardner (isabella-v-gardner-university-of-amsterdam) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.19.9
+wandb: Run data is saved locally in /gpfs/home6/igardner1/aig-gen/G2PT/wandb/run-20250421_132550-clpf20wn
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run aig-base-deg-5
+wandb: ⭐️ View project at https://wandb.ai/isabella-v-gardner-university-of-amsterdam/g2pt
+wandb: 🚀 View run at https://wandb.ai/isabella-v-gardner-university-of-amsterdam/g2pt/runs/clpf20wn
+/gpfs/home6/igardner1/aig-gen/G2PT/datasets_utils.py:284: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at /pytorch/torch/csrc/utils/tensor_new.cpp:254.)
+  edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]], dtype=torch.long)
+iter 0: loss 4.8727, time 2081.80ms, mfu -100.00%
+iter 10: loss 3.8165, time 1807.80ms, mfu 54.33%
+iter 20: loss 3.5027, time 1756.56ms, mfu 54.49%
+iter 30: loss 3.3049, time 1763.69ms, mfu 54.61%
+iter 40: loss 3.1494, time 1766.07ms, mfu 54.71%
+iter 50: loss 2.8782, time 1760.50ms, mfu 54.82%
+iter 60: loss 2.5844, time 1820.93ms, mfu 54.73%
+iter 70: loss 2.2211, time 1767.28ms, mfu 54.82%
+iter 80: loss 2.1573, time 1768.39ms, mfu 54.89%
+iter 90: loss 1.6889, time 1770.62ms, mfu 54.95%
+iter 100: loss 1.7552, time 1811.72ms, mfu 54.87%
+iter 110: loss 1.5369, time 1778.98ms, mfu 54.91%
+iter 120: loss 1.5198, time 1731.70ms, mfu 55.09%
