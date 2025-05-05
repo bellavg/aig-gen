@@ -29,7 +29,7 @@ try:
     from datasets_utils import get_datasets, seq_to_nxgraph
     from model import GPT, GPTConfig
     from evaluate_aigs import validate_aig_structures # Import the validation function
-    from sample import generate_and_parse_aigs # Import the generation+parsing function
+    from sample import get_graphs # Import the generation+parsing function
 except ImportError as e:
      logger.error(f"Failed to import required modules or configs: {e}")
      logger.error("Ensure all config files (aig.py, base.py, train_aig.py, sample_aig.py) exist in G2PT/configs/")
@@ -393,13 +393,12 @@ def main():
         raw_model_for_check = model.module if ddp else model # Use raw model for generation
         master_device = device if not ddp else f'cuda:{ddp_local_rank}' # Ensure generation on correct device
 
-        generated_graphs = generate_and_parse_aigs(
-            model=raw_model_for_check, tokenizer=tokenizer, device=master_device,
+        generated_graphs = get_graphs(model=raw_model_for_check, tokenizer=tokenizer,
             num_samples=validity_num_samples, batch_size=validity_gen_batch_size,
-            temperature=validity_temperature, top_k=validity_top_k,
-            max_new_tokens=validity_max_new_tokens, parsing_mode=validity_parsing_mode,
-            seed=1337 + iter_num # Consistent seed based on iteration
-        )
+            temperature=validity_temperature,
+           parsing_mode=validity_parsing_mode,
+            seed=1337 + iter_num) # Consistent seed based on iteration)
+
         num_generated = len(generated_graphs)
         logger.info(f"Generated and parsed {num_generated} graphs.")
         if num_generated == 0: validity_score = 0.0
