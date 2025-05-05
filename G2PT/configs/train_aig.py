@@ -16,11 +16,11 @@ ordering = 'topo'
 # This will often be combined with run-specific names.
 out_dir_base = 'results'
 # Interval (in iterations) for running evaluation
-eval_interval = 2
+eval_interval = 1000
 # Interval (in iterations) for logging training progress
 log_interval = 10
 # Number of iterations to run for evaluation to estimate loss
-eval_iters = 2
+eval_iters = 200
 # If True, save a checkpoint after every evaluation, not just on improvement
 always_save_checkpoint = False
 # Initialization mode: 'scratch', 'resume', or 'gpt2*' (for pretrained weights)
