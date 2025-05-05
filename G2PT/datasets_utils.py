@@ -17,7 +17,7 @@ import random # <-- IMPORT RANDOM
 import sys # <-- Added import
 
 # --- Import AIG Config ---
-import G2PT.configs.aig as aig_cfg
+import configs.aig as aig_cfg
 
 
 

@@ -20,13 +20,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%
 logger = logging.getLogger("G2PT_Trainer")
 
 # --- Project Imports ---
-import G2PT.configs.aig as aig_cfg
-import G2PT.configs.base as net_cfg
-import G2PT.configs.train_aig as train_cfg
-from G2PT.datasets_utils import get_datasets, seq_to_nxgraph
-from G2PT.model import GPT, GPTConfig
-from G2PT.evaluate_aigs import validate_aig_structures # Import the validation function
-from G2PT.sample import generate_and_parse_aigs # Import the generation+parsing function
+import configs.aig as aig_cfg
+import  configs.base as net_cfg
+import  configs.train_aig as train_cfg
+from  datasets_utils import get_datasets, seq_to_nxgraph
+from  model import GPT, GPTConfig
+from  evaluate_aigs import validate_aig_structures # Import the validation function
+from  sample import generate_and_parse_aigs # Import the generation+parsing function
 
 # --- Environment Setup ---
 # Recommended for Dynamo + DDP, but might cause issues, monitor performance/errors

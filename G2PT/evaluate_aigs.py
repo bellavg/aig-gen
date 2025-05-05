@@ -17,7 +17,7 @@ logger = logging.getLogger("evaluate_g2pt_aigs")
 
 # --- Import the AIG configuration ---
 
-from G2PT.configs import aig as aig_config
+from configs import aig as aig_config
 
 # Derive valid node/edge types from config
 VALID_AIG_NODE_TYPES = set(aig_config.NODE_TYPE_KEYS)
