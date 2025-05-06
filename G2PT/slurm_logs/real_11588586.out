@@ -1,0 +1,688 @@
+============================================================================================== 
+Warning! Mixing Conda and module environments may lead to corruption of the
+user environment. 
+We do not recommend users mixing those two environments unless absolutely
+necessary. Note that 
+SURF does not provide any support for Conda environment.
+For more information, please refer to our software policy page:
+https://servicedesk.surf.nl/wiki/display/WIKI/Software+policy+Snellius#SoftwarepolicySnellius-UseofAnacondaandMinicondaenvironmentsonSnellius 
+
+Remember that many packages have already been installed on the system and can
+be loaded using 
+the 'module load <package__name>' command. If you are uncertain if a package is
+already available 
+on the system, please use 'module avail' or 'module spider' to search for it.
+============================================================================================== 
+Starting training script...
+2025-05-06 11:58:59,794 - INFO - [G2PT_Trainer] Loading overrides from /gpfs/home6/igardner1/aig-gen/G2PT/configurator.py
+Overriding config with configs/aig.py:
+Overriding config with configs/base.py:
+Overriding config with configs/train_aig.py:
+Overriding config with configs/sample_aig.py:
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] Configuration potentially overridden by configurator.py
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] DDP not active. Running on device: cuda
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] Output directory: results/aig-base-topo-aug5
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] Global Batch Size: 640 sequences
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] Gradient Accumulation Steps: 10
+2025-05-06 11:58:59,796 - INFO - [G2PT_Trainer] Tokens per Optimizer Step (approx): 491,520
+2025-05-06 11:58:59,823 - INFO - [G2PT_Trainer] Selected dtype: bfloat16
+2025-05-06 11:58:59,823 - INFO - [G2PT_Trainer] Autocast context: enabled=True, device_type='cuda', dtype='torch.bfloat16'
+2025-05-06 11:58:59,827 - INFO - [G2PT_Trainer] Loading tokenizer from: /gpfs/home6/igardner1/aig-gen/G2PT/./datasets/aig/tokenizer
+2025-05-06 11:58:59,831 - INFO - [G2PT_Trainer] Final vocab size: 94. Tokenizer Max length: 768
+2025-05-06 11:58:59,831 - INFO - [G2PT_Trainer] Loading datasets for 'aig' (ordering: topo, augmentations: 5)...
+Loading dataset: aig with ordering: topo (Num augmentations: 5)
+get_datasets: Using dataset directory: ./datasets/aig/
+get_datasets: Looking for metadata at: ./datasets/aig/data_meta.json
+2025-05-06 11:58:59,834 - INFO - [G2PT_Trainer] Train dataset size: 520140, Eval dataset size: 26007
+2025-05-06 11:58:59,834 - INFO - [G2PT_Trainer] DataLoader num_workers: 0
+2025-05-06 11:58:59,834 - INFO - [G2PT_Trainer] Resuming training from results/aig-base-topo-aug5
+2025-05-06 11:58:59,835 - INFO - [G2PT_Trainer] Loading checkpoint: results/aig-base-topo-aug5/ckpt.pt
+number of parameters: 85.03M
+2025-05-06 11:59:02,016 - INFO - [G2PT_Trainer] Model state loaded.
+2025-05-06 11:59:02,016 - INFO - [G2PT_Trainer] Resuming from iter 43000, best_val_loss: 0.1810, best_val_validity: 0.910
+2025-05-06 11:59:02,036 - INFO - [G2PT_Trainer] Gradient Scaler enabled: False
+num decayed parameter tensors: 50, with 85,596,672 parameters
+num non-decayed parameter tensors: 25, with 19,200 parameters
+using fused AdamW: True
+2025-05-06 11:59:02,037 - INFO - [G2PT_Trainer] Optimizer configured: <class 'torch.optim.adamw.AdamW'>
+2025-05-06 11:59:02,037 - INFO - [G2PT_Trainer] Optimizer state loaded.
+2025-05-06 11:59:03,509 - INFO - [G2PT_Trainer] Initializing wandb...
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: isabella-v-gardner (isabella-v-gardner-university-of-amsterdam) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.19.9
+wandb: Run data is saved locally in /gpfs/home6/igardner1/aig-gen/G2PT/wandb/run-20250506_115904-zo4xa4a7
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run aig-base-topo-aug5
+wandb: ⭐️ View project at https://wandb.ai/isabella-v-gardner-university-of-amsterdam/real-g2pt
+wandb: 🚀 View run at https://wandb.ai/isabella-v-gardner-university-of-amsterdam/real-g2pt/runs/zo4xa4a7
+2025-05-06 11:59:04,901 - INFO - [G2PT_Trainer] Wandb initialized.
+2025-05-06 11:59:04,901 - INFO - [G2PT_Trainer] 
+--- Starting Training Loop (Max Iter: 60000) ---
+/gpfs/home6/igardner1/aig-gen/G2PT/datasets_utils.py:223: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at /pytorch/torch/csrc/utils/tensor_new.cpp:254.)
+  edge_index_final = torch.tensor([src_nodes_new[valid_edge_mask], dst_nodes_new[valid_edge_mask]], dtype=torch.long)
+2025-05-06 11:59:05,087 - INFO - [G2PT_Trainer] --- Starting Eval Iter 43000 (Eval #45) ---
+2025-05-06 11:59:49,476 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1164, Val: 0.1861
+2025-05-06 11:59:49,477 - INFO - [G2PT_Trainer] Val loss no improve: 2/7
+2025-05-06 11:59:49,477 - INFO - [G2PT_Trainer] --- Finished Eval Iter 43000 ---
+2025-05-06 11:59:50,661 - INFO - [G2PT_Trainer] Iter 43000/60000 | Loss: 0.1477 | LR: 1.21e-05 | Time/Iter: 45759.01ms | MFU: -100.00%
+2025-05-06 12:00:01,716 - INFO - [G2PT_Trainer] Iter 43010/60000 | Loss: 0.1641 | LR: 1.21e-05 | Time/Iter: 1097.44ms | MFU: 85.43%
+2025-05-06 12:00:12,767 - INFO - [G2PT_Trainer] Iter 43020/60000 | Loss: 0.1527 | LR: 1.21e-05 | Time/Iter: 1086.38ms | MFU: 85.51%
+2025-05-06 12:00:23,709 - INFO - [G2PT_Trainer] Iter 43030/60000 | Loss: 0.1595 | LR: 1.20e-05 | Time/Iter: 1089.63ms | MFU: 85.57%
+2025-05-06 12:00:34,628 - INFO - [G2PT_Trainer] Iter 43040/60000 | Loss: 0.1460 | LR: 1.20e-05 | Time/Iter: 1087.73ms | MFU: 85.63%
+2025-05-06 12:00:45,709 - INFO - [G2PT_Trainer] Iter 43050/60000 | Loss: 0.1360 | LR: 1.20e-05 | Time/Iter: 1087.64ms | MFU: 85.68%
+2025-05-06 12:00:56,610 - INFO - [G2PT_Trainer] Iter 43060/60000 | Loss: 0.1600 | LR: 1.20e-05 | Time/Iter: 1100.97ms | MFU: 85.63%
+2025-05-06 12:01:07,498 - INFO - [G2PT_Trainer] Iter 43070/60000 | Loss: 0.1528 | LR: 1.20e-05 | Time/Iter: 1083.02ms | MFU: 85.72%
+2025-05-06 12:01:18,369 - INFO - [G2PT_Trainer] Iter 43080/60000 | Loss: 0.1307 | LR: 1.20e-05 | Time/Iter: 1074.98ms | MFU: 85.87%
+2025-05-06 12:01:29,347 - INFO - [G2PT_Trainer] Iter 43090/60000 | Loss: 0.1445 | LR: 1.20e-05 | Time/Iter: 1086.78ms | MFU: 85.91%
+2025-05-06 12:01:40,238 - INFO - [G2PT_Trainer] Iter 43100/60000 | Loss: 0.1426 | LR: 1.20e-05 | Time/Iter: 1092.23ms | MFU: 85.90%
+2025-05-06 12:01:51,175 - INFO - [G2PT_Trainer] Iter 43110/60000 | Loss: 0.1256 | LR: 1.20e-05 | Time/Iter: 1095.00ms | MFU: 85.88%
+2025-05-06 12:02:02,205 - INFO - [G2PT_Trainer] Iter 43120/60000 | Loss: 0.1392 | LR: 1.20e-05 | Time/Iter: 1081.01ms | MFU: 85.96%
+2025-05-06 12:02:13,077 - INFO - [G2PT_Trainer] Iter 43130/60000 | Loss: 0.1268 | LR: 1.20e-05 | Time/Iter: 1089.88ms | MFU: 85.97%
+2025-05-06 12:02:23,958 - INFO - [G2PT_Trainer] Iter 43140/60000 | Loss: 0.1330 | LR: 1.20e-05 | Time/Iter: 1089.30ms | MFU: 85.98%
+2025-05-06 12:02:34,857 - INFO - [G2PT_Trainer] Iter 43150/60000 | Loss: 0.1419 | LR: 1.20e-05 | Time/Iter: 1090.94ms | MFU: 85.97%
+2025-05-06 12:02:45,921 - INFO - [G2PT_Trainer] Iter 43160/60000 | Loss: 0.1348 | LR: 1.20e-05 | Time/Iter: 1078.37ms | MFU: 86.07%
+2025-05-06 12:02:56,818 - INFO - [G2PT_Trainer] Iter 43170/60000 | Loss: 0.1287 | LR: 1.20e-05 | Time/Iter: 1090.79ms | MFU: 86.06%
+2025-05-06 12:03:07,663 - INFO - [G2PT_Trainer] Iter 43180/60000 | Loss: 0.1463 | LR: 1.20e-05 | Time/Iter: 1086.04ms | MFU: 86.08%
+2025-05-06 12:03:18,680 - INFO - [G2PT_Trainer] Iter 43190/60000 | Loss: 0.1532 | LR: 1.20e-05 | Time/Iter: 1221.15ms | MFU: 85.15%
+2025-05-06 12:03:29,574 - INFO - [G2PT_Trainer] Iter 43200/60000 | Loss: 0.1398 | LR: 1.19e-05 | Time/Iter: 1090.19ms | MFU: 85.24%
+2025-05-06 12:03:40,425 - INFO - [G2PT_Trainer] Iter 43210/60000 | Loss: 0.1357 | LR: 1.19e-05 | Time/Iter: 1081.32ms | MFU: 85.38%
+2025-05-06 12:03:51,327 - INFO - [G2PT_Trainer] Iter 43220/60000 | Loss: 0.1319 | LR: 1.19e-05 | Time/Iter: 1096.08ms | MFU: 85.40%
+2025-05-06 12:04:02,348 - INFO - [G2PT_Trainer] Iter 43230/60000 | Loss: 0.1488 | LR: 1.19e-05 | Time/Iter: 1084.91ms | MFU: 85.50%
+2025-05-06 12:04:13,220 - INFO - [G2PT_Trainer] Iter 43240/60000 | Loss: 0.1350 | LR: 1.19e-05 | Time/Iter: 1095.58ms | MFU: 85.51%
+2025-05-06 12:04:24,097 - INFO - [G2PT_Trainer] Iter 43250/60000 | Loss: 0.1316 | LR: 1.19e-05 | Time/Iter: 1085.95ms | MFU: 85.59%
+2025-05-06 12:04:35,125 - INFO - [G2PT_Trainer] Iter 43260/60000 | Loss: 0.1441 | LR: 1.19e-05 | Time/Iter: 1215.11ms | MFU: 84.74%
+2025-05-06 12:04:46,011 - INFO - [G2PT_Trainer] Iter 43270/60000 | Loss: 0.1445 | LR: 1.19e-05 | Time/Iter: 1080.83ms | MFU: 84.94%
+2025-05-06 12:04:56,909 - INFO - [G2PT_Trainer] Iter 43280/60000 | Loss: 0.1477 | LR: 1.19e-05 | Time/Iter: 1076.64ms | MFU: 85.16%
+2025-05-06 12:05:07,780 - INFO - [G2PT_Trainer] Iter 43290/60000 | Loss: 0.1389 | LR: 1.19e-05 | Time/Iter: 1078.02ms | MFU: 85.34%
+2025-05-06 12:05:18,880 - INFO - [G2PT_Trainer] Iter 43300/60000 | Loss: 0.1549 | LR: 1.19e-05 | Time/Iter: 1084.52ms | MFU: 85.45%
+2025-05-06 12:05:29,750 - INFO - [G2PT_Trainer] Iter 43310/60000 | Loss: 0.1378 | LR: 1.19e-05 | Time/Iter: 1085.86ms | MFU: 85.54%
+2025-05-06 12:05:40,655 - INFO - [G2PT_Trainer] Iter 43320/60000 | Loss: 0.1331 | LR: 1.19e-05 | Time/Iter: 1085.95ms | MFU: 85.62%
+2025-05-06 12:05:51,671 - INFO - [G2PT_Trainer] Iter 43330/60000 | Loss: 0.1399 | LR: 1.19e-05 | Time/Iter: 1226.32ms | MFU: 84.70%
+2025-05-06 12:06:02,572 - INFO - [G2PT_Trainer] Iter 43340/60000 | Loss: 0.1352 | LR: 1.19e-05 | Time/Iter: 1076.29ms | MFU: 84.94%
+2025-05-06 12:06:13,451 - INFO - [G2PT_Trainer] Iter 43350/60000 | Loss: 0.1428 | LR: 1.19e-05 | Time/Iter: 1085.90ms | MFU: 85.08%
+2025-05-06 12:06:24,364 - INFO - [G2PT_Trainer] Iter 43360/60000 | Loss: 0.1273 | LR: 1.19e-05 | Time/Iter: 1089.42ms | MFU: 85.18%
+2025-05-06 12:06:35,355 - INFO - [G2PT_Trainer] Iter 43370/60000 | Loss: 0.1430 | LR: 1.19e-05 | Time/Iter: 1075.97ms | MFU: 85.37%
+2025-05-06 12:06:46,227 - INFO - [G2PT_Trainer] Iter 43380/60000 | Loss: 0.1293 | LR: 1.18e-05 | Time/Iter: 1082.76ms | MFU: 85.49%
+2025-05-06 12:06:57,132 - INFO - [G2PT_Trainer] Iter 43390/60000 | Loss: 0.1584 | LR: 1.18e-05 | Time/Iter: 1076.80ms | MFU: 85.65%
+2025-05-06 12:07:08,141 - INFO - [G2PT_Trainer] Iter 43400/60000 | Loss: 0.1459 | LR: 1.18e-05 | Time/Iter: 1216.61ms | MFU: 84.79%
+2025-05-06 12:07:19,000 - INFO - [G2PT_Trainer] Iter 43410/60000 | Loss: 0.1418 | LR: 1.18e-05 | Time/Iter: 1076.38ms | MFU: 85.02%
+2025-05-06 12:07:29,899 - INFO - [G2PT_Trainer] Iter 43420/60000 | Loss: 0.1377 | LR: 1.18e-05 | Time/Iter: 1084.89ms | MFU: 85.16%
+2025-05-06 12:07:40,806 - INFO - [G2PT_Trainer] Iter 43430/60000 | Loss: 0.1561 | LR: 1.18e-05 | Time/Iter: 1080.10ms | MFU: 85.32%
+2025-05-06 12:07:51,808 - INFO - [G2PT_Trainer] Iter 43440/60000 | Loss: 0.1579 | LR: 1.18e-05 | Time/Iter: 1078.18ms | MFU: 85.49%
+2025-05-06 12:08:02,672 - INFO - [G2PT_Trainer] Iter 43450/60000 | Loss: 0.1305 | LR: 1.18e-05 | Time/Iter: 1083.24ms | MFU: 85.59%
+2025-05-06 12:08:13,539 - INFO - [G2PT_Trainer] Iter 43460/60000 | Loss: 0.1416 | LR: 1.18e-05 | Time/Iter: 1088.21ms | MFU: 85.65%
+2025-05-06 12:08:24,572 - INFO - [G2PT_Trainer] Iter 43470/60000 | Loss: 0.1444 | LR: 1.18e-05 | Time/Iter: 1085.98ms | MFU: 85.72%
+2025-05-06 12:08:35,430 - INFO - [G2PT_Trainer] Iter 43480/60000 | Loss: 0.1505 | LR: 1.18e-05 | Time/Iter: 1078.09ms | MFU: 85.84%
+2025-05-06 12:08:46,304 - INFO - [G2PT_Trainer] Iter 43490/60000 | Loss: 0.1434 | LR: 1.18e-05 | Time/Iter: 1086.14ms | MFU: 85.89%
+2025-05-06 12:08:57,211 - INFO - [G2PT_Trainer] Iter 43500/60000 | Loss: 0.1546 | LR: 1.18e-05 | Time/Iter: 1077.05ms | MFU: 86.00%
+2025-05-06 12:09:08,259 - INFO - [G2PT_Trainer] Iter 43510/60000 | Loss: 0.1407 | LR: 1.18e-05 | Time/Iter: 1081.79ms | MFU: 86.07%
+2025-05-06 12:09:19,167 - INFO - [G2PT_Trainer] Iter 43520/60000 | Loss: 0.1428 | LR: 1.18e-05 | Time/Iter: 1088.01ms | MFU: 86.08%
+2025-05-06 12:09:30,020 - INFO - [G2PT_Trainer] Iter 43530/60000 | Loss: 0.1405 | LR: 1.18e-05 | Time/Iter: 1075.87ms | MFU: 86.19%
+2025-05-06 12:09:41,014 - INFO - [G2PT_Trainer] Iter 43540/60000 | Loss: 0.1473 | LR: 1.18e-05 | Time/Iter: 1083.08ms | MFU: 86.22%
+2025-05-06 12:09:51,887 - INFO - [G2PT_Trainer] Iter 43550/60000 | Loss: 0.1388 | LR: 1.18e-05 | Time/Iter: 1088.78ms | MFU: 86.21%
+2025-05-06 12:10:02,772 - INFO - [G2PT_Trainer] Iter 43560/60000 | Loss: 0.1444 | LR: 1.18e-05 | Time/Iter: 1084.21ms | MFU: 86.24%
+2025-05-06 12:10:13,629 - INFO - [G2PT_Trainer] Iter 43570/60000 | Loss: 0.1453 | LR: 1.17e-05 | Time/Iter: 1087.22ms | MFU: 86.24%
+2025-05-06 12:10:24,669 - INFO - [G2PT_Trainer] Iter 43580/60000 | Loss: 0.1438 | LR: 1.17e-05 | Time/Iter: 1077.31ms | MFU: 86.31%
+2025-05-06 12:10:35,509 - INFO - [G2PT_Trainer] Iter 43590/60000 | Loss: 0.1293 | LR: 1.17e-05 | Time/Iter: 1081.36ms | MFU: 86.35%
+2025-05-06 12:10:46,354 - INFO - [G2PT_Trainer] Iter 43600/60000 | Loss: 0.1395 | LR: 1.17e-05 | Time/Iter: 1071.10ms | MFU: 86.47%
+2025-05-06 12:10:57,386 - INFO - [G2PT_Trainer] Iter 43610/60000 | Loss: 0.1305 | LR: 1.17e-05 | Time/Iter: 1222.94ms | MFU: 85.49%
+2025-05-06 12:11:08,272 - INFO - [G2PT_Trainer] Iter 43620/60000 | Loss: 0.1531 | LR: 1.17e-05 | Time/Iter: 1094.95ms | MFU: 85.50%
+2025-05-06 12:11:19,140 - INFO - [G2PT_Trainer] Iter 43630/60000 | Loss: 0.1475 | LR: 1.17e-05 | Time/Iter: 1092.48ms | MFU: 85.53%
+2025-05-06 12:11:30,053 - INFO - [G2PT_Trainer] Iter 43640/60000 | Loss: 0.1540 | LR: 1.17e-05 | Time/Iter: 1087.15ms | MFU: 85.60%
+2025-05-06 12:11:41,116 - INFO - [G2PT_Trainer] Iter 43650/60000 | Loss: 0.1294 | LR: 1.17e-05 | Time/Iter: 1085.90ms | MFU: 85.68%
+2025-05-06 12:11:51,970 - INFO - [G2PT_Trainer] Iter 43660/60000 | Loss: 0.1420 | LR: 1.17e-05 | Time/Iter: 1077.29ms | MFU: 85.81%
+2025-05-06 12:12:02,842 - INFO - [G2PT_Trainer] Iter 43670/60000 | Loss: 0.1396 | LR: 1.17e-05 | Time/Iter: 1085.08ms | MFU: 85.87%
+2025-05-06 12:12:13,703 - INFO - [G2PT_Trainer] Iter 43680/60000 | Loss: 0.1200 | LR: 1.17e-05 | Time/Iter: 1082.91ms | MFU: 85.94%
+2025-05-06 12:12:24,771 - INFO - [G2PT_Trainer] Iter 43690/60000 | Loss: 0.1135 | LR: 1.17e-05 | Time/Iter: 1091.87ms | MFU: 85.93%
+2025-05-06 12:12:35,610 - INFO - [G2PT_Trainer] Iter 43700/60000 | Loss: 0.1465 | LR: 1.17e-05 | Time/Iter: 1081.10ms | MFU: 86.01%
+2025-05-06 12:12:46,480 - INFO - [G2PT_Trainer] Iter 43710/60000 | Loss: 0.1302 | LR: 1.17e-05 | Time/Iter: 1089.91ms | MFU: 86.01%
+2025-05-06 12:12:57,488 - INFO - [G2PT_Trainer] Iter 43720/60000 | Loss: 0.1455 | LR: 1.17e-05 | Time/Iter: 1065.10ms | MFU: 86.21%
+2025-05-06 12:13:08,377 - INFO - [G2PT_Trainer] Iter 43730/60000 | Loss: 0.1300 | LR: 1.17e-05 | Time/Iter: 1088.82ms | MFU: 86.20%
+2025-05-06 12:13:19,252 - INFO - [G2PT_Trainer] Iter 43740/60000 | Loss: 0.1494 | LR: 1.17e-05 | Time/Iter: 1084.34ms | MFU: 86.23%
+2025-05-06 12:13:30,129 - INFO - [G2PT_Trainer] Iter 43750/60000 | Loss: 0.1365 | LR: 1.17e-05 | Time/Iter: 1084.05ms | MFU: 86.25%
+2025-05-06 12:13:41,154 - INFO - [G2PT_Trainer] Iter 43760/60000 | Loss: 0.1394 | LR: 1.16e-05 | Time/Iter: 1079.05ms | MFU: 86.32%
+2025-05-06 12:13:52,061 - INFO - [G2PT_Trainer] Iter 43770/60000 | Loss: 0.1361 | LR: 1.16e-05 | Time/Iter: 1085.37ms | MFU: 86.32%
+2025-05-06 12:14:02,949 - INFO - [G2PT_Trainer] Iter 43780/60000 | Loss: 0.1321 | LR: 1.16e-05 | Time/Iter: 1082.03ms | MFU: 86.35%
+2025-05-06 12:14:13,953 - INFO - [G2PT_Trainer] Iter 43790/60000 | Loss: 0.1566 | LR: 1.16e-05 | Time/Iter: 1079.93ms | MFU: 86.40%
+2025-05-06 12:14:24,818 - INFO - [G2PT_Trainer] Iter 43800/60000 | Loss: 0.1430 | LR: 1.16e-05 | Time/Iter: 1085.67ms | MFU: 86.39%
+2025-05-06 12:14:35,679 - INFO - [G2PT_Trainer] Iter 43810/60000 | Loss: 0.1382 | LR: 1.16e-05 | Time/Iter: 1075.21ms | MFU: 86.47%
+2025-05-06 12:14:37,585 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 43812, micro 7. Resetting.
+2025-05-06 12:14:46,298 - INFO - [G2PT_Trainer] Iter 43820/60000 | Loss: 0.1363 | LR: 1.16e-05 | Time/Iter: 1086.84ms | MFU: 86.45%
+2025-05-06 12:14:57,340 - INFO - [G2PT_Trainer] Iter 43830/60000 | Loss: 0.1260 | LR: 1.16e-05 | Time/Iter: 1091.72ms | MFU: 86.39%
+2025-05-06 12:15:08,178 - INFO - [G2PT_Trainer] Iter 43840/60000 | Loss: 0.1370 | LR: 1.16e-05 | Time/Iter: 1084.87ms | MFU: 86.40%
+2025-05-06 12:15:19,041 - INFO - [G2PT_Trainer] Iter 43850/60000 | Loss: 0.1334 | LR: 1.16e-05 | Time/Iter: 1079.96ms | MFU: 86.44%
+2025-05-06 12:15:30,033 - INFO - [G2PT_Trainer] Iter 43860/60000 | Loss: 0.1319 | LR: 1.16e-05 | Time/Iter: 1085.34ms | MFU: 86.43%
+2025-05-06 12:15:40,907 - INFO - [G2PT_Trainer] Iter 43870/60000 | Loss: 0.1448 | LR: 1.16e-05 | Time/Iter: 1084.38ms | MFU: 86.43%
+2025-05-06 12:15:51,795 - INFO - [G2PT_Trainer] Iter 43880/60000 | Loss: 0.1301 | LR: 1.16e-05 | Time/Iter: 1080.77ms | MFU: 86.47%
+2025-05-06 12:16:02,675 - INFO - [G2PT_Trainer] Iter 43890/60000 | Loss: 0.1327 | LR: 1.16e-05 | Time/Iter: 1071.15ms | MFU: 86.57%
+2025-05-06 12:16:13,707 - INFO - [G2PT_Trainer] Iter 43900/60000 | Loss: 0.1460 | LR: 1.16e-05 | Time/Iter: 1079.76ms | MFU: 86.60%
+2025-05-06 12:16:24,585 - INFO - [G2PT_Trainer] Iter 43910/60000 | Loss: 0.1481 | LR: 1.16e-05 | Time/Iter: 1070.55ms | MFU: 86.69%
+2025-05-06 12:16:35,485 - INFO - [G2PT_Trainer] Iter 43920/60000 | Loss: 0.1532 | LR: 1.16e-05 | Time/Iter: 1083.13ms | MFU: 86.68%
+2025-05-06 12:16:46,489 - INFO - [G2PT_Trainer] Iter 43930/60000 | Loss: 0.1450 | LR: 1.16e-05 | Time/Iter: 1080.88ms | MFU: 86.69%
+2025-05-06 12:16:57,342 - INFO - [G2PT_Trainer] Iter 43940/60000 | Loss: 0.1380 | LR: 1.16e-05 | Time/Iter: 1077.43ms | MFU: 86.72%
+2025-05-06 12:17:08,220 - INFO - [G2PT_Trainer] Iter 43950/60000 | Loss: 0.1382 | LR: 1.15e-05 | Time/Iter: 1081.16ms | MFU: 86.72%
+2025-05-06 12:17:19,081 - INFO - [G2PT_Trainer] Iter 43960/60000 | Loss: 0.1558 | LR: 1.15e-05 | Time/Iter: 1082.11ms | MFU: 86.71%
+2025-05-06 12:17:30,084 - INFO - [G2PT_Trainer] Iter 43970/60000 | Loss: 0.1391 | LR: 1.15e-05 | Time/Iter: 1081.20ms | MFU: 86.71%
+2025-05-06 12:17:40,982 - INFO - [G2PT_Trainer] Iter 43980/60000 | Loss: 0.1438 | LR: 1.15e-05 | Time/Iter: 1083.32ms | MFU: 86.69%
+2025-05-06 12:17:51,907 - INFO - [G2PT_Trainer] Iter 43990/60000 | Loss: 0.1280 | LR: 1.15e-05 | Time/Iter: 1104.37ms | MFU: 86.51%
+2025-05-06 12:18:01,888 - INFO - [G2PT_Trainer] --- Starting Eval Iter 44000 (Eval #46) ---
+2025-05-06 12:18:46,049 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1155, Val: 0.1855
+2025-05-06 12:18:46,049 - INFO - [G2PT_Trainer] 
+--- Starting Validity Check ---
+2025-05-06 12:18:46,049 - INFO - [G2PT_Trainer] Sampling 1000 graphs...
+2025-05-06 12:18:46,049 - INFO - [G2PT_Trainer] Generation params: temp=0.6, top_k=None, max_new_tokens=768, batch_size=256
+
+--- AIG Generation Summary ---
+Total sequences generated   : 1000
+Successfully converted    : 1000
+Errors during conversion  : 0
+------------------------------
+2025-05-06 12:19:37,073 - INFO - [G2PT_Trainer] Generated and parsed 1000 graphs.
+2025-05-06 12:19:37,073 - INFO - [G2PT_Trainer] Evaluating validity of 1000 graphs...
+2025-05-06 12:19:37,346 - INFO - [evaluate_g2pt_aigs] Validated 1000 graphs. Structurally Valid: 901 (90.10%)
+2025-05-06 12:19:37,346 - INFO - [G2PT_Trainer] --- Validity Score: 0.9010 ---
+2025-05-06 12:19:37,347 - INFO - [G2PT_Trainer] Val loss no improve: 3/7
+2025-05-06 12:19:37,347 - INFO - [G2PT_Trainer] --- Finished Eval Iter 44000 ---
+2025-05-06 12:19:38,393 - INFO - [G2PT_Trainer] Iter 44000/60000 | Loss: 0.1384 | LR: 1.15e-05 | Time/Iter: 96550.81ms | MFU: 77.96%
+2025-05-06 12:19:49,372 - INFO - [G2PT_Trainer] Iter 44010/60000 | Loss: 0.1457 | LR: 1.15e-05 | Time/Iter: 1082.34ms | MFU: 78.82%
+2025-05-06 12:20:00,327 - INFO - [G2PT_Trainer] Iter 44020/60000 | Loss: 0.1335 | LR: 1.15e-05 | Time/Iter: 1092.89ms | MFU: 79.52%
+2025-05-06 12:20:11,257 - INFO - [G2PT_Trainer] Iter 44030/60000 | Loss: 0.1358 | LR: 1.15e-05 | Time/Iter: 1094.95ms | MFU: 80.13%
+2025-05-06 12:20:22,400 - INFO - [G2PT_Trainer] Iter 44040/60000 | Loss: 0.1459 | LR: 1.15e-05 | Time/Iter: 1095.63ms | MFU: 80.67%
+2025-05-06 12:20:33,324 - INFO - [G2PT_Trainer] Iter 44050/60000 | Loss: 0.1650 | LR: 1.15e-05 | Time/Iter: 1100.17ms | MFU: 81.13%
+2025-05-06 12:20:44,283 - INFO - [G2PT_Trainer] Iter 44060/60000 | Loss: 0.1348 | LR: 1.15e-05 | Time/Iter: 1089.25ms | MFU: 81.62%
+2025-05-06 12:20:55,197 - INFO - [G2PT_Trainer] Iter 44070/60000 | Loss: 0.1520 | LR: 1.15e-05 | Time/Iter: 1077.89ms | MFU: 82.16%
+2025-05-06 12:21:06,239 - INFO - [G2PT_Trainer] Iter 44080/60000 | Loss: 0.1349 | LR: 1.15e-05 | Time/Iter: 1082.06ms | MFU: 82.61%
+2025-05-06 12:21:17,197 - INFO - [G2PT_Trainer] Iter 44090/60000 | Loss: 0.1395 | LR: 1.15e-05 | Time/Iter: 1089.03ms | MFU: 82.95%
+2025-05-06 12:21:28,153 - INFO - [G2PT_Trainer] Iter 44100/60000 | Loss: 0.1355 | LR: 1.15e-05 | Time/Iter: 1091.78ms | MFU: 83.24%
+2025-05-06 12:21:39,115 - INFO - [G2PT_Trainer] Iter 44110/60000 | Loss: 0.1331 | LR: 1.15e-05 | Time/Iter: 1079.49ms | MFU: 83.60%
+2025-05-06 12:21:50,186 - INFO - [G2PT_Trainer] Iter 44120/60000 | Loss: 0.1236 | LR: 1.15e-05 | Time/Iter: 1088.62ms | MFU: 83.86%
+2025-05-06 12:22:01,109 - INFO - [G2PT_Trainer] Iter 44130/60000 | Loss: 0.1352 | LR: 1.15e-05 | Time/Iter: 1097.56ms | MFU: 84.01%
+2025-05-06 12:22:12,028 - INFO - [G2PT_Trainer] Iter 44140/60000 | Loss: 0.1382 | LR: 1.15e-05 | Time/Iter: 1097.92ms | MFU: 84.15%
+2025-05-06 12:22:23,092 - INFO - [G2PT_Trainer] Iter 44150/60000 | Loss: 0.1310 | LR: 1.14e-05 | Time/Iter: 1090.48ms | MFU: 84.33%
+2025-05-06 12:22:34,020 - INFO - [G2PT_Trainer] Iter 44160/60000 | Loss: 0.1258 | LR: 1.14e-05 | Time/Iter: 1097.94ms | MFU: 84.44%
+2025-05-06 12:22:44,954 - INFO - [G2PT_Trainer] Iter 44170/60000 | Loss: 0.1374 | LR: 1.14e-05 | Time/Iter: 1086.68ms | MFU: 84.62%
+2025-05-06 12:22:55,877 - INFO - [G2PT_Trainer] Iter 44180/60000 | Loss: 0.1435 | LR: 1.14e-05 | Time/Iter: 1078.94ms | MFU: 84.85%
+2025-05-06 12:23:06,956 - INFO - [G2PT_Trainer] Iter 44190/60000 | Loss: 0.1355 | LR: 1.14e-05 | Time/Iter: 1084.45ms | MFU: 85.01%
+2025-05-06 12:23:17,907 - INFO - [G2PT_Trainer] Iter 44200/60000 | Loss: 0.1266 | LR: 1.14e-05 | Time/Iter: 1095.77ms | MFU: 85.06%
+2025-05-06 12:23:28,833 - INFO - [G2PT_Trainer] Iter 44210/60000 | Loss: 0.1417 | LR: 1.14e-05 | Time/Iter: 1084.80ms | MFU: 85.20%
+2025-05-06 12:23:39,833 - INFO - [G2PT_Trainer] Iter 44220/60000 | Loss: 0.1391 | LR: 1.14e-05 | Time/Iter: 1103.18ms | MFU: 85.18%
+2025-05-06 12:23:51,003 - INFO - [G2PT_Trainer] Iter 44230/60000 | Loss: 0.1344 | LR: 1.14e-05 | Time/Iter: 1098.94ms | MFU: 85.19%
+2025-05-06 12:24:02,014 - INFO - [G2PT_Trainer] Iter 44240/60000 | Loss: 0.1489 | LR: 1.14e-05 | Time/Iter: 1092.86ms | MFU: 85.25%
+2025-05-06 12:24:13,058 - INFO - [G2PT_Trainer] Iter 44250/60000 | Loss: 0.1304 | LR: 1.14e-05 | Time/Iter: 1097.49ms | MFU: 85.27%
+2025-05-06 12:24:24,229 - INFO - [G2PT_Trainer] Iter 44260/60000 | Loss: 0.1465 | LR: 1.14e-05 | Time/Iter: 1088.14ms | MFU: 85.36%
+2025-05-06 12:24:35,272 - INFO - [G2PT_Trainer] Iter 44270/60000 | Loss: 0.1636 | LR: 1.14e-05 | Time/Iter: 1102.21ms | MFU: 85.33%
+2025-05-06 12:24:46,344 - INFO - [G2PT_Trainer] Iter 44280/60000 | Loss: 0.1247 | LR: 1.14e-05 | Time/Iter: 1097.44ms | MFU: 85.34%
+2025-05-06 12:24:57,353 - INFO - [G2PT_Trainer] Iter 44290/60000 | Loss: 0.1313 | LR: 1.14e-05 | Time/Iter: 1089.06ms | MFU: 85.41%
+2025-05-06 12:25:08,520 - INFO - [G2PT_Trainer] Iter 44300/60000 | Loss: 0.1519 | LR: 1.14e-05 | Time/Iter: 1096.43ms | MFU: 85.42%
+2025-05-06 12:25:19,549 - INFO - [G2PT_Trainer] Iter 44310/60000 | Loss: 0.1376 | LR: 1.14e-05 | Time/Iter: 1093.72ms | MFU: 85.45%
+2025-05-06 12:25:30,569 - INFO - [G2PT_Trainer] Iter 44320/60000 | Loss: 0.1229 | LR: 1.14e-05 | Time/Iter: 1090.06ms | MFU: 85.50%
+2025-05-06 12:25:41,622 - INFO - [G2PT_Trainer] Iter 44330/60000 | Loss: 0.1221 | LR: 1.14e-05 | Time/Iter: 1102.03ms | MFU: 85.46%
+2025-05-06 12:25:52,824 - INFO - [G2PT_Trainer] Iter 44340/60000 | Loss: 0.1528 | LR: 1.14e-05 | Time/Iter: 1102.33ms | MFU: 85.42%
+2025-05-06 12:26:03,877 - INFO - [G2PT_Trainer] Iter 44350/60000 | Loss: 0.1431 | LR: 1.14e-05 | Time/Iter: 1109.11ms | MFU: 85.33%
+2025-05-06 12:26:14,955 - INFO - [G2PT_Trainer] Iter 44360/60000 | Loss: 0.1491 | LR: 1.13e-05 | Time/Iter: 1099.37ms | MFU: 85.33%
+2025-05-06 12:26:25,975 - INFO - [G2PT_Trainer] Iter 44370/60000 | Loss: 0.1288 | LR: 1.13e-05 | Time/Iter: 1105.12ms | MFU: 85.28%
+2025-05-06 12:26:37,192 - INFO - [G2PT_Trainer] Iter 44380/60000 | Loss: 0.1386 | LR: 1.13e-05 | Time/Iter: 1102.66ms | MFU: 85.25%
+2025-05-06 12:26:48,222 - INFO - [G2PT_Trainer] Iter 44390/60000 | Loss: 0.1375 | LR: 1.13e-05 | Time/Iter: 1085.93ms | MFU: 85.36%
+2025-05-06 12:26:59,258 - INFO - [G2PT_Trainer] Iter 44400/60000 | Loss: 0.1211 | LR: 1.13e-05 | Time/Iter: 1097.39ms | MFU: 85.37%
+2025-05-06 12:27:10,430 - INFO - [G2PT_Trainer] Iter 44410/60000 | Loss: 0.1341 | LR: 1.13e-05 | Time/Iter: 1110.76ms | MFU: 85.27%
+2025-05-06 12:27:21,486 - INFO - [G2PT_Trainer] Iter 44420/60000 | Loss: 0.1352 | LR: 1.13e-05 | Time/Iter: 1100.85ms | MFU: 85.26%
+2025-05-06 12:27:32,548 - INFO - [G2PT_Trainer] Iter 44430/60000 | Loss: 0.1437 | LR: 1.13e-05 | Time/Iter: 1100.85ms | MFU: 85.25%
+2025-05-06 12:27:43,611 - INFO - [G2PT_Trainer] Iter 44440/60000 | Loss: 0.1416 | LR: 1.13e-05 | Time/Iter: 1095.46ms | MFU: 85.28%
+2025-05-06 12:27:54,781 - INFO - [G2PT_Trainer] Iter 44450/60000 | Loss: 0.1404 | LR: 1.13e-05 | Time/Iter: 1099.30ms | MFU: 85.28%
+2025-05-06 12:28:05,783 - INFO - [G2PT_Trainer] Iter 44460/60000 | Loss: 0.1426 | LR: 1.13e-05 | Time/Iter: 1101.81ms | MFU: 85.26%
+2025-05-06 12:28:16,838 - INFO - [G2PT_Trainer] Iter 44470/60000 | Loss: 0.1349 | LR: 1.13e-05 | Time/Iter: 1097.80ms | MFU: 85.28%
+2025-05-06 12:28:27,862 - INFO - [G2PT_Trainer] Iter 44480/60000 | Loss: 0.1326 | LR: 1.13e-05 | Time/Iter: 1088.86ms | MFU: 85.36%
+2025-05-06 12:28:39,057 - INFO - [G2PT_Trainer] Iter 44490/60000 | Loss: 0.1289 | LR: 1.13e-05 | Time/Iter: 1101.24ms | MFU: 85.34%
+2025-05-06 12:28:50,081 - INFO - [G2PT_Trainer] Iter 44500/60000 | Loss: 0.1477 | LR: 1.13e-05 | Time/Iter: 1096.43ms | MFU: 85.35%
+2025-05-06 12:29:01,146 - INFO - [G2PT_Trainer] Iter 44510/60000 | Loss: 0.1531 | LR: 1.13e-05 | Time/Iter: 1100.42ms | MFU: 85.34%
+2025-05-06 12:29:12,149 - INFO - [G2PT_Trainer] Iter 44520/60000 | Loss: 0.1416 | LR: 1.13e-05 | Time/Iter: 1081.94ms | MFU: 85.47%
+2025-05-06 12:29:23,196 - INFO - [G2PT_Trainer] Iter 44530/60000 | Loss: 0.1400 | LR: 1.13e-05 | Time/Iter: 1088.77ms | MFU: 85.53%
+2025-05-06 12:29:34,165 - INFO - [G2PT_Trainer] Iter 44540/60000 | Loss: 0.1438 | LR: 1.13e-05 | Time/Iter: 1085.36ms | MFU: 85.62%
+2025-05-06 12:29:45,108 - INFO - [G2PT_Trainer] Iter 44550/60000 | Loss: 0.1341 | LR: 1.13e-05 | Time/Iter: 1087.93ms | MFU: 85.67%
+2025-05-06 12:29:56,012 - INFO - [G2PT_Trainer] Iter 44560/60000 | Loss: 0.1173 | LR: 1.13e-05 | Time/Iter: 1093.50ms | MFU: 85.68%
+2025-05-06 12:30:07,063 - INFO - [G2PT_Trainer] Iter 44570/60000 | Loss: 0.1544 | LR: 1.12e-05 | Time/Iter: 1088.60ms | MFU: 85.72%
+2025-05-06 12:30:17,977 - INFO - [G2PT_Trainer] Iter 44580/60000 | Loss: 0.1322 | LR: 1.12e-05 | Time/Iter: 1087.12ms | MFU: 85.77%
+2025-05-06 12:30:28,893 - INFO - [G2PT_Trainer] Iter 44590/60000 | Loss: 0.1340 | LR: 1.12e-05 | Time/Iter: 1081.35ms | MFU: 85.87%
+2025-05-06 12:30:39,946 - INFO - [G2PT_Trainer] Iter 44600/60000 | Loss: 0.1481 | LR: 1.12e-05 | Time/Iter: 1079.60ms | MFU: 85.96%
+2025-05-06 12:30:50,899 - INFO - [G2PT_Trainer] Iter 44610/60000 | Loss: 0.1321 | LR: 1.12e-05 | Time/Iter: 1089.94ms | MFU: 85.97%
+2025-05-06 12:31:01,859 - INFO - [G2PT_Trainer] Iter 44620/60000 | Loss: 0.1489 | LR: 1.12e-05 | Time/Iter: 1093.86ms | MFU: 85.94%
+2025-05-06 12:31:07,022 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 44625, micro 7. Resetting.
+2025-05-06 12:31:12,558 - INFO - [G2PT_Trainer] Iter 44630/60000 | Loss: 0.1360 | LR: 1.12e-05 | Time/Iter: 1099.92ms | MFU: 85.87%
+2025-05-06 12:31:23,663 - INFO - [G2PT_Trainer] Iter 44640/60000 | Loss: 0.1218 | LR: 1.12e-05 | Time/Iter: 1095.36ms | MFU: 85.84%
+2025-05-06 12:31:34,642 - INFO - [G2PT_Trainer] Iter 44650/60000 | Loss: 0.1360 | LR: 1.12e-05 | Time/Iter: 1097.48ms | MFU: 85.80%
+2025-05-06 12:31:45,540 - INFO - [G2PT_Trainer] Iter 44660/60000 | Loss: 0.1450 | LR: 1.12e-05 | Time/Iter: 1084.53ms | MFU: 85.86%
+2025-05-06 12:31:56,485 - INFO - [G2PT_Trainer] Iter 44670/60000 | Loss: 0.1303 | LR: 1.12e-05 | Time/Iter: 1092.68ms | MFU: 85.86%
+2025-05-06 12:32:07,596 - INFO - [G2PT_Trainer] Iter 44680/60000 | Loss: 0.1418 | LR: 1.12e-05 | Time/Iter: 1089.68ms | MFU: 85.88%
+2025-05-06 12:32:18,538 - INFO - [G2PT_Trainer] Iter 44690/60000 | Loss: 0.1490 | LR: 1.12e-05 | Time/Iter: 1084.06ms | MFU: 85.94%
+2025-05-06 12:32:29,574 - INFO - [G2PT_Trainer] Iter 44700/60000 | Loss: 0.1427 | LR: 1.12e-05 | Time/Iter: 1096.85ms | MFU: 85.89%
+2025-05-06 12:32:40,720 - INFO - [G2PT_Trainer] Iter 44710/60000 | Loss: 0.1589 | LR: 1.12e-05 | Time/Iter: 1074.13ms | MFU: 86.03%
+2025-05-06 12:32:51,728 - INFO - [G2PT_Trainer] Iter 44720/60000 | Loss: 0.1420 | LR: 1.12e-05 | Time/Iter: 1096.37ms | MFU: 85.98%
+2025-05-06 12:33:02,808 - INFO - [G2PT_Trainer] Iter 44730/60000 | Loss: 0.1277 | LR: 1.12e-05 | Time/Iter: 1114.21ms | MFU: 85.79%
+2025-05-06 12:33:13,859 - INFO - [G2PT_Trainer] Iter 44740/60000 | Loss: 0.1435 | LR: 1.12e-05 | Time/Iter: 1097.53ms | MFU: 85.76%
+2025-05-06 12:33:25,053 - INFO - [G2PT_Trainer] Iter 44750/60000 | Loss: 0.1438 | LR: 1.12e-05 | Time/Iter: 1107.50ms | MFU: 85.65%
+2025-05-06 12:33:36,047 - INFO - [G2PT_Trainer] Iter 44760/60000 | Loss: 0.1365 | LR: 1.12e-05 | Time/Iter: 1094.69ms | MFU: 85.64%
+2025-05-06 12:33:47,081 - INFO - [G2PT_Trainer] Iter 44770/60000 | Loss: 0.1215 | LR: 1.12e-05 | Time/Iter: 1093.56ms | MFU: 85.65%
+2025-05-06 12:33:58,108 - INFO - [G2PT_Trainer] Iter 44780/60000 | Loss: 0.1636 | LR: 1.12e-05 | Time/Iter: 1097.83ms | MFU: 85.63%
+2025-05-06 12:34:09,313 - INFO - [G2PT_Trainer] Iter 44790/60000 | Loss: 0.1289 | LR: 1.12e-05 | Time/Iter: 1113.54ms | MFU: 85.48%
+2025-05-06 12:34:20,385 - INFO - [G2PT_Trainer] Iter 44800/60000 | Loss: 0.1528 | LR: 1.11e-05 | Time/Iter: 1103.24ms | MFU: 85.43%
+2025-05-06 12:34:31,508 - INFO - [G2PT_Trainer] Iter 44810/60000 | Loss: 0.1304 | LR: 1.11e-05 | Time/Iter: 1103.50ms | MFU: 85.39%
+2025-05-06 12:34:42,622 - INFO - [G2PT_Trainer] Iter 44820/60000 | Loss: 0.1276 | LR: 1.11e-05 | Time/Iter: 1109.69ms | MFU: 85.30%
+2025-05-06 12:34:53,891 - INFO - [G2PT_Trainer] Iter 44830/60000 | Loss: 0.1264 | LR: 1.11e-05 | Time/Iter: 1109.55ms | MFU: 85.21%
+2025-05-06 12:35:05,023 - INFO - [G2PT_Trainer] Iter 44840/60000 | Loss: 0.1201 | LR: 1.11e-05 | Time/Iter: 1110.11ms | MFU: 85.14%
+2025-05-06 12:35:16,160 - INFO - [G2PT_Trainer] Iter 44850/60000 | Loss: 0.1307 | LR: 1.11e-05 | Time/Iter: 1113.47ms | MFU: 85.04%
+2025-05-06 12:35:27,425 - INFO - [G2PT_Trainer] Iter 44860/60000 | Loss: 0.1340 | LR: 1.11e-05 | Time/Iter: 1109.27ms | MFU: 84.99%
+2025-05-06 12:35:38,497 - INFO - [G2PT_Trainer] Iter 44870/60000 | Loss: 0.1318 | LR: 1.11e-05 | Time/Iter: 1091.48ms | MFU: 85.08%
+2025-05-06 12:35:49,611 - INFO - [G2PT_Trainer] Iter 44880/60000 | Loss: 0.1446 | LR: 1.11e-05 | Time/Iter: 1101.09ms | MFU: 85.09%
+2025-05-06 12:36:00,707 - INFO - [G2PT_Trainer] Iter 44890/60000 | Loss: 0.1455 | LR: 1.11e-05 | Time/Iter: 1093.36ms | MFU: 85.15%
+2025-05-06 12:36:12,008 - INFO - [G2PT_Trainer] Iter 44900/60000 | Loss: 0.1447 | LR: 1.11e-05 | Time/Iter: 1103.22ms | MFU: 85.14%
+2025-05-06 12:36:23,144 - INFO - [G2PT_Trainer] Iter 44910/60000 | Loss: 0.1407 | LR: 1.11e-05 | Time/Iter: 1114.69ms | MFU: 85.03%
+2025-05-06 12:36:34,259 - INFO - [G2PT_Trainer] Iter 44920/60000 | Loss: 0.1399 | LR: 1.11e-05 | Time/Iter: 1108.91ms | MFU: 84.98%
+2025-05-06 12:36:45,535 - INFO - [G2PT_Trainer] Iter 44930/60000 | Loss: 0.1391 | LR: 1.11e-05 | Time/Iter: 1264.70ms | MFU: 83.90%
+2025-05-06 12:36:56,649 - INFO - [G2PT_Trainer] Iter 44940/60000 | Loss: 0.1416 | LR: 1.11e-05 | Time/Iter: 1109.35ms | MFU: 83.96%
+2025-05-06 12:37:07,750 - INFO - [G2PT_Trainer] Iter 44950/60000 | Loss: 0.1445 | LR: 1.11e-05 | Time/Iter: 1117.66ms | MFU: 83.95%
+2025-05-06 12:37:18,856 - INFO - [G2PT_Trainer] Iter 44960/60000 | Loss: 0.1445 | LR: 1.11e-05 | Time/Iter: 1102.78ms | MFU: 84.06%
+2025-05-06 12:37:30,146 - INFO - [G2PT_Trainer] Iter 44970/60000 | Loss: 0.1344 | LR: 1.11e-05 | Time/Iter: 1112.67ms | MFU: 84.08%
+2025-05-06 12:37:41,159 - INFO - [G2PT_Trainer] Iter 44980/60000 | Loss: 0.1357 | LR: 1.11e-05 | Time/Iter: 1086.20ms | MFU: 84.30%
+2025-05-06 12:37:52,177 - INFO - [G2PT_Trainer] Iter 44990/60000 | Loss: 0.1373 | LR: 1.11e-05 | Time/Iter: 1085.56ms | MFU: 84.51%
+2025-05-06 12:38:02,117 - INFO - [G2PT_Trainer] --- Starting Eval Iter 45000 (Eval #47) ---
+2025-05-06 12:38:46,624 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1126, Val: 0.1864
+2025-05-06 12:38:46,625 - INFO - [G2PT_Trainer] Val loss no improve: 4/7
+2025-05-06 12:38:46,625 - INFO - [G2PT_Trainer] --- Finished Eval Iter 45000 ---
+2025-05-06 12:38:47,675 - INFO - [G2PT_Trainer] Iter 45000/60000 | Loss: 0.1208 | LR: 1.11e-05 | Time/Iter: 45605.98ms | MFU: 76.26%
+2025-05-06 12:38:58,817 - INFO - [G2PT_Trainer] Iter 45010/60000 | Loss: 0.1264 | LR: 1.11e-05 | Time/Iter: 1096.54ms | MFU: 77.18%
+2025-05-06 12:39:09,818 - INFO - [G2PT_Trainer] Iter 45020/60000 | Loss: 0.1335 | LR: 1.11e-05 | Time/Iter: 1100.67ms | MFU: 77.98%
+2025-05-06 12:39:20,824 - INFO - [G2PT_Trainer] Iter 45030/60000 | Loss: 0.1488 | LR: 1.10e-05 | Time/Iter: 1090.45ms | MFU: 78.78%
+2025-05-06 12:39:31,972 - INFO - [G2PT_Trainer] Iter 45040/60000 | Loss: 0.1464 | LR: 1.10e-05 | Time/Iter: 1093.44ms | MFU: 79.48%
+2025-05-06 12:39:42,977 - INFO - [G2PT_Trainer] Iter 45050/60000 | Loss: 0.1532 | LR: 1.10e-05 | Time/Iter: 1112.44ms | MFU: 79.96%
+2025-05-06 12:39:53,962 - INFO - [G2PT_Trainer] Iter 45060/60000 | Loss: 0.1348 | LR: 1.10e-05 | Time/Iter: 1088.44ms | MFU: 80.58%
+2025-05-06 12:40:04,951 - INFO - [G2PT_Trainer] Iter 45070/60000 | Loss: 0.1464 | LR: 1.10e-05 | Time/Iter: 1092.91ms | MFU: 81.10%
+2025-05-06 12:40:16,101 - INFO - [G2PT_Trainer] Iter 45080/60000 | Loss: 0.1600 | LR: 1.10e-05 | Time/Iter: 1098.22ms | MFU: 81.52%
+2025-05-06 12:40:27,094 - INFO - [G2PT_Trainer] Iter 45090/60000 | Loss: 0.1192 | LR: 1.10e-05 | Time/Iter: 1101.25ms | MFU: 81.88%
+2025-05-06 12:40:38,107 - INFO - [G2PT_Trainer] Iter 45100/60000 | Loss: 0.1375 | LR: 1.10e-05 | Time/Iter: 1097.68ms | MFU: 82.24%
+2025-05-06 12:40:49,103 - INFO - [G2PT_Trainer] Iter 45110/60000 | Loss: 0.1214 | LR: 1.10e-05 | Time/Iter: 1099.51ms | MFU: 82.54%
+2025-05-06 12:41:00,238 - INFO - [G2PT_Trainer] Iter 45120/60000 | Loss: 0.1541 | LR: 1.10e-05 | Time/Iter: 1090.36ms | MFU: 82.88%
+2025-05-06 12:41:11,239 - INFO - [G2PT_Trainer] Iter 45130/60000 | Loss: 0.1380 | LR: 1.10e-05 | Time/Iter: 1092.51ms | MFU: 83.18%
+2025-05-06 12:41:22,246 - INFO - [G2PT_Trainer] Iter 45140/60000 | Loss: 0.1629 | LR: 1.10e-05 | Time/Iter: 1095.16ms | MFU: 83.42%
+2025-05-06 12:41:33,378 - INFO - [G2PT_Trainer] Iter 45150/60000 | Loss: 0.1441 | LR: 1.10e-05 | Time/Iter: 1096.13ms | MFU: 83.63%
+2025-05-06 12:41:44,540 - INFO - [G2PT_Trainer] Iter 45160/60000 | Loss: 0.1336 | LR: 1.10e-05 | Time/Iter: 1121.44ms | MFU: 83.63%
+2025-05-06 12:41:55,657 - INFO - [G2PT_Trainer] Iter 45170/60000 | Loss: 0.1356 | LR: 1.10e-05 | Time/Iter: 1098.61ms | MFU: 83.80%
+2025-05-06 12:42:06,774 - INFO - [G2PT_Trainer] Iter 45180/60000 | Loss: 0.1155 | LR: 1.10e-05 | Time/Iter: 1102.47ms | MFU: 83.92%
+2025-05-06 12:42:18,053 - INFO - [G2PT_Trainer] Iter 45190/60000 | Loss: 0.1494 | LR: 1.10e-05 | Time/Iter: 1120.20ms | MFU: 83.90%
+2025-05-06 12:42:29,127 - INFO - [G2PT_Trainer] Iter 45200/60000 | Loss: 0.1439 | LR: 1.10e-05 | Time/Iter: 1094.99ms | MFU: 84.07%
+2025-05-06 12:42:40,275 - INFO - [G2PT_Trainer] Iter 45210/60000 | Loss: 0.1441 | LR: 1.10e-05 | Time/Iter: 1100.66ms | MFU: 84.18%
+2025-05-06 12:42:51,417 - INFO - [G2PT_Trainer] Iter 45220/60000 | Loss: 0.1422 | LR: 1.10e-05 | Time/Iter: 1100.15ms | MFU: 84.28%
+2025-05-06 12:43:02,701 - INFO - [G2PT_Trainer] Iter 45230/60000 | Loss: 0.1339 | LR: 1.10e-05 | Time/Iter: 1113.41ms | MFU: 84.28%
+2025-05-06 12:43:13,836 - INFO - [G2PT_Trainer] Iter 45240/60000 | Loss: 0.1331 | LR: 1.10e-05 | Time/Iter: 1115.78ms | MFU: 84.25%
+2025-05-06 12:43:24,958 - INFO - [G2PT_Trainer] Iter 45250/60000 | Loss: 0.1449 | LR: 1.10e-05 | Time/Iter: 1108.09ms | MFU: 84.29%
+2025-05-06 12:43:36,107 - INFO - [G2PT_Trainer] Iter 45260/60000 | Loss: 0.1351 | LR: 1.10e-05 | Time/Iter: 1112.67ms | MFU: 84.28%
+2025-05-06 12:43:47,381 - INFO - [G2PT_Trainer] Iter 45270/60000 | Loss: 0.1396 | LR: 1.10e-05 | Time/Iter: 1110.96ms | MFU: 84.29%
+2025-05-06 12:43:58,566 - INFO - [G2PT_Trainer] Iter 45280/60000 | Loss: 0.1369 | LR: 1.09e-05 | Time/Iter: 1096.80ms | MFU: 84.41%
+2025-05-06 12:44:09,693 - INFO - [G2PT_Trainer] Iter 45290/60000 | Loss: 0.1444 | LR: 1.09e-05 | Time/Iter: 1106.46ms | MFU: 84.44%
+2025-05-06 12:44:20,999 - INFO - [G2PT_Trainer] Iter 45300/60000 | Loss: 0.1257 | LR: 1.09e-05 | Time/Iter: 1268.45ms | MFU: 83.39%
+2025-05-06 12:44:32,137 - INFO - [G2PT_Trainer] Iter 45310/60000 | Loss: 0.1461 | LR: 1.09e-05 | Time/Iter: 1103.64ms | MFU: 83.55%
+2025-05-06 12:44:43,318 - INFO - [G2PT_Trainer] Iter 45320/60000 | Loss: 0.1550 | LR: 1.09e-05 | Time/Iter: 1111.95ms | MFU: 83.62%
+2025-05-06 12:44:54,445 - INFO - [G2PT_Trainer] Iter 45330/60000 | Loss: 0.1415 | LR: 1.09e-05 | Time/Iter: 1112.38ms | MFU: 83.69%
+2025-05-06 12:45:05,749 - INFO - [G2PT_Trainer] Iter 45340/60000 | Loss: 0.1420 | LR: 1.09e-05 | Time/Iter: 1102.92ms | MFU: 83.82%
+2025-05-06 12:45:16,918 - INFO - [G2PT_Trainer] Iter 45350/60000 | Loss: 0.1320 | LR: 1.09e-05 | Time/Iter: 1118.54ms | MFU: 83.82%
+2025-05-06 12:45:28,055 - INFO - [G2PT_Trainer] Iter 45360/60000 | Loss: 0.1527 | LR: 1.09e-05 | Time/Iter: 1098.66ms | MFU: 83.97%
+2025-05-06 12:45:39,177 - INFO - [G2PT_Trainer] Iter 45370/60000 | Loss: 0.1539 | LR: 1.09e-05 | Time/Iter: 1108.22ms | MFU: 84.03%
+2025-05-06 12:45:50,403 - INFO - [G2PT_Trainer] Iter 45380/60000 | Loss: 0.1299 | LR: 1.09e-05 | Time/Iter: 1107.81ms | MFU: 84.09%
+2025-05-06 12:46:01,552 - INFO - [G2PT_Trainer] Iter 45390/60000 | Loss: 0.1480 | LR: 1.09e-05 | Time/Iter: 1109.44ms | MFU: 84.13%
+2025-05-06 12:46:12,673 - INFO - [G2PT_Trainer] Iter 45400/60000 | Loss: 0.1358 | LR: 1.09e-05 | Time/Iter: 1111.32ms | MFU: 84.16%
+2025-05-06 12:46:23,796 - INFO - [G2PT_Trainer] Iter 45410/60000 | Loss: 0.1407 | LR: 1.09e-05 | Time/Iter: 1111.53ms | MFU: 84.17%
+2025-05-06 12:46:35,055 - INFO - [G2PT_Trainer] Iter 45420/60000 | Loss: 0.1444 | LR: 1.09e-05 | Time/Iter: 1101.15ms | MFU: 84.27%
+2025-05-06 12:46:46,208 - INFO - [G2PT_Trainer] Iter 45430/60000 | Loss: 0.1386 | LR: 1.09e-05 | Time/Iter: 1112.19ms | MFU: 84.27%
+2025-05-06 12:46:54,823 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 45438, micro 7. Resetting.
+2025-05-06 12:46:57,093 - INFO - [G2PT_Trainer] Iter 45440/60000 | Loss: 0.1298 | LR: 1.09e-05 | Time/Iter: 1104.03ms | MFU: 84.34%
+2025-05-06 12:47:08,378 - INFO - [G2PT_Trainer] Iter 45450/60000 | Loss: 0.1516 | LR: 1.09e-05 | Time/Iter: 1256.83ms | MFU: 83.36%
+2025-05-06 12:47:19,497 - INFO - [G2PT_Trainer] Iter 45460/60000 | Loss: 0.1585 | LR: 1.09e-05 | Time/Iter: 1104.01ms | MFU: 83.52%
+2025-05-06 12:47:30,657 - INFO - [G2PT_Trainer] Iter 45470/60000 | Loss: 0.1242 | LR: 1.09e-05 | Time/Iter: 1106.46ms | MFU: 83.64%
+2025-05-06 12:47:41,763 - INFO - [G2PT_Trainer] Iter 45480/60000 | Loss: 0.1297 | LR: 1.09e-05 | Time/Iter: 1115.03ms | MFU: 83.68%
+2025-05-06 12:47:53,040 - INFO - [G2PT_Trainer] Iter 45490/60000 | Loss: 0.1414 | LR: 1.09e-05 | Time/Iter: 1105.43ms | MFU: 83.80%
+2025-05-06 12:48:04,157 - INFO - [G2PT_Trainer] Iter 45500/60000 | Loss: 0.1336 | LR: 1.09e-05 | Time/Iter: 1101.70ms | MFU: 83.93%
+2025-05-06 12:48:15,196 - INFO - [G2PT_Trainer] Iter 45510/60000 | Loss: 0.1338 | LR: 1.09e-05 | Time/Iter: 1098.91ms | MFU: 84.06%
+2025-05-06 12:48:26,183 - INFO - [G2PT_Trainer] Iter 45520/60000 | Loss: 0.1486 | LR: 1.09e-05 | Time/Iter: 1083.67ms | MFU: 84.31%
+2025-05-06 12:48:37,329 - INFO - [G2PT_Trainer] Iter 45530/60000 | Loss: 0.1241 | LR: 1.08e-05 | Time/Iter: 1094.36ms | MFU: 84.44%
+2025-05-06 12:48:48,353 - INFO - [G2PT_Trainer] Iter 45540/60000 | Loss: 0.1417 | LR: 1.08e-05 | Time/Iter: 1102.26ms | MFU: 84.51%
+2025-05-06 12:48:59,354 - INFO - [G2PT_Trainer] Iter 45550/60000 | Loss: 0.1435 | LR: 1.08e-05 | Time/Iter: 1088.03ms | MFU: 84.67%
+2025-05-06 12:49:10,341 - INFO - [G2PT_Trainer] Iter 45560/60000 | Loss: 0.1216 | LR: 1.08e-05 | Time/Iter: 1091.94ms | MFU: 84.79%
+2025-05-06 12:49:21,505 - INFO - [G2PT_Trainer] Iter 45570/60000 | Loss: 0.1491 | LR: 1.08e-05 | Time/Iter: 1106.15ms | MFU: 84.79%
+2025-05-06 12:49:32,491 - INFO - [G2PT_Trainer] Iter 45580/60000 | Loss: 0.1337 | LR: 1.08e-05 | Time/Iter: 1105.10ms | MFU: 84.79%
+2025-05-06 12:49:43,488 - INFO - [G2PT_Trainer] Iter 45590/60000 | Loss: 0.1494 | LR: 1.08e-05 | Time/Iter: 1090.59ms | MFU: 84.91%
+2025-05-06 12:49:54,637 - INFO - [G2PT_Trainer] Iter 45600/60000 | Loss: 0.1462 | LR: 1.08e-05 | Time/Iter: 1246.89ms | MFU: 83.94%
+2025-05-06 12:50:05,638 - INFO - [G2PT_Trainer] Iter 45610/60000 | Loss: 0.1491 | LR: 1.08e-05 | Time/Iter: 1096.29ms | MFU: 84.09%
+2025-05-06 12:50:16,631 - INFO - [G2PT_Trainer] Iter 45620/60000 | Loss: 0.1438 | LR: 1.08e-05 | Time/Iter: 1091.26ms | MFU: 84.28%
+2025-05-06 12:50:27,642 - INFO - [G2PT_Trainer] Iter 45630/60000 | Loss: 0.1351 | LR: 1.08e-05 | Time/Iter: 1093.03ms | MFU: 84.42%
+2025-05-06 12:50:38,780 - INFO - [G2PT_Trainer] Iter 45640/60000 | Loss: 0.1419 | LR: 1.08e-05 | Time/Iter: 1099.51ms | MFU: 84.51%
+2025-05-06 12:50:49,783 - INFO - [G2PT_Trainer] Iter 45650/60000 | Loss: 0.1369 | LR: 1.08e-05 | Time/Iter: 1096.85ms | MFU: 84.61%
+2025-05-06 12:51:00,795 - INFO - [G2PT_Trainer] Iter 45660/60000 | Loss: 0.1434 | LR: 1.08e-05 | Time/Iter: 1081.83ms | MFU: 84.81%
+2025-05-06 12:51:11,822 - INFO - [G2PT_Trainer] Iter 45670/60000 | Loss: 0.1357 | LR: 1.08e-05 | Time/Iter: 1100.69ms | MFU: 84.85%
+2025-05-06 12:51:22,957 - INFO - [G2PT_Trainer] Iter 45680/60000 | Loss: 0.1324 | LR: 1.08e-05 | Time/Iter: 1090.42ms | MFU: 84.96%
+2025-05-06 12:51:33,985 - INFO - [G2PT_Trainer] Iter 45690/60000 | Loss: 0.1330 | LR: 1.08e-05 | Time/Iter: 1093.42ms | MFU: 85.04%
+2025-05-06 12:51:44,976 - INFO - [G2PT_Trainer] Iter 45700/60000 | Loss: 0.1367 | LR: 1.08e-05 | Time/Iter: 1085.42ms | MFU: 85.17%
+2025-05-06 12:51:55,991 - INFO - [G2PT_Trainer] Iter 45710/60000 | Loss: 0.1290 | LR: 1.08e-05 | Time/Iter: 1098.06ms | MFU: 85.19%
+2025-05-06 12:52:07,177 - INFO - [G2PT_Trainer] Iter 45720/60000 | Loss: 0.1383 | LR: 1.08e-05 | Time/Iter: 1095.80ms | MFU: 85.23%
+2025-05-06 12:52:18,210 - INFO - [G2PT_Trainer] Iter 45730/60000 | Loss: 0.1495 | LR: 1.08e-05 | Time/Iter: 1097.26ms | MFU: 85.25%
+2025-05-06 12:52:29,238 - INFO - [G2PT_Trainer] Iter 45740/60000 | Loss: 0.1482 | LR: 1.08e-05 | Time/Iter: 1111.86ms | MFU: 85.16%
+2025-05-06 12:52:40,380 - INFO - [G2PT_Trainer] Iter 45750/60000 | Loss: 0.1327 | LR: 1.08e-05 | Time/Iter: 1074.02ms | MFU: 85.37%
+2025-05-06 12:52:51,386 - INFO - [G2PT_Trainer] Iter 45760/60000 | Loss: 0.1266 | LR: 1.08e-05 | Time/Iter: 1113.41ms | MFU: 85.25%
+2025-05-06 12:53:02,398 - INFO - [G2PT_Trainer] Iter 45770/60000 | Loss: 0.1361 | LR: 1.08e-05 | Time/Iter: 1086.83ms | MFU: 85.35%
+2025-05-06 12:53:13,355 - INFO - [G2PT_Trainer] Iter 45780/60000 | Loss: 0.1416 | LR: 1.08e-05 | Time/Iter: 1101.05ms | MFU: 85.33%
+2025-05-06 12:53:24,523 - INFO - [G2PT_Trainer] Iter 45790/60000 | Loss: 0.1346 | LR: 1.08e-05 | Time/Iter: 1087.97ms | MFU: 85.42%
+2025-05-06 12:53:35,522 - INFO - [G2PT_Trainer] Iter 45800/60000 | Loss: 0.1327 | LR: 1.08e-05 | Time/Iter: 1101.05ms | MFU: 85.39%
+2025-05-06 12:53:46,539 - INFO - [G2PT_Trainer] Iter 45810/60000 | Loss: 0.1401 | LR: 1.07e-05 | Time/Iter: 1094.86ms | MFU: 85.41%
+2025-05-06 12:53:57,536 - INFO - [G2PT_Trainer] Iter 45820/60000 | Loss: 0.1274 | LR: 1.07e-05 | Time/Iter: 1097.71ms | MFU: 85.41%
+2025-05-06 12:54:08,685 - INFO - [G2PT_Trainer] Iter 45830/60000 | Loss: 0.1388 | LR: 1.07e-05 | Time/Iter: 1091.99ms | MFU: 85.46%
+2025-05-06 12:54:19,674 - INFO - [G2PT_Trainer] Iter 45840/60000 | Loss: 0.1247 | LR: 1.07e-05 | Time/Iter: 1092.55ms | MFU: 85.49%
+2025-05-06 12:54:30,693 - INFO - [G2PT_Trainer] Iter 45850/60000 | Loss: 0.1511 | LR: 1.07e-05 | Time/Iter: 1084.48ms | MFU: 85.59%
+2025-05-06 12:54:41,691 - INFO - [G2PT_Trainer] Iter 45860/60000 | Loss: 0.1350 | LR: 1.07e-05 | Time/Iter: 1096.00ms | MFU: 85.58%
+2025-05-06 12:54:52,842 - INFO - [G2PT_Trainer] Iter 45870/60000 | Loss: 0.1465 | LR: 1.07e-05 | Time/Iter: 1092.39ms | MFU: 85.61%
+2025-05-06 12:55:03,860 - INFO - [G2PT_Trainer] Iter 45880/60000 | Loss: 0.1358 | LR: 1.07e-05 | Time/Iter: 1091.17ms | MFU: 85.64%
+2025-05-06 12:55:14,889 - INFO - [G2PT_Trainer] Iter 45890/60000 | Loss: 0.1555 | LR: 1.07e-05 | Time/Iter: 1104.66ms | MFU: 85.56%
+2025-05-06 12:55:25,955 - INFO - [G2PT_Trainer] Iter 45900/60000 | Loss: 0.1238 | LR: 1.07e-05 | Time/Iter: 1109.60ms | MFU: 85.45%
+2025-05-06 12:55:37,113 - INFO - [G2PT_Trainer] Iter 45910/60000 | Loss: 0.1353 | LR: 1.07e-05 | Time/Iter: 1096.45ms | MFU: 85.46%
+2025-05-06 12:55:48,051 - INFO - [G2PT_Trainer] Iter 45920/60000 | Loss: 0.1351 | LR: 1.07e-05 | Time/Iter: 1088.62ms | MFU: 85.52%
+2025-05-06 12:55:59,042 - INFO - [G2PT_Trainer] Iter 45930/60000 | Loss: 0.1365 | LR: 1.07e-05 | Time/Iter: 1093.07ms | MFU: 85.55%
+2025-05-06 12:56:10,198 - INFO - [G2PT_Trainer] Iter 45940/60000 | Loss: 0.1474 | LR: 1.07e-05 | Time/Iter: 1091.32ms | MFU: 85.58%
+2025-05-06 12:56:21,164 - INFO - [G2PT_Trainer] Iter 45950/60000 | Loss: 0.1369 | LR: 1.07e-05 | Time/Iter: 1088.98ms | MFU: 85.63%
+2025-05-06 12:56:32,170 - INFO - [G2PT_Trainer] Iter 45960/60000 | Loss: 0.1267 | LR: 1.07e-05 | Time/Iter: 1101.47ms | MFU: 85.58%
+2025-05-06 12:56:43,138 - INFO - [G2PT_Trainer] Iter 45970/60000 | Loss: 0.1269 | LR: 1.07e-05 | Time/Iter: 1089.82ms | MFU: 85.63%
+2025-05-06 12:56:54,282 - INFO - [G2PT_Trainer] Iter 45980/60000 | Loss: 0.1304 | LR: 1.07e-05 | Time/Iter: 1098.11ms | MFU: 85.60%
+2025-05-06 12:57:05,262 - INFO - [G2PT_Trainer] Iter 45990/60000 | Loss: 0.1373 | LR: 1.07e-05 | Time/Iter: 1091.77ms | MFU: 85.63%
+2025-05-06 12:57:15,217 - INFO - [G2PT_Trainer] --- Starting Eval Iter 46000 (Eval #48) ---
+2025-05-06 12:57:59,685 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1127, Val: 0.1848
+2025-05-06 12:57:59,686 - INFO - [G2PT_Trainer] 
+--- Starting Validity Check ---
+2025-05-06 12:57:59,686 - INFO - [G2PT_Trainer] Sampling 1000 graphs...
+2025-05-06 12:57:59,686 - INFO - [G2PT_Trainer] Generation params: temp=0.6, top_k=None, max_new_tokens=768, batch_size=256
+
+--- AIG Generation Summary ---
+Total sequences generated   : 1000
+Successfully converted    : 1000
+Errors during conversion  : 0
+------------------------------
+2025-05-06 12:58:49,864 - INFO - [G2PT_Trainer] Generated and parsed 1000 graphs.
+2025-05-06 12:58:49,864 - INFO - [G2PT_Trainer] Evaluating validity of 1000 graphs...
+2025-05-06 12:58:49,969 - INFO - [evaluate_g2pt_aigs] Validated 1000 graphs. Structurally Valid: 900 (90.00%)
+2025-05-06 12:58:49,969 - INFO - [G2PT_Trainer] --- Validity Score: 0.9000 ---
+2025-05-06 12:58:49,970 - INFO - [G2PT_Trainer] Val loss no improve: 5/7
+2025-05-06 12:58:49,970 - INFO - [G2PT_Trainer] --- Finished Eval Iter 46000 ---
+2025-05-06 12:58:51,005 - INFO - [G2PT_Trainer] Iter 46000/60000 | Loss: 0.1367 | LR: 1.07e-05 | Time/Iter: 95848.61ms | MFU: 77.16%
+2025-05-06 12:59:02,022 - INFO - [G2PT_Trainer] Iter 46010/60000 | Loss: 0.1514 | LR: 1.07e-05 | Time/Iter: 1102.62ms | MFU: 77.95%
+2025-05-06 12:59:13,085 - INFO - [G2PT_Trainer] Iter 46020/60000 | Loss: 0.1594 | LR: 1.07e-05 | Time/Iter: 1103.52ms | MFU: 78.65%
+2025-05-06 12:59:24,294 - INFO - [G2PT_Trainer] Iter 46030/60000 | Loss: 0.1588 | LR: 1.07e-05 | Time/Iter: 1090.86ms | MFU: 79.38%
+2025-05-06 12:59:35,299 - INFO - [G2PT_Trainer] Iter 46040/60000 | Loss: 0.1402 | LR: 1.07e-05 | Time/Iter: 1098.08ms | MFU: 79.98%
+2025-05-06 12:59:46,277 - INFO - [G2PT_Trainer] Iter 46050/60000 | Loss: 0.1510 | LR: 1.07e-05 | Time/Iter: 1090.65ms | MFU: 80.58%
+2025-05-06 12:59:57,297 - INFO - [G2PT_Trainer] Iter 46060/60000 | Loss: 0.1278 | LR: 1.07e-05 | Time/Iter: 1094.59ms | MFU: 81.08%
+2025-05-06 13:00:08,436 - INFO - [G2PT_Trainer] Iter 46070/60000 | Loss: 0.1389 | LR: 1.07e-05 | Time/Iter: 1092.61ms | MFU: 81.56%
+2025-05-06 13:00:19,449 - INFO - [G2PT_Trainer] Iter 46080/60000 | Loss: 0.1301 | LR: 1.07e-05 | Time/Iter: 1101.79ms | MFU: 81.91%
+2025-05-06 13:00:30,437 - INFO - [G2PT_Trainer] Iter 46090/60000 | Loss: 0.1355 | LR: 1.07e-05 | Time/Iter: 1097.60ms | MFU: 82.26%
+2025-05-06 13:00:41,383 - INFO - [G2PT_Trainer] Iter 46100/60000 | Loss: 0.1300 | LR: 1.06e-05 | Time/Iter: 1089.90ms | MFU: 82.64%
+2025-05-06 13:00:52,474 - INFO - [G2PT_Trainer] Iter 46110/60000 | Loss: 0.1363 | LR: 1.06e-05 | Time/Iter: 1085.66ms | MFU: 83.01%
+2025-05-06 13:01:03,442 - INFO - [G2PT_Trainer] Iter 46120/60000 | Loss: 0.1489 | LR: 1.06e-05 | Time/Iter: 1098.43ms | MFU: 83.24%
+2025-05-06 13:01:14,449 - INFO - [G2PT_Trainer] Iter 46130/60000 | Loss: 0.1264 | LR: 1.06e-05 | Time/Iter: 1100.59ms | MFU: 83.44%
+2025-05-06 13:01:25,611 - INFO - [G2PT_Trainer] Iter 46140/60000 | Loss: 0.1510 | LR: 1.06e-05 | Time/Iter: 1095.20ms | MFU: 83.65%
+2025-05-06 13:01:36,572 - INFO - [G2PT_Trainer] Iter 46150/60000 | Loss: 0.1294 | LR: 1.06e-05 | Time/Iter: 1087.78ms | MFU: 83.90%
+2025-05-06 13:01:47,600 - INFO - [G2PT_Trainer] Iter 46160/60000 | Loss: 0.1374 | LR: 1.06e-05 | Time/Iter: 1099.48ms | MFU: 84.04%
+2025-05-06 13:01:58,597 - INFO - [G2PT_Trainer] Iter 46170/60000 | Loss: 0.1368 | LR: 1.06e-05 | Time/Iter: 1094.37ms | MFU: 84.20%
+2025-05-06 13:02:09,702 - INFO - [G2PT_Trainer] Iter 46180/60000 | Loss: 0.1541 | LR: 1.06e-05 | Time/Iter: 1093.46ms | MFU: 84.36%
+2025-05-06 13:02:20,681 - INFO - [G2PT_Trainer] Iter 46190/60000 | Loss: 0.1196 | LR: 1.06e-05 | Time/Iter: 1088.25ms | MFU: 84.54%
+2025-05-06 13:02:31,671 - INFO - [G2PT_Trainer] Iter 46200/60000 | Loss: 0.1428 | LR: 1.06e-05 | Time/Iter: 1096.35ms | MFU: 84.63%
+2025-05-06 13:02:42,711 - INFO - [G2PT_Trainer] Iter 46210/60000 | Loss: 0.1380 | LR: 1.06e-05 | Time/Iter: 1092.95ms | MFU: 84.75%
+2025-05-06 13:02:53,868 - INFO - [G2PT_Trainer] Iter 46220/60000 | Loss: 0.1391 | LR: 1.06e-05 | Time/Iter: 1103.56ms | MFU: 84.77%
+2025-05-06 13:03:04,898 - INFO - [G2PT_Trainer] Iter 46230/60000 | Loss: 0.1427 | LR: 1.06e-05 | Time/Iter: 1102.89ms | MFU: 84.79%
+2025-05-06 13:03:15,927 - INFO - [G2PT_Trainer] Iter 46240/60000 | Loss: 0.1348 | LR: 1.06e-05 | Time/Iter: 1100.00ms | MFU: 84.84%
+2025-05-06 13:03:27,084 - INFO - [G2PT_Trainer] Iter 46250/60000 | Loss: 0.1426 | LR: 1.06e-05 | Time/Iter: 1244.42ms | MFU: 83.89%
+2025-05-06 13:03:27,899 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 46251, micro 7. Resetting.
+2025-05-06 13:03:37,835 - INFO - [G2PT_Trainer] Iter 46260/60000 | Loss: 0.1338 | LR: 1.06e-05 | Time/Iter: 1098.29ms | MFU: 84.03%
+2025-05-06 13:03:48,819 - INFO - [G2PT_Trainer] Iter 46270/60000 | Loss: 0.1260 | LR: 1.06e-05 | Time/Iter: 1107.31ms | MFU: 84.10%
+2025-05-06 13:03:59,798 - INFO - [G2PT_Trainer] Iter 46280/60000 | Loss: 0.1514 | LR: 1.06e-05 | Time/Iter: 1098.09ms | MFU: 84.22%
+2025-05-06 13:04:10,972 - INFO - [G2PT_Trainer] Iter 46290/60000 | Loss: 0.1314 | LR: 1.06e-05 | Time/Iter: 1108.24ms | MFU: 84.26%
+2025-05-06 13:04:21,977 - INFO - [G2PT_Trainer] Iter 46300/60000 | Loss: 0.1481 | LR: 1.06e-05 | Time/Iter: 1086.89ms | MFU: 84.46%
+2025-05-06 13:04:32,996 - INFO - [G2PT_Trainer] Iter 46310/60000 | Loss: 0.1254 | LR: 1.06e-05 | Time/Iter: 1092.18ms | MFU: 84.60%
+2025-05-06 13:04:43,974 - INFO - [G2PT_Trainer] Iter 46320/60000 | Loss: 0.1302 | LR: 1.06e-05 | Time/Iter: 1083.29ms | MFU: 84.79%
+2025-05-06 13:04:55,104 - INFO - [G2PT_Trainer] Iter 46330/60000 | Loss: 0.1288 | LR: 1.06e-05 | Time/Iter: 1090.30ms | MFU: 84.91%
+2025-05-06 13:05:06,115 - INFO - [G2PT_Trainer] Iter 46340/60000 | Loss: 0.1378 | LR: 1.06e-05 | Time/Iter: 1097.39ms | MFU: 84.96%
+2025-05-06 13:05:17,120 - INFO - [G2PT_Trainer] Iter 46350/60000 | Loss: 0.1346 | LR: 1.06e-05 | Time/Iter: 1091.17ms | MFU: 85.06%
+2025-05-06 13:05:28,109 - INFO - [G2PT_Trainer] Iter 46360/60000 | Loss: 0.1254 | LR: 1.06e-05 | Time/Iter: 1090.11ms | MFU: 85.15%
+2025-05-06 13:05:39,263 - INFO - [G2PT_Trainer] Iter 46370/60000 | Loss: 0.1376 | LR: 1.06e-05 | Time/Iter: 1104.40ms | MFU: 85.13%
+2025-05-06 13:05:50,260 - INFO - [G2PT_Trainer] Iter 46380/60000 | Loss: 0.1384 | LR: 1.06e-05 | Time/Iter: 1091.25ms | MFU: 85.20%
+2025-05-06 13:06:01,262 - INFO - [G2PT_Trainer] Iter 46390/60000 | Loss: 0.1311 | LR: 1.06e-05 | Time/Iter: 1091.54ms | MFU: 85.27%
+2025-05-06 13:06:12,399 - INFO - [G2PT_Trainer] Iter 46400/60000 | Loss: 0.1271 | LR: 1.06e-05 | Time/Iter: 1084.50ms | MFU: 85.39%
+2025-05-06 13:06:23,411 - INFO - [G2PT_Trainer] Iter 46410/60000 | Loss: 0.1486 | LR: 1.05e-05 | Time/Iter: 1095.05ms | MFU: 85.41%
+2025-05-06 13:06:34,464 - INFO - [G2PT_Trainer] Iter 46420/60000 | Loss: 0.1214 | LR: 1.05e-05 | Time/Iter: 1107.94ms | MFU: 85.33%
+2025-05-06 13:06:45,448 - INFO - [G2PT_Trainer] Iter 46430/60000 | Loss: 0.1301 | LR: 1.05e-05 | Time/Iter: 1098.39ms | MFU: 85.33%
+2025-05-06 13:06:56,600 - INFO - [G2PT_Trainer] Iter 46440/60000 | Loss: 0.1324 | LR: 1.05e-05 | Time/Iter: 1092.50ms | MFU: 85.38%
+2025-05-06 13:07:07,616 - INFO - [G2PT_Trainer] Iter 46450/60000 | Loss: 0.1341 | LR: 1.05e-05 | Time/Iter: 1095.73ms | MFU: 85.40%
+2025-05-06 13:07:18,593 - INFO - [G2PT_Trainer] Iter 46460/60000 | Loss: 0.1300 | LR: 1.05e-05 | Time/Iter: 1100.68ms | MFU: 85.38%
+2025-05-06 13:07:29,600 - INFO - [G2PT_Trainer] Iter 46470/60000 | Loss: 0.1287 | LR: 1.05e-05 | Time/Iter: 1100.24ms | MFU: 85.36%
+2025-05-06 13:07:40,719 - INFO - [G2PT_Trainer] Iter 46480/60000 | Loss: 0.1286 | LR: 1.05e-05 | Time/Iter: 1096.84ms | MFU: 85.37%
+2025-05-06 13:07:51,757 - INFO - [G2PT_Trainer] Iter 46490/60000 | Loss: 0.1313 | LR: 1.05e-05 | Time/Iter: 1113.28ms | MFU: 85.26%
+2025-05-06 13:08:02,775 - INFO - [G2PT_Trainer] Iter 46500/60000 | Loss: 0.1325 | LR: 1.05e-05 | Time/Iter: 1099.33ms | MFU: 85.26%
+2025-05-06 13:08:13,781 - INFO - [G2PT_Trainer] Iter 46510/60000 | Loss: 0.1285 | LR: 1.05e-05 | Time/Iter: 1092.98ms | MFU: 85.31%
+2025-05-06 13:08:24,961 - INFO - [G2PT_Trainer] Iter 46520/60000 | Loss: 0.1317 | LR: 1.05e-05 | Time/Iter: 1101.70ms | MFU: 85.29%
+2025-05-06 13:08:35,952 - INFO - [G2PT_Trainer] Iter 46530/60000 | Loss: 0.1403 | LR: 1.05e-05 | Time/Iter: 1099.33ms | MFU: 85.29%
+2025-05-06 13:08:46,932 - INFO - [G2PT_Trainer] Iter 46540/60000 | Loss: 0.1288 | LR: 1.05e-05 | Time/Iter: 1088.08ms | MFU: 85.37%
+2025-05-06 13:08:58,102 - INFO - [G2PT_Trainer] Iter 46550/60000 | Loss: 0.1395 | LR: 1.05e-05 | Time/Iter: 1099.20ms | MFU: 85.37%
+2025-05-06 13:09:09,182 - INFO - [G2PT_Trainer] Iter 46560/60000 | Loss: 0.1166 | LR: 1.05e-05 | Time/Iter: 1111.79ms | MFU: 85.26%
+2025-05-06 13:09:20,282 - INFO - [G2PT_Trainer] Iter 46570/60000 | Loss: 0.1257 | LR: 1.05e-05 | Time/Iter: 1114.52ms | MFU: 85.15%
+2025-05-06 13:09:31,387 - INFO - [G2PT_Trainer] Iter 46580/60000 | Loss: 0.1376 | LR: 1.05e-05 | Time/Iter: 1114.29ms | MFU: 85.05%
+2025-05-06 13:09:42,656 - INFO - [G2PT_Trainer] Iter 46590/60000 | Loss: 0.1429 | LR: 1.05e-05 | Time/Iter: 1100.24ms | MFU: 85.06%
+2025-05-06 13:09:53,770 - INFO - [G2PT_Trainer] Iter 46600/60000 | Loss: 0.1474 | LR: 1.05e-05 | Time/Iter: 1103.09ms | MFU: 85.05%
+2025-05-06 13:10:04,909 - INFO - [G2PT_Trainer] Iter 46610/60000 | Loss: 0.1305 | LR: 1.05e-05 | Time/Iter: 1101.62ms | MFU: 85.06%
+2025-05-06 13:10:16,030 - INFO - [G2PT_Trainer] Iter 46620/60000 | Loss: 0.1308 | LR: 1.05e-05 | Time/Iter: 1098.00ms | MFU: 85.09%
+2025-05-06 13:10:27,276 - INFO - [G2PT_Trainer] Iter 46630/60000 | Loss: 0.1454 | LR: 1.05e-05 | Time/Iter: 1110.19ms | MFU: 85.03%
+2025-05-06 13:10:38,400 - INFO - [G2PT_Trainer] Iter 46640/60000 | Loss: 0.1104 | LR: 1.05e-05 | Time/Iter: 1119.00ms | MFU: 84.90%
+2025-05-06 13:10:49,542 - INFO - [G2PT_Trainer] Iter 46650/60000 | Loss: 0.1414 | LR: 1.05e-05 | Time/Iter: 1108.68ms | MFU: 84.87%
+2025-05-06 13:11:00,817 - INFO - [G2PT_Trainer] Iter 46660/60000 | Loss: 0.1427 | LR: 1.05e-05 | Time/Iter: 1121.00ms | MFU: 84.74%
+2025-05-06 13:11:11,947 - INFO - [G2PT_Trainer] Iter 46670/60000 | Loss: 0.1459 | LR: 1.05e-05 | Time/Iter: 1115.59ms | MFU: 84.67%
+2025-05-06 13:11:23,072 - INFO - [G2PT_Trainer] Iter 46680/60000 | Loss: 0.1395 | LR: 1.05e-05 | Time/Iter: 1108.14ms | MFU: 84.67%
+2025-05-06 13:11:34,220 - INFO - [G2PT_Trainer] Iter 46690/60000 | Loss: 0.1356 | LR: 1.05e-05 | Time/Iter: 1118.60ms | MFU: 84.58%
+2025-05-06 13:11:45,469 - INFO - [G2PT_Trainer] Iter 46700/60000 | Loss: 0.1388 | LR: 1.05e-05 | Time/Iter: 1103.24ms | MFU: 84.62%
+2025-05-06 13:11:56,602 - INFO - [G2PT_Trainer] Iter 46710/60000 | Loss: 0.1269 | LR: 1.05e-05 | Time/Iter: 1102.63ms | MFU: 84.66%
+2025-05-06 13:12:07,746 - INFO - [G2PT_Trainer] Iter 46720/60000 | Loss: 0.1577 | LR: 1.05e-05 | Time/Iter: 1093.69ms | MFU: 84.77%
+2025-05-06 13:12:18,886 - INFO - [G2PT_Trainer] Iter 46730/60000 | Loss: 0.1395 | LR: 1.05e-05 | Time/Iter: 1107.98ms | MFU: 84.75%
+2025-05-06 13:12:30,150 - INFO - [G2PT_Trainer] Iter 46740/60000 | Loss: 0.1356 | LR: 1.05e-05 | Time/Iter: 1110.77ms | MFU: 84.72%
+2025-05-06 13:12:41,272 - INFO - [G2PT_Trainer] Iter 46750/60000 | Loss: 0.1424 | LR: 1.05e-05 | Time/Iter: 1105.27ms | MFU: 84.73%
+2025-05-06 13:12:52,436 - INFO - [G2PT_Trainer] Iter 46760/60000 | Loss: 0.1379 | LR: 1.04e-05 | Time/Iter: 1108.61ms | MFU: 84.71%
+2025-05-06 13:13:03,662 - INFO - [G2PT_Trainer] Iter 46770/60000 | Loss: 0.1499 | LR: 1.04e-05 | Time/Iter: 1275.82ms | MFU: 83.59%
+2025-05-06 13:13:14,788 - INFO - [G2PT_Trainer] Iter 46780/60000 | Loss: 0.1477 | LR: 1.04e-05 | Time/Iter: 1116.96ms | MFU: 83.62%
+2025-05-06 13:13:25,898 - INFO - [G2PT_Trainer] Iter 46790/60000 | Loss: 0.1506 | LR: 1.04e-05 | Time/Iter: 1108.12ms | MFU: 83.72%
+2025-05-06 13:13:37,006 - INFO - [G2PT_Trainer] Iter 46800/60000 | Loss: 0.1471 | LR: 1.04e-05 | Time/Iter: 1106.05ms | MFU: 83.82%
+2025-05-06 13:13:48,280 - INFO - [G2PT_Trainer] Iter 46810/60000 | Loss: 0.1330 | LR: 1.04e-05 | Time/Iter: 1105.48ms | MFU: 83.92%
+2025-05-06 13:13:59,393 - INFO - [G2PT_Trainer] Iter 46820/60000 | Loss: 0.1468 | LR: 1.04e-05 | Time/Iter: 1111.67ms | MFU: 83.96%
+2025-05-06 13:14:10,540 - INFO - [G2PT_Trainer] Iter 46830/60000 | Loss: 0.1387 | LR: 1.04e-05 | Time/Iter: 1108.80ms | MFU: 84.02%
+2025-05-06 13:14:21,694 - INFO - [G2PT_Trainer] Iter 46840/60000 | Loss: 0.1403 | LR: 1.04e-05 | Time/Iter: 1106.00ms | MFU: 84.10%
+2025-05-06 13:14:32,927 - INFO - [G2PT_Trainer] Iter 46850/60000 | Loss: 0.1420 | LR: 1.04e-05 | Time/Iter: 1108.10ms | MFU: 84.15%
+2025-05-06 13:14:44,033 - INFO - [G2PT_Trainer] Iter 46860/60000 | Loss: 0.1299 | LR: 1.04e-05 | Time/Iter: 1106.41ms | MFU: 84.21%
+2025-05-06 13:14:55,147 - INFO - [G2PT_Trainer] Iter 46870/60000 | Loss: 0.1345 | LR: 1.04e-05 | Time/Iter: 1115.93ms | MFU: 84.19%
+2025-05-06 13:15:06,455 - INFO - [G2PT_Trainer] Iter 46880/60000 | Loss: 0.1156 | LR: 1.04e-05 | Time/Iter: 1278.40ms | MFU: 83.10%
+2025-05-06 13:15:17,573 - INFO - [G2PT_Trainer] Iter 46890/60000 | Loss: 0.1317 | LR: 1.04e-05 | Time/Iter: 1101.24ms | MFU: 83.30%
+2025-05-06 13:15:28,732 - INFO - [G2PT_Trainer] Iter 46900/60000 | Loss: 0.1308 | LR: 1.04e-05 | Time/Iter: 1104.62ms | MFU: 83.46%
+2025-05-06 13:15:39,854 - INFO - [G2PT_Trainer] Iter 46910/60000 | Loss: 0.1520 | LR: 1.04e-05 | Time/Iter: 1102.11ms | MFU: 83.62%
+2025-05-06 13:15:51,108 - INFO - [G2PT_Trainer] Iter 46920/60000 | Loss: 0.1254 | LR: 1.04e-05 | Time/Iter: 1106.70ms | MFU: 83.73%
+2025-05-06 13:16:02,231 - INFO - [G2PT_Trainer] Iter 46930/60000 | Loss: 0.1340 | LR: 1.04e-05 | Time/Iter: 1102.64ms | MFU: 83.86%
+2025-05-06 13:16:13,364 - INFO - [G2PT_Trainer] Iter 46940/60000 | Loss: 0.1362 | LR: 1.04e-05 | Time/Iter: 1096.81ms | MFU: 84.02%
+2025-05-06 13:16:24,503 - INFO - [G2PT_Trainer] Iter 46950/60000 | Loss: 0.1372 | LR: 1.04e-05 | Time/Iter: 1104.17ms | MFU: 84.11%
+2025-05-06 13:16:35,734 - INFO - [G2PT_Trainer] Iter 46960/60000 | Loss: 0.1325 | LR: 1.04e-05 | Time/Iter: 1111.52ms | MFU: 84.13%
+2025-05-06 13:16:46,862 - INFO - [G2PT_Trainer] Iter 46970/60000 | Loss: 0.1391 | LR: 1.04e-05 | Time/Iter: 1112.09ms | MFU: 84.15%
+2025-05-06 13:16:57,986 - INFO - [G2PT_Trainer] Iter 46980/60000 | Loss: 0.1497 | LR: 1.04e-05 | Time/Iter: 1124.68ms | MFU: 84.07%
+2025-05-06 13:17:09,064 - INFO - [G2PT_Trainer] Iter 46990/60000 | Loss: 0.1319 | LR: 1.04e-05 | Time/Iter: 1106.19ms | MFU: 84.14%
+2025-05-06 13:17:19,276 - INFO - [G2PT_Trainer] --- Starting Eval Iter 47000 (Eval #49) ---
+2025-05-06 13:18:03,848 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1110, Val: 0.1859
+2025-05-06 13:18:03,849 - INFO - [G2PT_Trainer] Val loss no improve: 6/7
+2025-05-06 13:18:03,849 - INFO - [G2PT_Trainer] --- Finished Eval Iter 47000 ---
+2025-05-06 13:18:04,942 - INFO - [G2PT_Trainer] Iter 47000/60000 | Loss: 0.1317 | LR: 1.04e-05 | Time/Iter: 45691.40ms | MFU: 75.93%
+2025-05-06 13:18:16,092 - INFO - [G2PT_Trainer] Iter 47010/60000 | Loss: 0.1361 | LR: 1.04e-05 | Time/Iter: 1105.53ms | MFU: 76.82%
+2025-05-06 13:18:27,209 - INFO - [G2PT_Trainer] Iter 47020/60000 | Loss: 0.1467 | LR: 1.04e-05 | Time/Iter: 1103.64ms | MFU: 77.63%
+2025-05-06 13:18:38,472 - INFO - [G2PT_Trainer] Iter 47030/60000 | Loss: 0.1443 | LR: 1.04e-05 | Time/Iter: 1107.56ms | MFU: 78.33%
+2025-05-06 13:18:49,590 - INFO - [G2PT_Trainer] Iter 47040/60000 | Loss: 0.1461 | LR: 1.04e-05 | Time/Iter: 1105.30ms | MFU: 78.98%
+2025-05-06 13:19:00,750 - INFO - [G2PT_Trainer] Iter 47050/60000 | Loss: 0.1153 | LR: 1.04e-05 | Time/Iter: 1107.54ms | MFU: 79.55%
+2025-05-06 13:19:11,873 - INFO - [G2PT_Trainer] Iter 47060/60000 | Loss: 0.1394 | LR: 1.04e-05 | Time/Iter: 1113.46ms | MFU: 80.01%
+2025-05-06 13:19:16,187 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 47064, micro 7. Resetting.
+2025-05-06 13:19:22,858 - INFO - [G2PT_Trainer] Iter 47070/60000 | Loss: 0.1264 | LR: 1.04e-05 | Time/Iter: 1098.56ms | MFU: 80.54%
+2025-05-06 13:19:33,965 - INFO - [G2PT_Trainer] Iter 47080/60000 | Loss: 0.1146 | LR: 1.04e-05 | Time/Iter: 1114.09ms | MFU: 80.90%
+2025-05-06 13:19:45,080 - INFO - [G2PT_Trainer] Iter 47090/60000 | Loss: 0.1358 | LR: 1.04e-05 | Time/Iter: 1114.57ms | MFU: 81.23%
+2025-05-06 13:19:56,216 - INFO - [G2PT_Trainer] Iter 47100/60000 | Loss: 0.1260 | LR: 1.04e-05 | Time/Iter: 1113.12ms | MFU: 81.53%
+2025-05-06 13:20:07,497 - INFO - [G2PT_Trainer] Iter 47110/60000 | Loss: 0.1490 | LR: 1.04e-05 | Time/Iter: 1105.38ms | MFU: 81.85%
+2025-05-06 13:20:18,608 - INFO - [G2PT_Trainer] Iter 47120/60000 | Loss: 0.1334 | LR: 1.04e-05 | Time/Iter: 1106.34ms | MFU: 82.14%
+2025-05-06 13:20:29,711 - INFO - [G2PT_Trainer] Iter 47130/60000 | Loss: 0.1391 | LR: 1.04e-05 | Time/Iter: 1108.91ms | MFU: 82.38%
+2025-05-06 13:20:40,934 - INFO - [G2PT_Trainer] Iter 47140/60000 | Loss: 0.1482 | LR: 1.03e-05 | Time/Iter: 1087.80ms | MFU: 82.76%
+2025-05-06 13:20:52,053 - INFO - [G2PT_Trainer] Iter 47150/60000 | Loss: 0.1475 | LR: 1.03e-05 | Time/Iter: 1116.20ms | MFU: 82.89%
+2025-05-06 13:21:03,169 - INFO - [G2PT_Trainer] Iter 47160/60000 | Loss: 0.1352 | LR: 1.03e-05 | Time/Iter: 1116.42ms | MFU: 82.99%
+2025-05-06 13:21:14,302 - INFO - [G2PT_Trainer] Iter 47170/60000 | Loss: 0.1283 | LR: 1.03e-05 | Time/Iter: 1111.31ms | MFU: 83.13%
+2025-05-06 13:21:25,553 - INFO - [G2PT_Trainer] Iter 47180/60000 | Loss: 0.1435 | LR: 1.03e-05 | Time/Iter: 1099.16ms | MFU: 83.35%
+2025-05-06 13:21:36,676 - INFO - [G2PT_Trainer] Iter 47190/60000 | Loss: 0.1439 | LR: 1.03e-05 | Time/Iter: 1112.90ms | MFU: 83.44%
+2025-05-06 13:21:47,784 - INFO - [G2PT_Trainer] Iter 47200/60000 | Loss: 0.1397 | LR: 1.03e-05 | Time/Iter: 1109.33ms | MFU: 83.54%
+2025-05-06 13:21:58,854 - INFO - [G2PT_Trainer] Iter 47210/60000 | Loss: 0.1374 | LR: 1.03e-05 | Time/Iter: 1112.74ms | MFU: 83.61%
+2025-05-06 13:22:10,101 - INFO - [G2PT_Trainer] Iter 47220/60000 | Loss: 0.1485 | LR: 1.03e-05 | Time/Iter: 1106.34ms | MFU: 83.73%
+2025-05-06 13:22:21,182 - INFO - [G2PT_Trainer] Iter 47230/60000 | Loss: 0.1252 | LR: 1.03e-05 | Time/Iter: 1105.38ms | MFU: 83.84%
+2025-05-06 13:22:32,296 - INFO - [G2PT_Trainer] Iter 47240/60000 | Loss: 0.1253 | LR: 1.03e-05 | Time/Iter: 1116.29ms | MFU: 83.85%
+2025-05-06 13:22:43,544 - INFO - [G2PT_Trainer] Iter 47250/60000 | Loss: 0.1562 | LR: 1.03e-05 | Time/Iter: 1108.00ms | MFU: 83.93%
+2025-05-06 13:22:54,627 - INFO - [G2PT_Trainer] Iter 47260/60000 | Loss: 0.1329 | LR: 1.03e-05 | Time/Iter: 1100.90ms | MFU: 84.05%
+2025-05-06 13:23:05,745 - INFO - [G2PT_Trainer] Iter 47270/60000 | Loss: 0.1271 | LR: 1.03e-05 | Time/Iter: 1112.96ms | MFU: 84.07%
+2025-05-06 13:23:16,907 - INFO - [G2PT_Trainer] Iter 47280/60000 | Loss: 0.1292 | LR: 1.03e-05 | Time/Iter: 1118.42ms | MFU: 84.04%
+2025-05-06 13:23:28,132 - INFO - [G2PT_Trainer] Iter 47290/60000 | Loss: 0.1357 | LR: 1.03e-05 | Time/Iter: 1103.76ms | MFU: 84.13%
+2025-05-06 13:23:39,253 - INFO - [G2PT_Trainer] Iter 47300/60000 | Loss: 0.1393 | LR: 1.03e-05 | Time/Iter: 1119.98ms | MFU: 84.09%
+2025-05-06 13:23:50,360 - INFO - [G2PT_Trainer] Iter 47310/60000 | Loss: 0.1339 | LR: 1.03e-05 | Time/Iter: 1098.55ms | MFU: 84.22%
+2025-05-06 13:24:01,414 - INFO - [G2PT_Trainer] Iter 47320/60000 | Loss: 0.1482 | LR: 1.03e-05 | Time/Iter: 1108.32ms | MFU: 84.25%
+2025-05-06 13:24:12,675 - INFO - [G2PT_Trainer] Iter 47330/60000 | Loss: 0.1458 | LR: 1.03e-05 | Time/Iter: 1103.47ms | MFU: 84.32%
+2025-05-06 13:24:23,761 - INFO - [G2PT_Trainer] Iter 47340/60000 | Loss: 0.1316 | LR: 1.03e-05 | Time/Iter: 1108.99ms | MFU: 84.34%
+2025-05-06 13:24:34,749 - INFO - [G2PT_Trainer] Iter 47350/60000 | Loss: 0.1219 | LR: 1.03e-05 | Time/Iter: 1088.21ms | MFU: 84.52%
+2025-05-06 13:24:45,876 - INFO - [G2PT_Trainer] Iter 47360/60000 | Loss: 0.1326 | LR: 1.03e-05 | Time/Iter: 1250.75ms | MFU: 83.57%
+2025-05-06 13:24:56,905 - INFO - [G2PT_Trainer] Iter 47370/60000 | Loss: 0.1268 | LR: 1.03e-05 | Time/Iter: 1099.10ms | MFU: 83.74%
+2025-05-06 13:25:07,958 - INFO - [G2PT_Trainer] Iter 47380/60000 | Loss: 0.1338 | LR: 1.03e-05 | Time/Iter: 1106.68ms | MFU: 83.84%
+2025-05-06 13:25:18,954 - INFO - [G2PT_Trainer] Iter 47390/60000 | Loss: 0.1490 | LR: 1.03e-05 | Time/Iter: 1096.48ms | MFU: 84.00%
+2025-05-06 13:25:30,084 - INFO - [G2PT_Trainer] Iter 47400/60000 | Loss: 0.1304 | LR: 1.03e-05 | Time/Iter: 1087.44ms | MFU: 84.22%
+2025-05-06 13:25:41,149 - INFO - [G2PT_Trainer] Iter 47410/60000 | Loss: 0.1226 | LR: 1.03e-05 | Time/Iter: 1096.14ms | MFU: 84.36%
+2025-05-06 13:25:52,205 - INFO - [G2PT_Trainer] Iter 47420/60000 | Loss: 0.1265 | LR: 1.03e-05 | Time/Iter: 1106.70ms | MFU: 84.39%
+2025-05-06 13:26:03,226 - INFO - [G2PT_Trainer] Iter 47430/60000 | Loss: 0.1415 | LR: 1.03e-05 | Time/Iter: 1096.45ms | MFU: 84.50%
+2025-05-06 13:26:14,363 - INFO - [G2PT_Trainer] Iter 47440/60000 | Loss: 0.1374 | LR: 1.03e-05 | Time/Iter: 1092.69ms | MFU: 84.63%
+2025-05-06 13:26:25,345 - INFO - [G2PT_Trainer] Iter 47450/60000 | Loss: 0.1470 | LR: 1.03e-05 | Time/Iter: 1096.92ms | MFU: 84.72%
+2025-05-06 13:26:36,382 - INFO - [G2PT_Trainer] Iter 47460/60000 | Loss: 0.1300 | LR: 1.03e-05 | Time/Iter: 1095.71ms | MFU: 84.80%
+2025-05-06 13:26:47,404 - INFO - [G2PT_Trainer] Iter 47470/60000 | Loss: 0.1401 | LR: 1.03e-05 | Time/Iter: 1105.78ms | MFU: 84.80%
+2025-05-06 13:26:58,520 - INFO - [G2PT_Trainer] Iter 47480/60000 | Loss: 0.1192 | LR: 1.03e-05 | Time/Iter: 1094.06ms | MFU: 84.89%
+2025-05-06 13:27:09,518 - INFO - [G2PT_Trainer] Iter 47490/60000 | Loss: 0.1447 | LR: 1.03e-05 | Time/Iter: 1085.70ms | MFU: 85.03%
+2025-05-06 13:27:20,518 - INFO - [G2PT_Trainer] Iter 47500/60000 | Loss: 0.1378 | LR: 1.03e-05 | Time/Iter: 1087.91ms | MFU: 85.15%
+2025-05-06 13:27:31,667 - INFO - [G2PT_Trainer] Iter 47510/60000 | Loss: 0.1452 | LR: 1.03e-05 | Time/Iter: 1091.86ms | MFU: 85.22%
+2025-05-06 13:27:42,683 - INFO - [G2PT_Trainer] Iter 47520/60000 | Loss: 0.1312 | LR: 1.03e-05 | Time/Iter: 1104.51ms | MFU: 85.18%
+2025-05-06 13:27:53,701 - INFO - [G2PT_Trainer] Iter 47530/60000 | Loss: 0.1353 | LR: 1.03e-05 | Time/Iter: 1092.18ms | MFU: 85.25%
+2025-05-06 13:28:04,728 - INFO - [G2PT_Trainer] Iter 47540/60000 | Loss: 0.1203 | LR: 1.03e-05 | Time/Iter: 1104.10ms | MFU: 85.22%
+2025-05-06 13:28:15,904 - INFO - [G2PT_Trainer] Iter 47550/60000 | Loss: 0.1323 | LR: 1.03e-05 | Time/Iter: 1098.57ms | MFU: 85.23%
+2025-05-06 13:28:26,876 - INFO - [G2PT_Trainer] Iter 47560/60000 | Loss: 0.1140 | LR: 1.03e-05 | Time/Iter: 1109.36ms | MFU: 85.16%
+2025-05-06 13:28:37,905 - INFO - [G2PT_Trainer] Iter 47570/60000 | Loss: 0.1374 | LR: 1.03e-05 | Time/Iter: 1093.77ms | MFU: 85.21%
+2025-05-06 13:28:48,945 - INFO - [G2PT_Trainer] Iter 47580/60000 | Loss: 0.1552 | LR: 1.03e-05 | Time/Iter: 1096.51ms | MFU: 85.24%
+2025-05-06 13:29:00,118 - INFO - [G2PT_Trainer] Iter 47590/60000 | Loss: 0.1286 | LR: 1.02e-05 | Time/Iter: 1106.15ms | MFU: 85.19%
+2025-05-06 13:29:11,147 - INFO - [G2PT_Trainer] Iter 47600/60000 | Loss: 0.1455 | LR: 1.02e-05 | Time/Iter: 1094.22ms | MFU: 85.24%
+2025-05-06 13:29:22,210 - INFO - [G2PT_Trainer] Iter 47610/60000 | Loss: 0.1584 | LR: 1.02e-05 | Time/Iter: 1095.22ms | MFU: 85.28%
+2025-05-06 13:29:33,189 - INFO - [G2PT_Trainer] Iter 47620/60000 | Loss: 0.1346 | LR: 1.02e-05 | Time/Iter: 1106.73ms | MFU: 85.22%
+2025-05-06 13:29:44,305 - INFO - [G2PT_Trainer] Iter 47630/60000 | Loss: 0.1517 | LR: 1.02e-05 | Time/Iter: 1089.28ms | MFU: 85.30%
+2025-05-06 13:29:55,314 - INFO - [G2PT_Trainer] Iter 47640/60000 | Loss: 0.1226 | LR: 1.02e-05 | Time/Iter: 1106.91ms | MFU: 85.24%
+2025-05-06 13:30:06,312 - INFO - [G2PT_Trainer] Iter 47650/60000 | Loss: 0.1524 | LR: 1.02e-05 | Time/Iter: 1086.77ms | MFU: 85.35%
+2025-05-06 13:30:17,454 - INFO - [G2PT_Trainer] Iter 47660/60000 | Loss: 0.1338 | LR: 1.02e-05 | Time/Iter: 1100.17ms | MFU: 85.33%
+2025-05-06 13:30:28,429 - INFO - [G2PT_Trainer] Iter 47670/60000 | Loss: 0.1329 | LR: 1.02e-05 | Time/Iter: 1095.96ms | MFU: 85.35%
+2025-05-06 13:30:39,397 - INFO - [G2PT_Trainer] Iter 47680/60000 | Loss: 0.1512 | LR: 1.02e-05 | Time/Iter: 1079.19ms | MFU: 85.50%
+2025-05-06 13:30:50,404 - INFO - [G2PT_Trainer] Iter 47690/60000 | Loss: 0.1330 | LR: 1.02e-05 | Time/Iter: 1103.04ms | MFU: 85.45%
+2025-05-06 13:31:01,539 - INFO - [G2PT_Trainer] Iter 47700/60000 | Loss: 0.1353 | LR: 1.02e-05 | Time/Iter: 1099.09ms | MFU: 85.44%
+2025-05-06 13:31:12,519 - INFO - [G2PT_Trainer] Iter 47710/60000 | Loss: 0.1552 | LR: 1.02e-05 | Time/Iter: 1096.20ms | MFU: 85.45%
+2025-05-06 13:31:23,521 - INFO - [G2PT_Trainer] Iter 47720/60000 | Loss: 0.1269 | LR: 1.02e-05 | Time/Iter: 1100.01ms | MFU: 85.42%
+2025-05-06 13:31:34,513 - INFO - [G2PT_Trainer] Iter 47730/60000 | Loss: 0.1456 | LR: 1.02e-05 | Time/Iter: 1103.81ms | MFU: 85.38%
+2025-05-06 13:31:45,617 - INFO - [G2PT_Trainer] Iter 47740/60000 | Loss: 0.1457 | LR: 1.02e-05 | Time/Iter: 1093.88ms | MFU: 85.41%
+2025-05-06 13:31:56,624 - INFO - [G2PT_Trainer] Iter 47750/60000 | Loss: 0.1398 | LR: 1.02e-05 | Time/Iter: 1080.21ms | MFU: 85.55%
+2025-05-06 13:32:07,583 - INFO - [G2PT_Trainer] Iter 47760/60000 | Loss: 0.1252 | LR: 1.02e-05 | Time/Iter: 1092.95ms | MFU: 85.57%
+2025-05-06 13:32:18,707 - INFO - [G2PT_Trainer] Iter 47770/60000 | Loss: 0.1454 | LR: 1.02e-05 | Time/Iter: 1240.84ms | MFU: 84.57%
+2025-05-06 13:32:29,674 - INFO - [G2PT_Trainer] Iter 47780/60000 | Loss: 0.1490 | LR: 1.02e-05 | Time/Iter: 1093.55ms | MFU: 84.68%
+2025-05-06 13:32:40,671 - INFO - [G2PT_Trainer] Iter 47790/60000 | Loss: 0.1314 | LR: 1.02e-05 | Time/Iter: 1100.27ms | MFU: 84.74%
+2025-05-06 13:32:51,659 - INFO - [G2PT_Trainer] Iter 47800/60000 | Loss: 0.1202 | LR: 1.02e-05 | Time/Iter: 1089.60ms | MFU: 84.87%
+2025-05-06 13:33:02,818 - INFO - [G2PT_Trainer] Iter 47810/60000 | Loss: 0.1227 | LR: 1.02e-05 | Time/Iter: 1096.89ms | MFU: 84.93%
+2025-05-06 13:33:13,809 - INFO - [G2PT_Trainer] Iter 47820/60000 | Loss: 0.1168 | LR: 1.02e-05 | Time/Iter: 1091.99ms | MFU: 85.02%
+2025-05-06 13:33:24,867 - INFO - [G2PT_Trainer] Iter 47830/60000 | Loss: 0.1671 | LR: 1.02e-05 | Time/Iter: 1099.78ms | MFU: 85.04%
+2025-05-06 13:33:35,837 - INFO - [G2PT_Trainer] Iter 47840/60000 | Loss: 0.1412 | LR: 1.02e-05 | Time/Iter: 1092.41ms | MFU: 85.12%
+2025-05-06 13:33:46,955 - INFO - [G2PT_Trainer] Iter 47850/60000 | Loss: 0.1210 | LR: 1.02e-05 | Time/Iter: 1088.98ms | MFU: 85.22%
+2025-05-06 13:33:57,938 - INFO - [G2PT_Trainer] Iter 47860/60000 | Loss: 0.1394 | LR: 1.02e-05 | Time/Iter: 1099.03ms | MFU: 85.22%
+2025-05-06 13:34:08,922 - INFO - [G2PT_Trainer] Iter 47870/60000 | Loss: 0.1415 | LR: 1.02e-05 | Time/Iter: 1097.78ms | MFU: 85.24%
+2025-05-06 13:34:16,290 - INFO - [G2PT_Trainer] Train loader exhausted mid-accumulation at iter 47877, micro 7. Resetting.
+2025-05-06 13:34:19,637 - INFO - [G2PT_Trainer] Iter 47880/60000 | Loss: 0.1433 | LR: 1.02e-05 | Time/Iter: 1091.21ms | MFU: 85.31%
+2025-05-06 13:34:30,734 - INFO - [G2PT_Trainer] Iter 47890/60000 | Loss: 0.1480 | LR: 1.02e-05 | Time/Iter: 1095.59ms | MFU: 85.34%
+2025-05-06 13:34:41,685 - INFO - [G2PT_Trainer] Iter 47900/60000 | Loss: 0.1382 | LR: 1.02e-05 | Time/Iter: 1095.99ms | MFU: 85.36%
+2025-05-06 13:34:52,659 - INFO - [G2PT_Trainer] Iter 47910/60000 | Loss: 0.1374 | LR: 1.02e-05 | Time/Iter: 1097.75ms | MFU: 85.36%
+2025-05-06 13:35:03,763 - INFO - [G2PT_Trainer] Iter 47920/60000 | Loss: 0.1265 | LR: 1.02e-05 | Time/Iter: 1081.09ms | MFU: 85.50%
+2025-05-06 13:35:14,737 - INFO - [G2PT_Trainer] Iter 47930/60000 | Loss: 0.1354 | LR: 1.02e-05 | Time/Iter: 1099.18ms | MFU: 85.48%
+2025-05-06 13:35:25,693 - INFO - [G2PT_Trainer] Iter 47940/60000 | Loss: 0.1378 | LR: 1.02e-05 | Time/Iter: 1094.93ms | MFU: 85.49%
+2025-05-06 13:35:36,637 - INFO - [G2PT_Trainer] Iter 47950/60000 | Loss: 0.1357 | LR: 1.02e-05 | Time/Iter: 1090.40ms | MFU: 85.54%
+2025-05-06 13:35:47,726 - INFO - [G2PT_Trainer] Iter 47960/60000 | Loss: 0.1354 | LR: 1.02e-05 | Time/Iter: 1093.15ms | MFU: 85.56%
+2025-05-06 13:35:58,661 - INFO - [G2PT_Trainer] Iter 47970/60000 | Loss: 0.1266 | LR: 1.02e-05 | Time/Iter: 1091.04ms | MFU: 85.60%
+2025-05-06 13:36:09,587 - INFO - [G2PT_Trainer] Iter 47980/60000 | Loss: 0.1390 | LR: 1.02e-05 | Time/Iter: 1088.77ms | MFU: 85.65%
+2025-05-06 13:36:20,522 - INFO - [G2PT_Trainer] Iter 47990/60000 | Loss: 0.1343 | LR: 1.02e-05 | Time/Iter: 1078.85ms | MFU: 85.77%
+2025-05-06 13:36:30,555 - INFO - [G2PT_Trainer] --- Starting Eval Iter 48000 (Eval #50) ---
+2025-05-06 13:37:14,790 - INFO - [G2PT_Trainer] Eval Losses -> Train: 0.1108, Val: 0.1869
+2025-05-06 13:37:14,790 - INFO - [G2PT_Trainer] 
+--- Starting Validity Check ---
+2025-05-06 13:37:14,790 - INFO - [G2PT_Trainer] Sampling 1000 graphs...
+2025-05-06 13:37:14,790 - INFO - [G2PT_Trainer] Generation params: temp=0.6, top_k=None, max_new_tokens=768, batch_size=256
+
+--- AIG Generation Summary ---
+Total sequences generated   : 1000
+Successfully converted    : 1000
+Errors during conversion  : 0
+------------------------------
+2025-05-06 13:38:04,652 - INFO - [G2PT_Trainer] Generated and parsed 1000 graphs.
+2025-05-06 13:38:04,652 - INFO - [G2PT_Trainer] Evaluating validity of 1000 graphs...
+2025-05-06 13:38:04,754 - INFO - [evaluate_g2pt_aigs] Validated 1000 graphs. Structurally Valid: 907 (90.70%)
+2025-05-06 13:38:04,754 - INFO - [G2PT_Trainer] --- Validity Score: 0.9070 ---
+2025-05-06 13:38:04,755 - INFO - [G2PT_Trainer] Val loss no improve: 7/7
+2025-05-06 13:38:04,755 - INFO - [G2PT_Trainer] --- Finished Eval Iter 48000 ---
+2025-05-06 13:38:04,755 - INFO - [G2PT_Trainer] Early stopping.
+2025-05-06 13:38:04,756 - INFO - [G2PT_Trainer] Training finished.
+wandb:                                                                                
+wandb: 
+wandb: Run history:
+wandb:       eval/best_val_loss ▁▁▁▁▁▁
+wandb: eval/best_validity_score ▁▁▁
+wandb:        eval/eval_counter ▁▂▄▅▇█
+wandb:    eval/patience_counter ▁▂▄▅▇█
+wandb:          eval/train_loss █▇▃▃▁▁
+wandb:            eval/val_loss ▅▃▆▁▅█
+wandb:      eval/validity_score ▂▁█
+wandb:                     iter ▁▁▁▁▁▁▂▂▂▂▃▃▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇▇▇█
+wandb:                       lr █▆▄▃▂▁
+wandb:            perf/mfu_perc ██▇▇█▆▇▇▇▇██▇▇▇▅▆▆▆▆▆▅▆▆▇▇▇▁▂▆▁▃▄▄▅▇▇▇▇▇
+wandb:             scaler_scale ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:      timing/iter_time_ms ▁▂▁█▁▂▂▂▁▂▂▂▂▂▂▁▃▃▂▂▃▂▂▂▂▂▂▂▃▂▃▂▂▂▃▃▂▁▂▂
+wandb:               train/loss █▅▃▃█▄▇▆▇▇▅▅▆▁▃▅▂▂▅▃▇▃▆▄▅▂▄▂▄▄▄▆▂▆▅▂▄▆▂▄
+wandb: 
+wandb: Run summary:
+wandb:       eval/best_val_loss 0.18103
+wandb: eval/best_validity_score 0.91
+wandb:        eval/eval_counter 50
+wandb:    eval/patience_counter 6
+wandb:          eval/train_loss 0.11076
+wandb:            eval/val_loss 0.18687
+wandb:      eval/validity_score 0.907
+wandb:                     iter 48000
+wandb:                       lr 1e-05
+wandb:            perf/mfu_perc 85.77348
+wandb:             scaler_scale 1
+wandb:      timing/iter_time_ms 1078.84693
+wandb:               train/loss 0.13431
+wandb: 
+wandb: 🚀 View run aig-base-topo-aug5 at: https://wandb.ai/isabella-v-gardner-university-of-amsterdam/real-g2pt/runs/zo4xa4a7
+wandb: ⭐️ View project at: https://wandb.ai/isabella-v-gardner-university-of-amsterdam/real-g2pt
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20250506_115904-zo4xa4a7/logs
+Training script finished.
+
+JOB STATISTICS
+==============
+Job ID: 11588586
+Cluster: snellius
+User/Group: igardner1/igardner1
+State: RUNNING
+Nodes: 1
+Cores per node: 16
+CPU Utilized: 00:00:00
+CPU Efficiency: 0.00% of 1-02:30:56 core-walltime
+Job Wall-clock time: 01:39:26
+Memory Utilized: 0.00 MB
+Memory Efficiency: 0.00% of 180.00 GB (180.00 GB/node)
+WARNING: Efficiency statistics can only be obtained after the job has ended as seff tool is based on the accounting database data.
