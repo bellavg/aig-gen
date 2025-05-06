@@ -29,7 +29,7 @@ try:
     from datasets_utils import get_datasets, seq_to_nxgraph
     from model import GPT, GPTConfig
     from evaluate_aigs import validate_aig_structures # Import the validation function
-    from new_sample import get_graphs # Import the generation+parsing function
+    from sample_in_train import get_graphs # Import the generation+parsing function
 except ImportError as e:
      logger.error(f"Failed to import required modules or configs: {e}")
      logger.error("Ensure all config files (aig.py, base.py, train_aig.py, sample_aig.py) exist in G2PT/configs/")

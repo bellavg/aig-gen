@@ -29,7 +29,9 @@ def parse_args():
                         help='Sampling temperature (1.0 = standard)')
     parser.add_argument('--output_filename', type=str, default='generated_aigs.pkl',
                         help='Name for the output pickle file')
-    parser.add_argument('--parsing_mode', type=str, default='strict', choices=['strict', 'robust'],
+    parser.add_argument('--input_checkpoint', type=str, required=True,
+                        help='Name/path for the input model checkpoint')
+    parser.add_argument('--parsing_mode', type=str, default='robust', choices=['strict', 'robust'],
                         help='Edge sequence parsing mode: strict (fail on non-triplet length) or robust (skip malformed parts)')
 
     return parser.parse_args()
@@ -64,8 +66,7 @@ def setup_device(seed):
 
     return device, ctx
 
-def load_model(out_dir, device):
-    ckpt_path = os.path.join(out_dir, 'best.pt')
+def load_model(ckpt_path, device):
     print(f"Loading checkpoint from: {ckpt_path}")
     try:
         checkpoint = torch.load(ckpt_path, map_location=device)
@@ -178,7 +179,7 @@ if __name__ == '__main__':
 
     # Load Tokenizer and Model
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
-    model = load_model(args.out_dir, device) # Loads the ckpt.pt from out_dir
+    model = load_model(args.input_checkpoint, device) # Loads the ckpt.pt from out_dir
 
     # --- Sequence Generation ---
     prefix = None # AIG usually starts from <boc>
@@ -224,7 +225,7 @@ if __name__ == '__main__':
     print("------------------------------")
 
     # --- Saving Results ---
-    output_file_path = os.path.join(args.out_dir, args.output_filename)
+    output_file_path = os.path.join(args.out_dir,"multinomial_sampling"+args.output_filename)
     print(f"Saving {len(generated_graphs)} generated AIG DiGraphs to {output_file_path}")
     try:
         with open(output_file_path, 'wb') as f:
