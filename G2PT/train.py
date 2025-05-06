@@ -257,7 +257,7 @@ def main():
         # Load model args from checkpoint
         if 'model_args' in checkpoint: checkpoint_model_args = checkpoint['model_args']
         elif 'config' in checkpoint:
-             cfg = checkpoint['config']
+             cfg = config
              checkpoint_model_args = {'n_layer': cfg.get('n_layer'), 'n_head': cfg.get('n_head'), 'n_embd': cfg.get('n_embd'),
                                        'block_size': cfg.get('block_size'), 'bias': cfg.get('bias', False),
                                        'vocab_size': cfg.get('vocab_size'), 'dropout': cfg.get('dropout', 0.0)}

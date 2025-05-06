@@ -24,7 +24,8 @@ eval_iters = 200
 # If True, save a checkpoint after every evaluation, not just on improvement
 always_save_checkpoint = False
 # Initialization mode: 'scratch', 'resume', or 'gpt2*' (for pretrained weights)
-init_from = 'scratch'
+init_from = 'resume'
+
 
 # --- Weights & Biases Logging ---
 # Enable wandb logging if True
