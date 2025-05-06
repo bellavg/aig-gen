@@ -5,7 +5,7 @@
 # Set a default or leave as None if it *must* be specified externally.
 dataset = 'aig'
 # Number of data sequences generated per graph (if applicable to dataset)
-num_augmentations = 6
+num_augmentations = 5
 #TODO check augment number
 
 # Sequence ordering method (e.g., 'bfs', 'dfs') - specific to your data generation
