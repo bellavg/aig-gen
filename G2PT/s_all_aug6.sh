@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100     # Specify the appropriate partition
 #SBATCH --gpus=1                 # Requesting one GPU
 #SBATCH --time=08:00:00          # Adjust time as needed (sampling can be faster than training)
-#SBATCH --output=./slurm_logs/aig_sample_exp_%j.out
+#SBATCH --output=./slurm_logs/aig_sample_6_%j.out
 
 # --- Configuration ---
 # !!! IMPORTANT: Set these paths correctly !!!
@@ -18,9 +18,6 @@ BASE_OUTPUT_DIR="sampling_outputs"
 NUM_SAMPLES=1000 # Number of sequences to generate per configuration
 MAX_NEW_TOKENS=768
 # --- End Configuration ---
-
-# Navigate to the base directory (G2PT/) assuming the script is in a 'scripts' subdir
-cd "$(dirname "$0")/.." # Go up one level from the script's directory
 
 # Ensure output directories exist
 mkdir -p slurm_logs
@@ -112,7 +109,6 @@ srun python -u beam_search_sample.py \
     --output_filename "generated_aigs_beam.pkl" \
     --parsing_mode robust \
     --out_dir $BASE_OUTPUT_DIR
-
 
 
 # --- MODIFIED: Add Multinomial Sampling (from sample.py) ---
