@@ -32,6 +32,7 @@ try:
     from model import GPTConfig, GPT
     # Need the sequence-to-graph parser for AIGs
     from datasets_utils import seq_to_nxgraph
+    from configs.aig import vocab_size
     MODULE_IMPORTS_OK = True
 except ImportError as e:
     print(f"Error importing local modules (GPT, seq_to_nxgraph): {e}")
@@ -134,7 +135,7 @@ def load_model_and_tokenizer(ckpt_path, tokenizer_path, device):
         if tokenizer.pad_token is None:
              logger.warning("Tokenizer missing PAD token. Adding '<|pad|>' as pad_token.")
              tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
-        logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.vocab_size}, PAD ID: {tokenizer.pad_token_id}")
+        logger.info(f"Tokenizer loaded. Vocab size: {vocab_size}, PAD ID: {tokenizer.pad_token_id}")
     except Exception as e:
         logger.error(f"Error loading tokenizer from {tokenizer_path}: {e}", exc_info=True)
         return None, None
@@ -159,11 +160,6 @@ def load_model_and_tokenizer(ckpt_path, tokenizer_path, device):
              if None in [model_args['n_layer'], model_args['n_head'], model_args['n_embd'], model_args['block_size'], model_args['vocab_size']]:
                  raise ValueError(f"Missing critical model args in checkpoint 'config': {model_args}")
         else: raise KeyError("'model_args' or 'config' dictionary/object not found in checkpoint.")
-
-        # --- Vocab Size Check/Update ---
-        if model_args.get('vocab_size') != tokenizer.vocab_size:
-             logger.warning(f"Checkpoint vocab size ({model_args.get('vocab_size')}) differs from tokenizer ({tokenizer.vocab_size}). Initializing model with tokenizer's size.")
-             model_args['vocab_size'] = tokenizer.vocab_size
 
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
@@ -199,10 +195,6 @@ def load_model_and_tokenizer(ckpt_path, tokenizer_path, device):
     try:
         logger.info("Converting model to Hugging Face format...")
         hf_model = model.to_hf()
-        if hf_model.config.vocab_size != tokenizer.vocab_size:
-             logger.warning(f"Resizing HF model embeddings from {hf_model.config.vocab_size} to {tokenizer.vocab_size}.")
-             hf_model.resize_token_embeddings(len(tokenizer))
-             hf_model.config.vocab_size = len(tokenizer)
         logger.info("Successfully converted model to Hugging Face format.")
     except Exception as e:
         logger.error(f"Error converting model to Hugging Face format: {e}", exc_info=True)
