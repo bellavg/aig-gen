@@ -225,7 +225,7 @@ if __name__ == '__main__':
     print("------------------------------")
 
     # --- Saving Results ---
-    output_file_path = os.path.join(args.out_dir,"multinomial_sampling"+args.output_filename)
+    output_file_path = os.path.join(args.out_dir,"multinomial_sampling_"+args.output_filename)
     print(f"Saving {len(generated_graphs)} generated AIG DiGraphs to {output_file_path}")
     try:
         with open(output_file_path, 'wb') as f:
