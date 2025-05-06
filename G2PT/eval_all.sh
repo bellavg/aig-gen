@@ -1,13 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=reeval_all_aigs
+#SBATCH --job-name=eval
 #SBATCH --partition=gpu_h100     # Or a cpu partition if evaluate_aigs.py doesn't need GPU
 #SBATCH --gpus=1                 # Adjust if needed, maybe 0 if using CPU partition
-#SBATCH --time=02:00:00          # Adjust time estimate based on number of files/graphs
-#SBATCH --output=../slurm_logs/reeval_all_%j.out
-#SBATCH --error=../slurm_logs/reeval_all_%j.err # Capture errors separately
+#SBATCH --time=08:00:00          # Adjust time estimate based on number of files/graphs
+#SBATCH --output=./slurm_logs/eval_all_%j.out
 
 # Navigate to the base directory (G2PT/) relative to the script location (scripts/)
-cd ..
 
 # Ensure log directory exists
 mkdir -p slurm_logs
@@ -26,7 +24,7 @@ echo "Using updated evaluate_aigs.py"
 # Use find to locate all .pkl files within the results directory and its subdirs
 # -print0 and read -d $'\0' handle filenames with spaces/special chars safely
 
-find ./results -name '*.pkl' -print0 | while IFS= read -r -d $'\0' pkl_file; do
+find ./sampling_outputs -name '*.pkl' -print0 | while IFS= read -r -d $'\0' pkl_file; do
     echo "-----------------------------------------------------"
     echo "Evaluating file: $pkl_file"
     echo "-----------------------------------------------------"
@@ -37,7 +35,7 @@ find ./results -name '*.pkl' -print0 | while IFS= read -r -d $'\0' pkl_file; do
         # Use srun if needed within the loop for Slurm resource tracking per file,
         # or run directly if the main job allocation is sufficient.
         # Running directly might be simpler here.
-        python -u evaluate_aigs.py "$pkl_file"
+        python -u evaluate_aigs.py "$pkl_file" --train_data_dir "./datasets/aig/"
     else
         echo "Warning: File '$pkl_file' found by 'find' but seems not accessible?"
     fi
