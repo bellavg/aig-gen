@@ -5,10 +5,10 @@ import numpy as np
 import networkx as nx
 import random
 
-from rdkit import Chem
-from rdkit.Chem import rdmolops
-from rdkit.Chem import rdMolDescriptors
-from rdkit import DataStructs
+# from rdkit import Chem
+# from rdkit.Chem import rdmolops
+# from rdkit.Chem import rdMolDescriptors
+# from rdkit import DataStructs
 
 import torch
 import torch.nn.functional as F
@@ -29,29 +29,29 @@ def mol_to_nx(mol):
                    bond.GetEndAtomIdx(),
                    bond_type=bond.GetBondType())
     return G
-
-    
-def get_maxlen_of_bfs_queue(path):
-    """
-    Calculate the maxlen of bfs queue.
-    """
-    fp = open(path, 'r')
-    max_all = []
-    cnt = 0
-    for smiles in fp:
-        cnt += 1
-        if cnt % 10000 == 0:
-            print('cur cnt %d' % cnt)
-        smiles = smiles.strip()
-        mol = Chem.MolFromSmiles(smiles)
-        #adj = construct_adj_matrix(mol)
-        graph = mol_to_nx(mol)
-        N = len(graph.nodes)
-        for i in range(N):
-            start = i
-            order, max_ = bfs_seq(graph, start)
-            max_all.append(max_)
-    print(max(max_all))
+#
+#
+# def get_maxlen_of_bfs_queue(path):
+#     """
+#     Calculate the maxlen of bfs queue.
+#     """
+#     fp = open(path, 'r')
+#     max_all = []
+#     cnt = 0
+#     for smiles in fp:
+#         cnt += 1
+#         if cnt % 10000 == 0:
+#             print('cur cnt %d' % cnt)
+#         smiles = smiles.strip()
+#         mol = Chem.MolFromSmiles(smiles)
+#         #adj = construct_adj_matrix(mol)
+#         graph = mol_to_nx(mol)
+#         N = len(graph.nodes)
+#         for i in range(N):
+#             start = i
+#             order, max_ = bfs_seq(graph, start)
+#             max_all.append(max_)
+#     print(max(max_all))
 
 
 def set_seed(seed, cuda=False):
@@ -180,21 +180,21 @@ def update_total_optim_dict(total_optim_dict, optim_dict):
             total_optim_dict[key][3][2] = optim_dict[key][3][2]
     return total_optim_dict
 
-
-def reward_target_molecule_similarity(mol, target, radius=2, nBits=2048,
-                                      useChirality=True):
-    """
-    Reward for a target molecule similarity, based on tanimoto similarity
-    between the ECFP fingerprints of the x molecule and target molecule
-    :param mol: rdkit mol object
-    :param target: rdkit mol object
-    :return: float, [0.0, 1.0]
-    """
-    x = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=radius,
-                                                        nBits=nBits,
-                                                        useChirality=useChirality)
-    target = rdMolDescriptors.GetMorganFingerprintAsBitVect(target,
-                                                            radius=radius,
-                                                        nBits=nBits,
-                                                        useChirality=useChirality)
-    return DataStructs.TanimotoSimilarity(x, target)
+#
+# def reward_target_molecule_similarity(mol, target, radius=2, nBits=2048,
+#                                       useChirality=True):
+#     """
+#     Reward for a target molecule similarity, based on tanimoto similarity
+#     between the ECFP fingerprints of the x molecule and target molecule
+#     :param mol: rdkit mol object
+#     :param target: rdkit mol object
+#     :return: float, [0.0, 1.0]
+#     """
+#     x = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=radius,
+#                                                         nBits=nBits,
+#                                                         useChirality=useChirality)
+#     target = rdMolDescriptors.GetMorganFingerprintAsBitVect(target,
+#                                                             radius=radius,
+#                                                         nBits=nBits,
+#                                                         useChirality=useChirality)
+#     return DataStructs.TanimotoSimilarity(x, target)

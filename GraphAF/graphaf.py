@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 # from rdkit import Chem
-from .model import GraphFlowModel, GraphFlowModel_rl, GraphFlowModel_con_rl
+from .model import GraphFlowModel
 from .train_utils import adjust_learning_rate, DataIterator
 
 class Generator():
@@ -75,10 +75,6 @@ class GraphAF(Generator):
             model_conf_dict['use_gpu'] = False
         if task == 'rand_gen':
             self.model = GraphFlowModel(model_conf_dict)
-        elif task == 'prop_opt':
-            self.model = GraphFlowModel_rl(model_conf_dict)
-        elif task == 'const_opt':
-            self.model = GraphFlowModel_con_rl(model_conf_dict)
         else:
             raise ValueError('Task {} is not supported in GraphDF!'.format(task))
         if checkpoint_path is not None:
