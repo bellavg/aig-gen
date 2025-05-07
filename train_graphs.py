@@ -9,7 +9,7 @@ import os.path as osp
 from data.aig_dataset import AIGDatasetLoader
 # Import the models
 from GraphDF import GraphDF
-from GraphAF import GraphAF
+#from GraphAF import GraphAF
 
 
 # --- Hardcoded Configuration Dictionary ---
