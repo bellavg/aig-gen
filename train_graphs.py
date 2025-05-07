@@ -6,19 +6,10 @@ import torch
 from torch_geometric.loader import DenseDataLoader
 import warnings
 import os.path as osp
-
-# --- Assume ggraph and your AIG dataset loader are importable ---
-try:
-    # Import the loader class (make sure the filename is correct)
-    from data.aig_dataset import AIGDatasetLoader
-    # Import the models
-    from GraphDF import GraphDF
-except ImportError as e:
-    print(f"Error importing necessary modules: {e}")
-    print("Please ensure 'ggraph' is installed and your AIGDatasetLoader class "
-          "(e.g., in ggraph/dataset/aig_dataset_loader.py) is accessible.")
-    exit()
-# --- End Imports ---
+from data.aig_dataset import AIGDatasetLoader
+# Import the models
+from GraphDF import GraphDF
+from GraphAF import GraphAF
 
 
 # --- Hardcoded Configuration Dictionary ---
