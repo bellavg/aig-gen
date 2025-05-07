@@ -280,7 +280,7 @@ class MaskedGraphAF(nn.Module):
         '''
         # inputs for RelGCNs
         batch_size = x.size(0)
-        adj = adj[:, :3] # (batch, 3, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
+        adj = adj[:, :2] # (batch, 3, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
         x = torch.where(self.mask_node, x.unsqueeze(1).repeat(1, self.repeat_num, 1, 1), torch.zeros([1], device=x.device)).view(
             -1, self.graph_size, self.num_node_type)  # (batch*repeat_num, N, 9)
 
