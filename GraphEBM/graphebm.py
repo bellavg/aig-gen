@@ -5,13 +5,11 @@ import copy
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
-#from rdkit import Chem
+# from rdkit import Chem # Uncomment if RDKit dependent functions are used
 
-#
-# from ggraph.utils import gen_mol_from_one_shot_tensor
-# from ggraph.utils import qed, calculate_min_plogp, reward_target_molecule_similarity
+# Assuming energy_func.py and util.py are in the same directory or accessible in PYTHONPATH
 from .energy_func import EnergyFunc
-from .util import rescale_adj, requires_grad, clip_grad
+from .util import rescale_adj, requires_grad, clip_grad  # clip_grad might be from a different util
 
 
 class Generator():
@@ -27,28 +25,26 @@ class Generator():
         Args:
             loader: The data loader for loading training samples.
         """
-
         raise NotImplementedError("The function train_rand_gen is not implemented!")
 
     def run_rand_gen(self, *args, **kwargs):
         r"""
         Running graph generation for random generation task.
         """
-
         raise NotImplementedError("The function run_rand_gen is not implemented!")
 
-    def train_prop_opt(self, *args, **kwargs):
+    def train_goal_directed(self, loader, *args, **kwargs):  # Changed from train_prop_opt to match paper's terminology
         r"""
-        Running training for property optimization task.
+        Running training for goal-directed generation task (property optimization).
+        Args:
+            loader: The data loader for loading training samples.
         """
-
-        raise NotImplementedError("The function train_prop_opt is not implemented!")
+        raise NotImplementedError("The function train_goal_directed is not implemented!")
 
     def run_prop_opt(self, *args, **kwargs):
         r"""
         Running graph generation for property optimization task.
         """
-
         raise NotImplementedError("The function run_prop_opt is not implemented!")
 
     def train_const_prop_opt(self, loader, *args, **kwargs):
@@ -58,61 +54,83 @@ class Generator():
         Args:
             loader: The data loader for loading training samples.
         """
-
         raise NotImplementedError("The function train_const_prop_opt is not implemented!")
 
     def run_const_prop_opt(self, *args, **kwargs):
         r"""
         Running molecule optimization for constrained optimization task.
         """
-
         raise NotImplementedError("The function run_const_prop_opt is not implemented!")
+
+    def run_comp_gen(self, *args, **kwargs):
+        r"""
+        Running graph generation for compositional generation task.
+        """
+        raise NotImplementedError("The function run_comp_gen is not implemented!")
 
 
 class GraphEBM(Generator):
     r"""
-        The method class for GraphEBM algorithm proposed in the paper `GraphEBM: Molecular Graph Generation with Energy-Based Models <https://arxiv.org/abs/2102.00546>`_. This class provides interfaces for running random generation, goal-directed generation (including property
-        optimization and constrained optimization), and compositional generation with GraphEBM algorithm. Please refer to the `example codes <https://github.com/divelab/DIG/tree/dig-stable/examples/ggraph/GraphEBM>`_ for usage examples.
+        The method class for GraphEBM algorithm proposed in the paper `GraphEBM: Molecular Graph Generation with Energy-Based Models <https://arxiv.org/abs/2102.00546>`_.
+        This class provides interfaces for running random generation, goal-directed generation
+        (including property optimization and constrained optimization), and compositional generation.
 
         Args:
-            n_atom (int): Maximum number of atoms.
-            n_atom_type (int): Number of possible atom types.
-            n_edge_type (int): Number of possible bond types.
-            hidden (int): Hidden dimensions.
+            n_atom (int): Maximum number of atoms (nodes).
+            n_atom_type (int): Number of possible atom types (node feature dimension).
+            n_edge_type (int): Number of possible bond types (edge feature dimension).
+            hidden (int): Hidden dimension for GraphConv layers in EnergyFunc. (Paper Appendix D: d=64)
+            depth (int): Number of additional GraphConv layers after the first one in EnergyFunc.
+                         (Paper Appendix D: L=3 total layers, so depth=2).
+            swish_act (bool): Whether to use Swish activation in EnergyFunc. (Paper Appendix D: Swish is used).
+            add_self (bool): Whether to add self-connections in GraphConv layers.
+            dropout (float): Dropout rate in EnergyFunc.
+            n_power_iterations (int): Number of power iterations for spectral normalization.
             device (torch.device, optional): The device where the model is deployed.
-
     """
-    def __init__(self, n_atom, n_atom_type, n_edge_type, hidden, device=None):
+
+    def __init__(self, n_atom, n_atom_type, n_edge_type, hidden=64, depth=2, swish_act=True, add_self=False,
+                 dropout=0.0, n_power_iterations=1, device=None):
         super(GraphEBM, self).__init__()
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
-        self.energy_function = EnergyFunc(n_atom_type, hidden, n_edge_type).to(self.device)
-        self.n_atom = n_atom
-        self.n_atom_type = n_atom_type
-        self.n_edge_type = n_edge_type
 
+        self.energy_function = EnergyFunc(
+            n_atom_type=n_atom_type,
+            hidden=hidden,
+            num_edge_type=n_edge_type,
+            swish_act=swish_act,
+            depth=depth,
+            add_self=add_self,
+            dropout=dropout,
+            n_power_iterations=n_power_iterations
+        ).to(self.device)
 
-    def train_rand_gen(self, loader, lr, wd, max_epochs, c, ld_step, ld_noise, ld_step_size, clamp, alpha, save_interval, save_dir):
+        self.n_atom = n_atom  # Max number of atoms (nodes)
+        self.n_atom_type = n_atom_type  # Number of atom types (node features dimension)
+        self.n_edge_type = n_edge_type  # Number of edge types
+
+    def train_rand_gen(self, loader, lr, wd, max_epochs, c, ld_step, ld_noise, ld_step_size, clamp_lgd_grad, alpha,
+                       save_interval, save_dir):
         r"""
-            Running training for random generation task.
+            Running training for random generation task. (Corresponds to Section 2.3 of the paper)
 
             Args:
-                loader: The data loader for loading training samples. It is supposed to use ggraph.dataset.QM9/ZINC250k
-                    as the dataset class, and apply torch_geometric.data.DenseDataLoader to it to form the data loader.
-                lr (float): The learning rate for training.
-                wd (float): The weight decay factor for training.
-                max_epochs (int): The maximum number of training epochs.
-                c (float): The scaling hyperparameter for dequantization.
-                ld_step (int): The number of iteration steps of Langevin dynamics.
-                ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-                ld_step_size (int): The step size of Langevin dynamics.
-                clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-                alpha (float): The weight coefficient for loss function.
-                save_interval (int): The frequency to save the model parameters to .pt files,
-                    *e.g.*, if save_interval=2, the model parameters will be saved for every 2 training epochs.
-                save_dir (str): the directory to save the model parameters.
+                loader: DataLoader for training samples. Assumes batch.x is (batch, features, nodes)
+                        and batch.adj is (batch, edge_types, nodes, nodes).
+                lr (float): Learning rate. (Paper Appendix D: 0.0001)
+                wd (float): Weight decay.
+                max_epochs (int): Maximum training epochs. (Paper Appendix D: up to 20)
+                c (float): Scaling hyperparameter for dequantization (t in paper Eq.8). (Paper Appendix D: t in [0,1])
+                ld_step (int): Number of Langevin dynamics steps (K in paper). (Paper Appendix D: K in [30, 300])
+                ld_noise (float): Std dev of Gaussian noise in Langevin dynamics (sigma in paper Eq.7). (Paper Appendix D: sigma=0.005)
+                ld_step_size (float): Step size for Langevin dynamics (lambda/2 in paper Eq.7). (Paper Appendix D: lambda/2 in [10,50])
+                clamp_lgd_grad (bool): Whether to clip gradients in Langevin dynamics. (Paper Appendix D: clip grad magnitude < 0.01)
+                alpha (float): Weight for regularization loss term. (Paper Appendix D: alpha=1)
+                save_interval (int): Frequency to save model checkpoints.
+                save_dir (str): Directory to save model checkpoints.
         """
         parameters = self.energy_function.parameters()
         optimizer = Adam(parameters, lr=lr, betas=(0.0, 0.999), weight_decay=wd)
@@ -122,547 +140,414 @@ class GraphEBM(Generator):
 
         for epoch in range(max_epochs):
             t_start = time.time()
-            losses_reg = []
-            losses_en = []
-            losses = []
-            for _, batch in enumerate(tqdm(loader)):
-                ### Dequantization
-                pos_x = batch.x.to(self.device).to(dtype=torch.float32)
-                pos_x += c * torch.rand_like(pos_x, device=self.device)
-                pos_adj = batch.adj.to(self.device).to(dtype=torch.float32)
-                pos_adj += c * torch.rand_like(pos_adj, device=self.device)
+            epoch_losses_reg = []
+            epoch_losses_en = []
+            epoch_losses_total = []
 
+            self.energy_function.train()  # Ensure model is in training mode for dropout, etc.
 
-                ### Langevin dynamics
-                neg_x = torch.rand_like(pos_x, device=self.device) * (1 + c)
-                neg_adj = torch.rand_like(pos_adj, device=self.device)
+            for _, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch + 1}/{max_epochs}")):
+                ### Dequantization of positive samples (Section 2.3, Eq. 8)
+                # Assuming batch.x from loader is (batch_size, num_atom_types, num_nodes)
+                # Assuming batch.adj from loader is (batch_size, num_edge_types, num_nodes, num_nodes)
+                pos_x_orig = batch.x.to(self.device).to(dtype=torch.float32)
+                pos_adj_orig = batch.adj.to(self.device).to(dtype=torch.float32)
 
-                pos_adj = rescale_adj(pos_adj)
-                neg_x.requires_grad = True
+                pos_x = pos_x_orig + c * torch.rand_like(pos_x_orig, device=self.device)
+                pos_adj = pos_adj_orig + c * torch.rand_like(pos_adj_orig, device=self.device)
+
+                # Permute pos_x to (batch_size, num_nodes, num_atom_types) for EnergyFunc
+                # This aligns with typical GNN input and how gen_x is structured in run_rand_gen
+                pos_x = pos_x.permute(0, 2, 1)
+
+                ### Adjacency matrix normalization for positive samples (Section 2.3, Eq. 9)
+                # rescale_adj should implement: A_{(:,:,k)}^{\oplus} = D^{-1}A_{(:,:,k)}^{\prime}
+                # where D is diagonal degree matrix D_{(i,i)}=\sum_{j,k}A_{(i,j,k)}^{\prime}
+                pos_adj_normalized = rescale_adj(pos_adj)  # Critical: util.rescale_adj must match paper's Eq.9
+
+                ### Langevin Dynamics for generating negative samples (Section 2.3, Eq. 7, 10)
+                # Initialize negative samples
+                neg_x = torch.rand_like(pos_x_orig, device=self.device) * (1 + c)  # Shape (B, features, N_nodes)
+                neg_adj = torch.rand_like(pos_adj_orig, device=self.device)  # Shape (B, edge_types, N_nodes, N_nodes)
+
+                # Permute neg_x for consistency if it's used by energy_function directly in LD
+                # However, energy_function expects (B, N_nodes, features)
+                neg_x_for_ld = neg_x.permute(0, 2, 1)  # Shape (B, N_nodes, features) for energy_function input
+
+                neg_x_for_ld.requires_grad = True
+                neg_adj.requires_grad = True  # Assuming neg_adj is already in (B, E, N, N) format for energy_function
+
+                # Langevin dynamics loop
+                requires_grad(parameters, False)  # Detach EBM parameters from LD gradient computation
+                self.energy_function.eval()  # Use EBM in eval mode for LD (e.g. no dropout)
+
+                for _ in range(ld_step):
+                    noise_x_ld = torch.randn_like(neg_x_for_ld, device=self.device)  # Noise for (B, N_nodes, features)
+                    noise_adj_ld = torch.randn_like(neg_adj, device=self.device)  # Noise for (B, E, N_nodes, N_nodes)
+
+                    noise_x_ld.normal_(0, ld_noise)
+                    noise_adj_ld.normal_(0, ld_noise)
+
+                    # Add noise to current negative samples
+                    neg_x_for_ld.data.add_(noise_x_ld.data)
+                    neg_adj.data.add_(noise_adj_ld.data)
+
+                    # Compute energy and gradients w.r.t. negative samples
+                    neg_out_ld = self.energy_function(neg_adj, neg_x_for_ld)
+                    neg_out_ld.sum().backward()  # Sum over batch for independent gradients
+
+                    if clamp_lgd_grad:  # As per Appendix D
+                        if neg_x_for_ld.grad is not None:
+                            neg_x_for_ld.grad.data.clamp_(-0.01, 0.01)
+                        if neg_adj.grad is not None:
+                            neg_adj.grad.data.clamp_(-0.01, 0.01)
+
+                    # Update negative samples (gradient descent on energy)
+                    if neg_x_for_ld.grad is not None:
+                        neg_x_for_ld.data.add_(neg_x_for_ld.grad.data, alpha=-ld_step_size)
+                    if neg_adj.grad is not None:
+                        neg_adj.data.add_(neg_adj.grad.data, alpha=-ld_step_size)
+
+                    # Zero gradients for next LD step
+                    if neg_x_for_ld.grad is not None:
+                        neg_x_for_ld.grad.detach_()
+                        neg_x_for_ld.grad.zero_()
+                    if neg_adj.grad is not None:
+                        neg_adj.grad.detach_()
+                        neg_adj.grad.zero_()
+
+                    # Clamp negative samples to valid range (Section 2.3, after Eq. 10)
+                    neg_x_for_ld.data.clamp_(0, 1 + c)  # Clamp (B, N_nodes, features)
+                    neg_adj.data.clamp_(0, 1)  # Clamp (B, E, N_nodes, N_nodes)
+
+                # Detach negative samples from computation graph for EBM training
+                neg_x_final = neg_x_for_ld.detach()
+                neg_adj_final = neg_adj.detach()
+
+                ### Training EBM by backpropagation (Section 2.3, Eq. 11, 12)
+                requires_grad(parameters, True)  # Re-enable gradients for EBM parameters
+                self.energy_function.train()  # Set EBM to train mode
+                optimizer.zero_grad()
+
+                pos_out = self.energy_function(pos_adj_normalized, pos_x)  # pos_x is (B, N_nodes, features)
+                neg_out = self.energy_function(neg_adj_final, neg_x_final)  # neg_x_final is (B, N_nodes, features)
+
+                loss_en = pos_out - neg_out  # Energy shaping loss (Eq. 11)
+                loss_reg = (pos_out ** 2 + neg_out ** 2)  # Energy magnitude regularization (Eq. 12)
+
+                total_loss = (loss_en + alpha * loss_reg).mean()  # Average over batch
+                total_loss.backward()
+
+                if optimizer.param_groups[0]['params'][0].grad is not None:  # Check if grads exist
+                    clip_grad(optimizer)  # Custom gradient clipping if needed
+                optimizer.step()
+
+                epoch_losses_reg.append(loss_reg.mean().item())
+                epoch_losses_en.append(loss_en.mean().item())
+                epoch_losses_total.append(total_loss.item())
+
+            t_end = time.time()
+            avg_total_loss = sum(epoch_losses_total) / len(epoch_losses_total) if epoch_losses_total else float('nan')
+            avg_en_loss = sum(epoch_losses_en) / len(epoch_losses_en) if epoch_losses_en else float('nan')
+            avg_reg_loss = sum(epoch_losses_reg) / len(epoch_losses_reg) if epoch_losses_reg else float('nan')
+
+            print(f'Epoch: {epoch + 1:03d}, Loss: {avg_total_loss:.6f}, Energy Loss: {avg_en_loss:.6f}, '
+                  f'Regularizer Loss: {avg_reg_loss:.6f}, Sec/Epoch: {t_end - t_start:.2f}')
+            print('==========================================')
+
+            if (epoch + 1) % save_interval == 0:
+                save_path = os.path.join(save_dir, f'epoch_{epoch + 1}.pt')
+                torch.save(self.energy_function.state_dict(), save_path)
+                print(f'Saving checkpoint at epoch {epoch + 1} to {save_path}')
+                print('==========================================')
+
+    def run_rand_gen(self, checkpoint_path, n_samples, c, ld_step, ld_noise, ld_step_size, clamp_lgd_grad,
+                     atomic_num_list=None, correct_validity=True):
+        r"""
+            Running graph generation for random generation task. (Corresponds to Section 2.4 of the paper)
+
+            Args:
+                checkpoint_path (str): Path to the trained model checkpoint (.pt file).
+                n_samples (int): Number of molecules to generate.
+                c (float): Scaling hyperparameter for dequantization (t in paper).
+                ld_step (int): Number of Langevin dynamics steps (K in paper).
+                ld_noise (float): Std dev of Gaussian noise in Langevin dynamics (sigma in paper).
+                ld_step_size (float): Step size for Langevin dynamics (lambda/2 in paper).
+                clamp_lgd_grad (bool): Whether to clip gradients in Langevin dynamics.
+                atomic_num_list (list, optional): List to map atom type indices to atomic numbers (for RDKit conversion).
+                correct_validity (bool): Whether to apply validity correction (e.g. RDKit based).
+
+            Returns:
+                list: A list of generated molecules (e.g., RDKit Mol objects if conversion is implemented).
+                      Currently returns detached tensors gen_x, gen_adj.
+        """
+        print(f"Loading parameters from {checkpoint_path}")
+        self.energy_function.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+
+        parameters = self.energy_function.parameters()
+
+        ### Initialization of samples for generation (Section 2.3, Eq. 10)
+        print("Initializing samples for generation...")
+        # Initialize gen_x with shape (n_samples, n_atom_type, n_atom)
+        gen_x_orig_shape = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
+        # Initialize gen_adj with shape (n_samples, n_edge_type, n_atom, n_atom)
+        gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
+
+        # Permute gen_x to (n_samples, n_atom, n_atom_type) for EnergyFunc input
+        gen_x = gen_x_orig_shape.permute(0, 2, 1)
+
+        gen_x.requires_grad = True
+        gen_adj.requires_grad = True
+
+        requires_grad(parameters, False)  # Detach EBM parameters
+        self.energy_function.eval()  # EBM in eval mode
+
+        ### Langevin dynamics for generation (Section 2.4, reusing Eq. 7)
+        print("Generating samples via Langevin dynamics...")
+        for i in tqdm(range(ld_step), desc="Langevin Dynamics for Generation"):
+            noise_x = torch.randn_like(gen_x, device=self.device)  # Noise for (B, N_nodes, features)
+            noise_adj = torch.randn_like(gen_adj, device=self.device)  # Noise for (B, E, N_nodes, N_nodes)
+
+            noise_x.normal_(0, ld_noise)
+            noise_adj.normal_(0, ld_noise)
+
+            gen_x.data.add_(noise_x.data)
+            gen_adj.data.add_(noise_adj.data)
+
+            gen_out = self.energy_function(gen_adj, gen_x)
+            gen_out.sum().backward()
+
+            if clamp_lgd_grad:
+                if gen_x.grad is not None:
+                    gen_x.grad.data.clamp_(-0.01, 0.01)
+                if gen_adj.grad is not None:
+                    gen_adj.grad.data.clamp_(-0.01, 0.01)
+
+            if gen_x.grad is not None:
+                gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
+            if gen_adj.grad is not None:
+                gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
+
+            if gen_x.grad is not None:
+                gen_x.grad.detach_()
+                gen_x.grad.zero_()
+            if gen_adj.grad is not None:
+                gen_adj.grad.detach_()
+                gen_adj.grad.zero_()
+
+            gen_x.data.clamp_(0, 1 + c)  # Clamp to [0, 1+t)
+            gen_adj.data.clamp_(0, 1)  # Clamp to [0, 1)
+
+        gen_x_final = gen_x.detach()
+        gen_adj_final = gen_adj.detach()
+
+        ### Post-processing (Section 2.4)
+        # Symmetrize adjacency tensor
+        gen_adj_final = (gen_adj_final + gen_adj_final.permute(0, 1, 3, 2)) / 2  # Average for symmetry
+
+        # Discretization (argmax) would happen here.
+        # gen_x_discrete = torch.argmax(gen_x_final.permute(0,2,1), dim=1) # if gen_x_final is (B,N,F) -> (B,F,N) then argmax
+        # gen_adj_discrete = torch.argmax(gen_adj_final, dim=1)
+
+        # The commented RDKit lines below would handle conversion and validity correction.
+        # For now, returning raw tensors.
+        # gen_mols = gen_mol_from_one_shot_tensor(gen_adj_final, gen_x_final.permute(0,2,1), atomic_num_list, correct_validity=correct_validity)
+        # return gen_mols
+
+        print("Generation complete. Returning raw tensors.")
+        # Return gen_x_final in (B, N_nodes, Features) and gen_adj_final in (B, E_types, N_nodes, N_nodes)
+        return gen_x_final, gen_adj_final
+
+    def train_goal_directed(self, loader, lr, wd, max_epochs, c, ld_step, ld_noise, ld_step_size, clamp_lgd_grad, alpha,
+                            save_interval, save_dir):
+        r"""
+            Running training for goal-directed generation task. (Corresponds to Section 2.5 of the paper)
+            This function is analogous to train_rand_gen but uses a modified loss.
+
+            Args:
+                loader: DataLoader. Assumes batch contains batch.x, batch.adj, and batch.y (normalized property).
+                (Other parameters similar to train_rand_gen)
+                pos_y (torch.Tensor): Normalized property values for positive samples, shape (batch_size, 1).
+        """
+        parameters = self.energy_function.parameters()
+        optimizer = Adam(parameters, lr=lr, betas=(0.0, 0.999), weight_decay=wd)
+
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        for epoch in range(max_epochs):
+            t_start = time.time()
+            epoch_losses_reg = []
+            epoch_losses_en = []
+            epoch_losses_total = []
+
+            self.energy_function.train()
+
+            for _, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch + 1}/{max_epochs} (Goal-Directed)")):
+                pos_x_orig = batch.x.to(self.device).to(dtype=torch.float32)
+                pos_adj_orig = batch.adj.to(self.device).to(dtype=torch.float32)
+                pos_y = batch.y.to(self.device).to(dtype=torch.float32)  # Normalized property
+
+                pos_x = pos_x_orig + c * torch.rand_like(pos_x_orig, device=self.device)
+                pos_adj = pos_adj_orig + c * torch.rand_like(pos_adj_orig, device=self.device)
+                pos_x = pos_x.permute(0, 2, 1)  # (B, N_nodes, Features)
+
+                pos_adj_normalized = rescale_adj(pos_adj)
+
+                # Langevin Dynamics (same as in train_rand_gen)
+                neg_x = torch.rand_like(pos_x_orig, device=self.device) * (1 + c)
+                neg_adj = torch.rand_like(pos_adj_orig, device=self.device)
+                neg_x_for_ld = neg_x.permute(0, 2, 1)
+                neg_x_for_ld.requires_grad = True
                 neg_adj.requires_grad = True
-
-
 
                 requires_grad(parameters, False)
                 self.energy_function.eval()
 
-
-
-                noise_x = torch.randn_like(neg_x, device=self.device)
-                noise_adj = torch.randn_like(neg_adj, device=self.device)
                 for _ in range(ld_step):
+                    noise_x_ld = torch.randn_like(neg_x_for_ld, device=self.device)
+                    noise_adj_ld = torch.randn_like(neg_adj, device=self.device)
+                    noise_x_ld.normal_(0, ld_noise)
+                    noise_adj_ld.normal_(0, ld_noise)
+                    neg_x_for_ld.data.add_(noise_x_ld.data)
+                    neg_adj.data.add_(noise_adj_ld.data)
 
-                    noise_x.normal_(0, ld_noise)
-                    noise_adj.normal_(0, ld_noise)
-                    neg_x.data.add_(noise_x.data)
-                    neg_adj.data.add_(noise_adj.data)
-
-                    neg_out = self.energy_function(neg_adj, neg_x)
-                    neg_out.sum().backward()
-                    if clamp:
-                        neg_x.grad.data.clamp_(-0.01, 0.01)
-                        neg_adj.grad.data.clamp_(-0.01, 0.01)
-
-
-                    neg_x.data.add_(neg_x.grad.data, alpha=-ld_step_size)
-                    neg_adj.data.add_(neg_adj.grad.data, alpha=-ld_step_size)
-
-                    neg_x.grad.detach_()
-                    neg_x.grad.zero_()
-                    neg_adj.grad.detach_()
-                    neg_adj.grad.zero_()
-
-                    neg_x.data.clamp_(0, 1 + c)
+                    neg_out_ld = self.energy_function(neg_adj, neg_x_for_ld)
+                    neg_out_ld.sum().backward()
+                    if clamp_lgd_grad:
+                        if neg_x_for_ld.grad is not None: neg_x_for_ld.grad.data.clamp_(-0.01, 0.01)
+                        if neg_adj.grad is not None: neg_adj.grad.data.clamp_(-0.01, 0.01)
+                    if neg_x_for_ld.grad is not None: neg_x_for_ld.data.add_(neg_x_for_ld.grad.data,
+                                                                             alpha=-ld_step_size)
+                    if neg_adj.grad is not None: neg_adj.data.add_(neg_adj.grad.data, alpha=-ld_step_size)
+                    if neg_x_for_ld.grad is not None: neg_x_for_ld.grad.detach_(); neg_x_for_ld.grad.zero_()
+                    if neg_adj.grad is not None: neg_adj.grad.detach_(); neg_adj.grad.zero_()
+                    neg_x_for_ld.data.clamp_(0, 1 + c)
                     neg_adj.data.clamp_(0, 1)
 
-                ### Training by backprop
-                neg_x = neg_x.detach()
-                neg_adj = neg_adj.detach()
+                neg_x_final = neg_x_for_ld.detach()
+                neg_adj_final = neg_adj.detach()
+
+                # Training EBM
                 requires_grad(parameters, True)
                 self.energy_function.train()
+                optimizer.zero_grad()
 
-                self.energy_function.zero_grad()
+                pos_out = self.energy_function(pos_adj_normalized, pos_x)
+                neg_out = self.energy_function(neg_adj_final, neg_x_final)
 
-                pos_out = self.energy_function(pos_adj, pos_x)
-                neg_out = self.energy_function(neg_adj, neg_x)
+                # Goal-directed loss (Section 2.5, Eq. 13)
+                # f(y) = 1 + e^y. Ensure pos_y is normalized property [0,1]
+                f_y = 1 + torch.exp(pos_y)
+                loss_en = f_y * pos_out - neg_out
+                loss_reg = (pos_out ** 2 + neg_out ** 2)
 
-                loss_reg = (pos_out ** 2 + neg_out ** 2)  # energy magnitudes regularizer
-                loss_en = pos_out - neg_out  # loss for shaping energy function
-                loss = loss_en + alpha * loss_reg
-                loss = loss.mean()
-                loss.backward()
-                clip_grad(optimizer)
+                total_loss = (loss_en + alpha * loss_reg).mean()
+                total_loss.backward()
+                if optimizer.param_groups[0]['params'][0].grad is not None:
+                    clip_grad(optimizer)
                 optimizer.step()
 
-
-                losses_reg.append(loss_reg.mean())
-                losses_en.append(loss_en.mean())
-                losses.append(loss)
-
+                epoch_losses_reg.append(loss_reg.mean().item())
+                epoch_losses_en.append(loss_en.mean().item())
+                epoch_losses_total.append(total_loss.item())
 
             t_end = time.time()
+            avg_total_loss = sum(epoch_losses_total) / len(epoch_losses_total) if epoch_losses_total else float('nan')
+            avg_en_loss = sum(epoch_losses_en) / len(epoch_losses_en) if epoch_losses_en else float('nan')
+            avg_reg_loss = sum(epoch_losses_reg) / len(epoch_losses_reg) if epoch_losses_reg else float('nan')
 
-            ### Save checkpoints
-            if (epoch+1) % save_interval == 0:
-                torch.save(self.energy_function.state_dict(), os.path.join(save_dir, 'epoch_{}.pt'.format(epoch + 1)))
-                print('Saving checkpoint at epoch ', epoch+1)
-                print('==========================================')
-            print('Epoch: {:03d}, Loss: {:.6f}, Energy Loss: {:.6f}, Regularizer Loss: {:.6f}, Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses)/len(losses)).item(), (sum(losses_en)/len(losses_en)).item(), (sum(losses_reg)/len(losses_reg)).item(), t_end-t_start))
+            print(
+                f'Epoch (Goal-Directed): {epoch + 1:03d}, Loss: {avg_total_loss:.6f}, Energy Loss: {avg_en_loss:.6f}, '
+                f'Regularizer Loss: {avg_reg_loss:.6f}, Sec/Epoch: {t_end - t_start:.2f}')
             print('==========================================')
 
-    #
-    # def run_rand_gen(self, checkpoint_path, n_samples, c, ld_step, ld_noise, ld_step_size, clamp, atomic_num_list):
-    #     r"""
-    #         Running graph generation for random generation task.
-    #
-    #         Args:
-    #             checkpoint_path (str): The path of the trained model, *i.e.*, the .pt file.
-    #             n_samples (int): the number of molecules to generate.
-    #             c (float): The scaling hyperparameter for dequantization.
-    #             ld_step (int): The number of iteration steps of Langevin dynamics.
-    #             ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-    #             ld_step_size (int): The step size of Langevin dynamics.
-    #             clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-    #             atomic_num_list (list): The list used to indicate atom types.
-    #
-    #         :rtype:
-    #             gen_mols (list): A list of generated molecules represented by rdkit Chem.Mol objects;
-    #
-    #     """
-    #     print("Loading paramaters from {}".format(checkpoint_path))
-    #     self.energy_function.load_state_dict(torch.load(checkpoint_path))
-    #     parameters =  self.energy_function.parameters()
-    #
-    #     ### Initialization
-    #     print("Initializing samples...")
-    #     gen_x = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
-    #     gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
-    #
-    #     gen_x.requires_grad = True
-    #     gen_adj.requires_grad = True
-    #     requires_grad(parameters, False)
-    #     self.energy_function.eval()
-    #
-    #     noise_x = torch.randn_like(gen_x, device=self.device)
-    #     noise_adj = torch.randn_like(gen_adj, device=self.device)
-    #
-    #     ### Langevin dynamics
-    #     print("Generating samples...")
-    #     for _ in range(ld_step):
-    #         noise_x.normal_(0, ld_noise)
-    #         noise_adj.normal_(0, ld_noise)
-    #         gen_x.data.add_(noise_x.data)
-    #         gen_adj.data.add_(noise_adj.data)
-    #
-    #
-    #         gen_out = self.energy_function(gen_adj, gen_x)
-    #         gen_out.sum().backward()
-    #         if clamp:
-    #             gen_x.grad.data.clamp_(-0.01, 0.01)
-    #             gen_adj.grad.data.clamp_(-0.01, 0.01)
-    #
-    #
-    #         gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-    #         gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
-    #
-    #         gen_x.grad.detach_()
-    #         gen_x.grad.zero_()
-    #         gen_adj.grad.detach_()
-    #         gen_adj.grad.zero_()
-    #
-    #         gen_x.data.clamp_(0, 1 + c)
-    #         gen_adj.data.clamp_(0, 1)
-    #
-    #     gen_x = gen_x.detach()
-    #     gen_adj = gen_adj.detach()
-    #     gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
-    #
-    #     gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list, correct_validity=True)
-    #
-    #     return gen_mols
-    #
-    #
-    # def train_goal_directed(self, loader, lr, wd, max_epochs, c, ld_step, ld_noise, ld_step_size, clamp, alpha, save_interval, save_dir):
-    #     r"""
-    #         Running training for goal-directed generation task.
-    #
-    #         Args:
-    #             loader: The data loader for loading training samples. It is supposed to use ggraph.dataset.QM9/ZINC250k
-    #                 as the dataset class, and apply torch_geometric.data.DenseDataLoader to it to form the data loader.
-    #             lr (float): The learning rate for training.
-    #             wd (float): The weight decay factor for training.
-    #             max_epochs (int): The maximum number of training epochs.
-    #             c (float): The scaling hyperparameter for dequantization.
-    #             ld_step (int): The number of iteration steps of Langevin dynamics.
-    #             ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-    #             ld_step_size (int): The step size of Langevin dynamics.
-    #             clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-    #             alpha (float): The weight coefficient for loss function.
-    #             save_interval (int): The frequency to save the model parameters to .pt files,
-    #                 *e.g.*, if save_interval=2, the model parameters will be saved for every 2 training epochs.
-    #             save_dir (str): the directory to save the model parameters.
-    #     """
-    #     parameters = self.energy_function.parameters()
-    #     optimizer = Adam(parameters, lr=lr, betas=(0.0, 0.999), weight_decay=wd)
-    #
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    #
-    #     for epoch in range(max_epochs):
-    #         t_start = time.time()
-    #         losses_reg = []
-    #         losses_en = []
-    #         losses = []
-    #         for _, batch in enumerate(tqdm(loader)):
-    #             ### Dequantization
-    #             pos_x = batch.x.to(self.device).to(dtype=torch.float32)
-    #             pos_x += c * torch.rand_like(pos_x, device=self.device)
-    #             pos_adj = batch.adj.to(self.device).to(dtype=torch.float32)
-    #             pos_adj += c * torch.rand_like(pos_adj, device=self.device)
-    #
-    #             pos_y = batch.y.to(self.device)
-    #
-    #
-    #             ### Langevin dynamics
-    #             neg_x = torch.rand_like(pos_x, device=self.device) * (1 + c)
-    #             neg_adj = torch.rand_like(pos_adj, device=self.device)
-    #
-    #             pos_adj = rescale_adj(pos_adj)
-    #             neg_x.requires_grad = True
-    #             neg_adj.requires_grad = True
-    #
-    #
-    #
-    #             requires_grad(parameters, False)
-    #             self.energy_function.eval()
-    #
-    #
-    #
-    #             noise_x = torch.randn_like(neg_x, device=self.device)
-    #             noise_adj = torch.randn_like(neg_adj, device=self.device)
-    #             for _ in range(ld_step):
-    #
-    #                 noise_x.normal_(0, ld_noise)
-    #                 noise_adj.normal_(0, ld_noise)
-    #                 neg_x.data.add_(noise_x.data)
-    #                 neg_adj.data.add_(noise_adj.data)
-    #
-    #                 neg_out = self.energy_function(neg_adj, neg_x)
-    #                 neg_out.sum().backward()
-    #                 if clamp:
-    #                     neg_x.grad.data.clamp_(-0.01, 0.01)
-    #                     neg_adj.grad.data.clamp_(-0.01, 0.01)
-    #
-    #
-    #                 neg_x.data.add_(neg_x.grad.data, alpha=-ld_step_size)
-    #                 neg_adj.data.add_(neg_adj.grad.data, alpha=-ld_step_size)
-    #
-    #                 neg_x.grad.detach_()
-    #                 neg_x.grad.zero_()
-    #                 neg_adj.grad.detach_()
-    #                 neg_adj.grad.zero_()
-    #
-    #                 neg_x.data.clamp_(0, 1 + c)
-    #                 neg_adj.data.clamp_(0, 1)
-    #
-    #             ### Training by backprop
-    #             neg_x = neg_x.detach()
-    #             neg_adj = neg_adj.detach()
-    #             requires_grad(parameters, True)
-    #             self.energy_function.train()
-    #
-    #             self.energy_function.zero_grad()
-    #
-    #             pos_out = self.energy_function(pos_adj, pos_x)
-    #             neg_out = self.energy_function(neg_adj, neg_x)
-    #
-    #             loss_reg = (pos_out ** 2 + neg_out ** 2)  # energy magnitudes regularizer
-    #             loss_en = (1 + torch.exp(pos_y)) * pos_out - neg_out  # loss for shaping energy function
-    #             loss = loss_en + alpha * loss_reg
-    #             loss = loss.mean()
-    #             loss.backward()
-    #             clip_grad(optimizer)
-    #             optimizer.step()
-    #
-    #
-    #             losses_reg.append(loss_reg.mean())
-    #             losses_en.append(loss_en.mean())
-    #             losses.append(loss)
-    #
-    #
-    #         t_end = time.time()
-    #
-    #         ### Save checkpoints
-    #         if (epoch+1) % save_interval == 0:
-    #             torch.save(self.energy_function.state_dict(), os.path.join(save_dir, 'epoch_{}.pt'.format(epoch + 1)))
-    #             print('Saving checkpoint at epoch ', epoch+1)
-    #             print('==========================================')
-    #         print('Epoch: {:03d}, Loss: {:.6f}, Energy Loss: {:.6f}, Regularizer Loss: {:.6f}, Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses)/len(losses)).item(), (sum(losses_en)/len(losses_en)).item(), (sum(losses_reg)/len(losses_reg)).item(), t_end-t_start))
-    #         print('==========================================')
-    #
-    #
-    # def run_prop_opt(self, checkpoint_path, initialization_loader, c, ld_step, ld_noise, ld_step_size, clamp, atomic_num_list, train_smiles):
-    #     r"""
-    #         Running graph generation for goal-directed generation task: property optimization.
-    #
-    #         Args:
-    #             checkpoint_path (str): The path of the trained model, *i.e.*, the .pt file.
-    #             initialization_loader: The data loader for loading samples to initialize the Langevin dynamics. It is supposed to use ggraph.dataset.QM9/ZINC250k as the dataset class, and apply torch_geometric.data.DenseDataLoader to it to form the data loader.
-    #             c (float): The scaling hyperparameter for dequantization.
-    #             ld_step (int): The number of iteration steps of Langevin dynamics.
-    #             ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-    #             ld_step_size (int): The step size of Langevin dynamics.
-    #             clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-    #             atomic_num_list (list): The list used to indicate atom types.
-    #             train_smiles (list): A list of smiles string corresponding to training samples.
-    #
-    #         :rtype:
-    #             save_mols_list (list), prop_list (list): save_mols_list is a list of generated molecules with high QED scores represented by rdkit Chem.Mol objects; prop_list is a list of the corresponding QED scores.
-    #
-    #     """
-    #     print("Loading paramaters from {}".format(checkpoint_path))
-    #     self.energy_function.load_state_dict(torch.load(checkpoint_path))
-    #     parameters =  self.energy_function.parameters()
-    #
-    #     save_mols_list = []
-    #     prop_list = []
-    #
-    #     for _, batch in enumerate(tqdm(initialization_loader)):
-    #         ### Initialization
-    #         gen_x = batch.x.to(self.device).to(dtype=torch.float32)
-    #         gen_adj = batch.adj.to(self.device).to(dtype=torch.float32)
-    #
-    #         gen_x.requires_grad = True
-    #         gen_adj.requires_grad = True
-    #         requires_grad(parameters, False)
-    #         self.energy_function.eval()
-    #
-    #         noise_x = torch.randn_like(gen_x, device=self.device)
-    #         noise_adj = torch.randn_like(gen_adj, device=self.device)
-    #
-    #         ### Langevin dynamics
-    #         for _ in range(ld_step):
-    #             noise_x.normal_(0, ld_noise)
-    #             noise_adj.normal_(0, ld_noise)
-    #             gen_x.data.add_(noise_x.data)
-    #             gen_adj.data.add_(noise_adj.data)
-    #
-    #
-    #             gen_out = self.energy_function(gen_adj, gen_x)
-    #             gen_out.sum().backward()
-    #             if clamp:
-    #                 gen_x.grad.data.clamp_(-0.01, 0.01)
-    #                 gen_adj.grad.data.clamp_(-0.01, 0.01)
-    #
-    #
-    #             gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-    #             gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
-    #
-    #             gen_x.grad.detach_()
-    #             gen_x.grad.zero_()
-    #             gen_adj.grad.detach_()
-    #             gen_adj.grad.zero_()
-    #
-    #             gen_x.data.clamp_(0, 1 + c)
-    #             gen_adj.data.clamp_(0, 1)
-    #
-    #             gen_x_t = copy.deepcopy(gen_x)
-    #             gen_adj_t = copy.deepcopy(gen_adj)
-    #             gen_adj_t = (gen_adj_t + gen_adj_t.permute(0, 1, 3, 2)) / 2
-    #
-    #             gen_mols = gen_mol_from_one_shot_tensor(gen_adj_t, gen_x_t, atomic_num_list, correct_validity=True)
-    #             gen_smiles = [Chem.MolToSmiles(mol) for mol in gen_mols]
-    #
-    #             for mol_idx in range(len(gen_smiles)):
-    #                 if gen_mols[mol_idx] is not None:
-    #                     tmp_mol = gen_mols[mol_idx]
-    #                     tmp_smiles = gen_smiles[mol_idx]
-    #                     if tmp_smiles not in train_smiles:
-    #                         tmp_qed = qed(tmp_mol)
-    #                         if tmp_qed > 0.930:
-    #                             save_mols_list.append(tmp_mol)
-    #                             prop_list.append(tmp_qed)
-    #     return save_mols_list, prop_list
-    #
-    #
-    # def run_const_prop_opt(self, checkpoint_path, initialization_loader, c, ld_step, ld_noise, ld_step_size, clamp, atomic_num_list, train_smiles):
-    #     r"""
-    #         Running graph generation for goal-directed generation task: constrained property optimization.
-    #
-    #         Args:
-    #             checkpoint_path (str): The path of the trained model, *i.e.*, the .pt file.
-    #             initialization_loader: The data loader for loading samples to initialize the Langevin dynamics. It is supposed to use ggraph.dataset.QM9/ZINC250k as the dataset class, and apply torch_geometric.data.DenseDataLoader to it to form the data loader.
-    #             c (float): The scaling hyperparameter for dequantization.
-    #             ld_step (int): The number of iteration steps of Langevin dynamics.
-    #             ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-    #             ld_step_size (int): The step size of Langevin dynamics.
-    #             clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-    #             atomic_num_list (list): The list used to indicate atom types.
-    #             train_smiles (list): A list of smiles string corresponding to training samples.
-    #
-    #         :rtype:
-    #             mols_0_list (list), mols_2_list (list), mols_4_list (list), mols_6_list (list), imp_0_list (list), imp_2_list (list), imp_4_list (list), imp_4_list (list): They are lists of optimized molecules (represented by rdkit Chem.Mol objects) and the corresponding improvements under the threshold 0.0, 0.2, 0.4, 0.6, respectively.
-    #     """
-    #     print("Loading paramaters from {}".format(checkpoint_path))
-    #     self.energy_function.load_state_dict(torch.load(checkpoint_path))
-    #     parameters =  self.energy_function.parameters()
-    #
-    #     mols_0_list = [None]*800
-    #     mols_2_list = [None]*800
-    #     mols_4_list = [None]*800
-    #     mols_6_list = [None]*800
-    #
-    #     imp_0_list = [0]*800
-    #     imp_2_list = [0]*800
-    #     imp_4_list = [0]*800
-    #     imp_6_list = [0]*800
-    #
-    #     for i, batch in enumerate(tqdm(initialization_loader)):
-    #         ### Initialization
-    #         gen_x = batch.x.to(self.device).to(dtype=torch.float32)
-    #         gen_adj = batch.adj.to(self.device).to(dtype=torch.float32)
-    #
-    #         ori_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list, correct_validity=True)
-    #         ori_smiles = [Chem.MolToSmiles(mol) for mol in ori_mols]
-    #
-    #         gen_x.requires_grad = True
-    #         gen_adj.requires_grad = True
-    #         requires_grad(parameters, False)
-    #         self.energy_function.eval()
-    #
-    #         noise_x = torch.randn_like(gen_x, device=self.device)
-    #         noise_adj = torch.randn_like(gen_adj, device=self.device)
-    #
-    #         ### Langevin dynamics
-    #         for k in range(ld_step):
-    #             noise_x.normal_(0, ld_noise)
-    #             noise_adj.normal_(0, ld_noise)
-    #             gen_x.data.add_(noise_x.data)
-    #             gen_adj.data.add_(noise_adj.data)
-    #
-    #
-    #             gen_out = self.energy_function(gen_adj, gen_x)
-    #             gen_out.sum().backward()
-    #             if clamp:
-    #                 gen_x.grad.data.clamp_(-0.1, 0.1)
-    #                 gen_adj.grad.data.clamp_(-0.1, 0.1)
-    #
-    #
-    #             gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-    #             gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
-    #
-    #             gen_x.grad.detach_()
-    #             gen_x.grad.zero_()
-    #             gen_adj.grad.detach_()
-    #             gen_adj.grad.zero_()
-    #
-    #             gen_x.data.clamp_(0, 1 + c)
-    #             gen_adj.data.clamp_(0, 1)
-    #
-    #             gen_x_t = copy.deepcopy(gen_x)
-    #             gen_adj_t = copy.deepcopy(gen_adj)
-    #             gen_adj_t = (gen_adj_t + gen_adj_t.permute(0, 1, 3, 2)) / 2
-    #
-    #             gen_mols = gen_mol_from_one_shot_tensor(gen_adj_t, gen_x_t, atomic_num_list, correct_validity=True)
-    #             gen_smiles = [Chem.MolToSmiles(mol) for mol in gen_mols]
-    #
-    #             for mol_idx in range(len(gen_smiles)):
-    #                 if gen_mols[mol_idx] is not None:
-    #                     tmp_mol = gen_mols[mol_idx]
-    #                     ori_mol = ori_mols[mol_idx]
-    #                     imp_p = calculate_min_plogp(tmp_mol) - calculate_min_plogp(ori_mol)
-    #                     current_sim = reward_target_molecule_similarity(tmp_mol, ori_mol)
-    #                     if current_sim >= 0.:
-    #                         if imp_p > imp_0_list[mol_idx]:
-    #                             mols_0_list[mol_idx] = tmp_mol
-    #                     if current_sim >= 0.2:
-    #                         if imp_p > imp_2_list[mol_idx]:
-    #                             mols_2_list[mol_idx] = tmp_mol
-    #                     if current_sim >= 0.4:
-    #                         if imp_p > imp_4_list[mol_idx]:
-    #                             mols_4_list[mol_idx] = tmp_mol
-    #                     if current_sim >= 0.6:
-    #                         if imp_p > imp_6_list[mol_idx]:
-    #                             mols_6_list[mol_idx] = tmp_mol
-    #
-    #     return mols_0_list, mols_2_list, mols_4_list, mols_6_list, imp_0_list, imp_2_list, imp_4_list, imp_4_list
-    #
-    #
-    # def run_comp_gen(self, checkpoint_path_qed, checkpoint_path_plogp, n_samples, c, ld_step, ld_noise, ld_step_size, clamp, atomic_num_list):
-    #     r"""
-    #         Running graph generation for compositional generation task.
-    #
-    #         Args:
-    #             checkpoint_path_qed (str): The path of the model trained on QED property, *i.e.*, the .pt file.
-    #             checkpoint_path_plogp (str): The path of the model trained on plogp property, *i.e.*, the .pt file.
-    #             n_samples (int): the number of molecules to generate.
-    #             c (float): The scaling hyperparameter for dequantization.
-    #             ld_step (int): The number of iteration steps of Langevin dynamics.
-    #             ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-    #             ld_step_size (int): The step size of Langevin dynamics.
-    #             clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-    #             atomic_num_list (list): The list used to indicate atom types.
-    #
-    #         :rtype:
-    #             gen_mols (list): A list of generated molecules represented by rdkit Chem.Mol objects;
-    #     """
-    #     model_qed = self.energy_function
-    #     model_plogp = copy.deepcopy(self.energy_function)
-    #     print("Loading paramaters from {}".format(checkpoint_path_qed))
-    #     model_qed.load_state_dict(torch.load(checkpoint_path_qed))
-    #     parameters_qed =  model_qed.parameters()
-    #     print("Loading paramaters from {}".format(checkpoint_path_plogp))
-    #     model_plogp.load_state_dict(torch.load(checkpoint_path_plogp))
-    #     parameters_plogp =  model_plogp.parameters()
-    #
-    #     ### Initialization
-    #     print("Initializing samples...")
-    #     gen_x = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
-    #     gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
-    #
-    #     gen_x.requires_grad = True
-    #     gen_adj.requires_grad = True
-    #     requires_grad(parameters_qed, False)
-    #     requires_grad(parameters_plogp, False)
-    #     model_qed.eval()
-    #     model_plogp.eval()
-    #
-    #     noise_x = torch.randn_like(gen_x, device=self.device)
-    #     noise_adj = torch.randn_like(gen_adj, device=self.device)
-    #
-    #     ### Langevin dynamics
-    #     print("Generating samples...")
-    #     for _ in range(ld_step):
-    #         noise_x.normal_(0, ld_noise)
-    #         noise_adj.normal_(0, ld_noise)
-    #         gen_x.data.add_(noise_x.data)
-    #         gen_adj.data.add_(noise_adj.data)
-    #
-    #
-    #         gen_out_qed = model_qed(gen_adj, gen_x)
-    #         gen_out_plogp = model_plogp(gen_adj, gen_x)
-    #         gen_out = 0.5 * gen_out_qed + 0.5 * gen_out_plogp
-    #         gen_out.sum().backward()
-    #         if clamp:
-    #             gen_x.grad.data.clamp_(-0.01, 0.01)
-    #             gen_adj.grad.data.clamp_(-0.01, 0.01)
-    #
-    #
-    #         gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-    #         gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
-    #
-    #         gen_x.grad.detach_()
-    #         gen_x.grad.zero_()
-    #         gen_adj.grad.detach_()
-    #         gen_adj.grad.zero_()
-    #
-    #         gen_x.data.clamp_(0, 1 + c)
-    #         gen_adj.data.clamp_(0, 1)
-    #
-    #     gen_x = gen_x.detach()
-    #     gen_adj = gen_adj.detach()
-    #     gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
-    #
-    #     gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list, correct_validity=True)
-    #
-    #     return gen_mols
+            if (epoch + 1) % save_interval == 0:
+                save_path = os.path.join(save_dir, f'epoch_goal_directed_{epoch + 1}.pt')
+                torch.save(self.energy_function.state_dict(), save_path)
+                print(f'Saving checkpoint at epoch {epoch + 1} to {save_path}')
+                print('==========================================')
+
+    # Placeholder for run_prop_opt - depends on RDKit utils for molecule processing
+    # def run_prop_opt(self, checkpoint_path, initialization_loader, c, ld_step, ld_noise, ld_step_size, clamp_lgd_grad, atomic_num_list, train_smiles):
+    #     # ... (Implementation would be similar to run_rand_gen but might involve property calculation)
+    #     raise NotImplementedError("run_prop_opt requires RDKit utilities for molecule processing and property calculation.")
+
+    # Placeholder for run_const_prop_opt
+    # def run_const_prop_opt(self, checkpoint_path, initialization_loader, c, ld_step, ld_noise, ld_step_size, clamp_lgd_grad, atomic_num_list, train_smiles):
+    #     # ...
+    #     raise NotImplementedError("run_const_prop_opt requires RDKit utilities.")
+
+    def run_comp_gen(self, checkpoint_path_prop1, checkpoint_path_prop2, n_samples, c, ld_step, ld_noise, ld_step_size,
+                     clamp_lgd_grad, weight_prop1=0.5, weight_prop2=0.5, atomic_num_list=None, correct_validity=True):
+        r"""
+            Running graph generation for compositional generation task. (Corresponds to Section 2.6 of the paper)
+
+            Args:
+                checkpoint_path_prop1 (str): Path to model trained for property 1.
+                checkpoint_path_prop2 (str): Path to model trained for property 2.
+                weight_prop1 (float): Weight for energy from model 1.
+                weight_prop2 (float): Weight for energy from model 2.
+                (Other parameters similar to run_rand_gen)
+
+            Returns:
+                list: A list of generated molecules (e.g., RDKit Mol objects if conversion is implemented).
+        """
+        print(f"Loading model for property 1 from {checkpoint_path_prop1}")
+        energy_function_prop1 = copy.deepcopy(self.energy_function)  # Create a new instance
+        energy_function_prop1.load_state_dict(torch.load(checkpoint_path_prop1, map_location=self.device))
+        energy_function_prop1.eval()
+        requires_grad(energy_function_prop1.parameters(), False)
+
+        print(f"Loading model for property 2 from {checkpoint_path_prop2}")
+        energy_function_prop2 = copy.deepcopy(self.energy_function)  # Create another new instance
+        energy_function_prop2.load_state_dict(torch.load(checkpoint_path_prop2, map_location=self.device))
+        energy_function_prop2.eval()
+        requires_grad(energy_function_prop2.parameters(), False)
+
+        print("Initializing samples for compositional generation...")
+        gen_x_orig_shape = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
+        gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
+        gen_x = gen_x_orig_shape.permute(0, 2, 1)  # (B, N_nodes, Features)
+
+        gen_x.requires_grad = True
+        gen_adj.requires_grad = True
+
+        print("Generating samples via Langevin dynamics (Compositional)...")
+        for i in tqdm(range(ld_step), desc="Langevin Dynamics (Compositional)"):
+            noise_x = torch.randn_like(gen_x, device=self.device)
+            noise_adj = torch.randn_like(gen_adj, device=self.device)
+            noise_x.normal_(0, ld_noise)
+            noise_adj.normal_(0, ld_noise)
+
+            gen_x.data.add_(noise_x.data)
+            gen_adj.data.add_(noise_adj.data)
+
+            # Combined energy (Section 2.6, Eq. 14)
+            e_prop1 = energy_function_prop1(gen_adj, gen_x)
+            e_prop2 = energy_function_prop2(gen_adj, gen_x)
+            combined_energy = weight_prop1 * e_prop1 + weight_prop2 * e_prop2  # Paper uses sum, can be weighted sum
+            combined_energy.sum().backward()
+
+            if clamp_lgd_grad:
+                if gen_x.grad is not None: gen_x.grad.data.clamp_(-0.01, 0.01)
+                if gen_adj.grad is not None: gen_adj.grad.data.clamp_(-0.01, 0.01)
+
+            if gen_x.grad is not None: gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
+            if gen_adj.grad is not None: gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
+
+            if gen_x.grad is not None: gen_x.grad.detach_(); gen_x.grad.zero_()
+            if gen_adj.grad is not None: gen_adj.grad.detach_(); gen_adj.grad.zero_()
+
+            gen_x.data.clamp_(0, 1 + c)
+            gen_adj.data.clamp_(0, 1)
+
+        gen_x_final = gen_x.detach()
+        gen_adj_final = gen_adj.detach()
+        gen_adj_final = (gen_adj_final + gen_adj_final.permute(0, 1, 3, 2)) / 2
+
+        # gen_mols = gen_mol_from_one_shot_tensor(gen_adj_final, gen_x_final.permute(0,2,1), atomic_num_list, correct_validity=correct_validity)
+        # return gen_mols
+        print("Compositional generation complete. Returning raw tensors.")
+        return gen_x_final, gen_adj_final
+

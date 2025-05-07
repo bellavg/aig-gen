@@ -9,7 +9,7 @@ import networkx as nx
 
 # Try to import aig_config for type strings, handle if not found.
 try:
-    from ..G2PT.configs.aig import aig_config  # Adjust this import path if necessary
+    from ..data.aig_config import aig_config  # Adjust this import path if necessary
 
     AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
     AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
