@@ -171,7 +171,7 @@ def main(args):
         try:
             train_ebm_params = conf['train_ebm']
             runner.train_rand_gen(
-                dataloader=loader,  # GraphEBM's train_rand_gen expects 'dataloader'
+                loader=loader,  # GraphEBM's train_rand_gen expects 'dataloader'
                 lr=conf['lr'],
                 wd=conf['weight_decay'],
                 max_epochs=conf['max_epochs'],

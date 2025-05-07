@@ -231,7 +231,7 @@ class MaskedGraphAF(nn.Module):
         Returns:
             graph embedding for updating node features with shape (batch, d)
         """
-        adj = adj[:, :3] # (batch, 3, N, N)
+        adj = adj[:, :2] # (batch, 3, N, N)
 
         node_emb = self.rgcn(x, adj) # (batch, N, d)
         if hasattr(self, 'batchNorm'):
@@ -254,7 +254,7 @@ class MaskedGraphAF(nn.Module):
         batch_size = x.size(0)
         assert batch_size == index.size(0)
 
-        adj = adj[:, :3] # (batch, 3, N, N)
+        adj = adj[:, :2] # (batch, 3, N, N)
 
         node_emb = self.rgcn(x, adj) # (batch, N, d)
         if hasattr(self, 'batchNorm'):

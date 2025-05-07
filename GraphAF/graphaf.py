@@ -4,6 +4,7 @@ import torch.nn as nn
 # from rdkit import Chem
 from .model import GraphFlowModel
 from .train_utils import adjust_learning_rate, DataIterator
+import pickle
 
 class Generator():
     r"""
@@ -136,41 +137,167 @@ class GraphAF(Generator):
                 torch.save(self.model.state_dict(), os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))
 
 
-    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_mols=100, num_min_node=7, num_max_node=25, temperature=0.75, atomic_num_list=[6, 7, 8, 9]):
+    def run_rand_gen(self, model_conf_dict, checkpoint_path,
+                     num_samples=100, num_min_nodes=5,
+                     # num_max_nodes_config is implicitly model_conf_dict['max_size'] used by GraphFlowModel
+                     temperature=0.75, aig_node_types=None,
+                     output_pickle_path="GraphAF_generated_aigs.pkl"):  # Default filename changed
         r"""
-            Running graph generation for random generation task.
-            
-            Args:
-                model_conf_dict (dict): The python dict for configuring the model hyperparameters.
-                checkpoint_path (str): The path to the saved model checkpoint file.
-                n_mols (int, optional): The number of molecules to generate. (default: :obj:`100`)
-                num_min_node (int, optional): The minimum number of nodes in the generated molecular graphs. (default: :obj:`7`)
-                num_max_node (int, optional): The maximum number of nodes in the generated molecular graphs. (default: :obj:`25`)
-                temperature (float, optional): A float numbers, the temperature parameter of prior distribution. (default: :obj:`0.75`)
-                atomic_num_list (list, optional): A list of integers, the list of atomic numbers indicating the node types in the generated molecular graphs. (default: :obj:`[6, 7, 8, 9]`)
-            
-            :rtype:
-                (all_mols, pure_valids),
-                all_mols is a list of generated molecules represented by rdkit Chem.Mol objects;
-                pure_valids is a list of integers, all are 0 or 1, indicating whether bond resampling happens.
-        """
-        
-        self.get_model('rand_gen', model_conf_dict, checkpoint_path)
-        self.model.eval()
-        all_mols, pure_valids = [], []
-        cnt_mol = 0
+        Running AIG graph generation for random generation task using GraphAF.
 
-        while cnt_mol < n_mols:
-            mol, no_resample, num_atoms = self.model.generate(atom_list=atomic_num_list, min_atoms=num_min_node, max_atoms=num_max_node, temperature=temperature)
-            if (num_atoms >= num_min_node):
-                cnt_mol += 1
-                all_mols.append(mol)
-                pure_valids.append(no_resample)
-                if cnt_mol % 10 == 0:
-                    print('Generated {} molecules'.format(cnt_mol))
-        
-        assert cnt_mol == n_mols, 'number of generated molecules does not equal num'        
-        return all_mols, pure_valids
+        Args:
+            model_conf_dict (dict): Python dict for configuring model hyperparameters.
+                                    Must include 'node_dim' and 'max_size'.
+            checkpoint_path (str): Path to the saved model checkpoint file.
+            num_samples (int, optional): Number of AIGs to generate. (default: 100)
+            num_min_nodes (int, optional): Minimum number of actual nodes in generated AIGs. (default: 5)
+            temperature (float, optional): Temperature for sampling in the internal generation. (default: 0.75)
+            aig_node_types (list, optional): List of AIG node type strings.
+                                             Length must match model_conf_dict['node_dim'].
+                                             Example: ['CONST0', 'PI', 'AND', 'PO'].
+                                             If None, defaults to generic types based on node_dim.
+            output_pickle_path (str, optional): Full path to save the list of generated AIGs.
+                                                (default: "GraphAF_generated_aigs.pkl")
+
+        :rtype:
+            list: A list of generated AIGs, where each AIG is a networkx.DiGraph object.
+        """
+        node_dim_config = model_conf_dict.get('node_dim')
+        max_size_config = model_conf_dict.get('max_size')
+
+        if node_dim_config is None or max_size_config is None:
+            raise ValueError("model_conf_dict must contain 'node_dim' and 'max_size'.")
+
+        if aig_node_types is None:
+            aig_node_types = [f"TYPE_{i}" for i in range(node_dim_config)]
+            print(
+                f"Warning: aig_node_types not provided. Using generic types based on node_dim={node_dim_config}: {aig_node_types}")
+
+        if len(aig_node_types) != node_dim_config:
+            raise ValueError(
+                f"Length of aig_node_types ({len(aig_node_types)}) must match model_conf_dict['node_dim'] ({node_dim_config}).")
+
+        # Initialize or get the model, ensuring it's on the correct device
+        self.get_model('rand_gen_aig', model_conf_dict, checkpoint_path)
+        self.model.eval()  # Set model to evaluation mode
+
+        generated_aig_graphs = []
+        generated_count = 0
+        attempts = 0
+        # Increase max_attempts if generation is often filtered out by num_min_nodes
+        max_attempts = num_samples * 10
+
+        print(f"Attempting to generate {num_samples} AIGs (min nodes: {num_min_nodes})...")
+
+        # Determine device for generation calls from the model itself
+        try:
+            generation_device = next(self.model.parameters()).device
+        except StopIteration:  # Model has no parameters
+            generation_device = torch.device(
+                "cuda" if model_conf_dict.get('use_gpu', False) and torch.cuda.is_available() else "cpu")
+        print(f"Generation will run on device: {generation_device}")
+
+        while generated_count < num_samples and attempts < max_attempts:
+            attempts += 1
+
+            if not hasattr(self.model, 'generate_aig_raw_data'):
+                raise NotImplementedError(
+                    "The internal model (GraphFlowModel) does not have the required "
+                    "'generate_aig_raw_data(self, max_nodes, temperature, device)' method for AIG generation. "
+                    "This method needs to be implemented in GraphFlowModel to return "
+                    "(raw_node_features_tensor, raw_adj_matrix_tensor, actual_num_nodes_generated)."
+                )
+
+            try:
+                # self.model.max_size comes from model_conf_dict['max_size']
+                # raw_node_features: (max_size, node_dim)
+                # raw_adj_matrix: (max_size, max_size) - representing directed edges
+                # actual_nodes: int
+                raw_node_features, raw_adj_matrix, actual_nodes = \
+                    self.model.generate_aig_raw_data(max_nodes=max_size_config,  # Model's capacity
+                                                     temperature=temperature,
+                                                     device=generation_device)
+            except Exception as e:
+                print(f"Error during self.model.generate_aig_raw_data (attempt {attempts}): {e}")
+                if attempts % (max_attempts // 10 if max_attempts > 10 else 1) == 0:  # Log progress periodically
+                    print(f"Generation progress: {generated_count}/{num_samples} after {attempts} attempts.")
+                continue
+
+            if actual_nodes >= num_min_nodes:
+                aig_graph = self._convert_raw_to_aig_digraph(raw_node_features, raw_adj_matrix, actual_nodes,
+                                                             aig_node_types)
+                if aig_graph is not None:
+                    generated_aig_graphs.append(aig_graph)
+                    generated_count += 1
+                    if generated_count % 10 == 0 or generated_count == num_samples:
+                        print(f"Successfully generated {generated_count}/{num_samples} AIGs.")
+
+            if attempts > 0 and attempts % (max_attempts // 20 if max_attempts > 20 else 1) == 0:  # Log progress
+                print(f"Generation progress: {generated_count}/{num_samples} after {attempts} attempts.")
+
+        if generated_count < num_samples:
+            print(
+                f"Warning: Generated only {generated_count} AIGs after {max_attempts} attempts (target was {num_samples}).")
+
+        try:
+            output_dir = os.path.dirname(output_pickle_path)
+            if output_dir and not os.path.exists(output_dir):  # Create directory if it doesn't exist
+                os.makedirs(output_dir)
+                print(f"Created directory for output: {output_dir}")
+
+            with open(output_pickle_path, 'wb') as f:
+                pickle.dump(generated_aig_graphs, f)
+            print(f"Saved {len(generated_aig_graphs)} AIG DiGraphs to {output_pickle_path}")
+        except Exception as e:
+            print(f"Error saving AIGs to pickle file '{output_pickle_path}': {e}")
+
+        return generated_aig_graphs
+
+
+    def _convert_raw_to_aig_digraph(self, node_features_tensor, adj_matrix_tensor, num_actual_nodes, aig_node_types):
+        """
+        Converts raw model output (node features and adjacency matrix for a single graph)
+        to a NetworkX DiGraph for AIGs.
+
+        Args:
+            node_features_tensor (torch.Tensor): Tensor of shape (max_nodes, node_dim)
+                                                 representing node type probabilities or one-hot encodings.
+            adj_matrix_tensor (torch.Tensor): Tensor of shape (max_nodes, max_nodes)
+                                              representing the directed adjacency matrix (binary or scores).
+            num_actual_nodes (int): The actual number of nodes in the graph (up to max_nodes).
+            aig_node_types (list): List of AIG node type strings (e.g., ['CONST0', 'PI', 'AND', 'PO']).
+
+        Returns:
+            nx.DiGraph: A NetworkX directed graph representing the AIG, or None if conversion fails.
+        """
+        graph = nx.DiGraph()
+
+        node_features = node_features_tensor.cpu().detach()
+        adj_matrix = adj_matrix_tensor.cpu().detach()  # Shape: (max_nodes, max_nodes)
+
+        # Add nodes up to num_actual_nodes
+        for i in range(num_actual_nodes):
+            try:
+                node_type_idx = torch.argmax(node_features[i]).item()
+                if 0 <= node_type_idx < len(aig_node_types):
+                    node_type_label = aig_node_types[node_type_idx]
+                else:
+                    print(
+                        f"Warning: Node {i} has invalid type index {node_type_idx}. Max index: {len(aig_node_types) - 1}. Setting type to UNKNOWN.")
+                    node_type_label = "UNKNOWN"
+                graph.add_node(i, type=node_type_label)
+            except IndexError:
+                print(f"Warning: Index error accessing node_features for node {i}. Skipping node.")
+                return None  # Or handle more gracefully
+
+        # Add directed edges among the actual nodes
+        for i in range(num_actual_nodes):
+            for j in range(num_actual_nodes):
+                # Assuming adj_matrix contains scores/probabilities that can be thresholded,
+                # or is already binary.
+                if adj_matrix[i, j] > 0.5:
+                    graph.add_edge(i, j)
+        return graph
 
     #
     # def train_prop_optim(self, lr, wd, max_iters, warm_up, model_conf_dict, pretrain_path, save_interval, save_dir):
