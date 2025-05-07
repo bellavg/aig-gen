@@ -31,7 +31,7 @@ except ImportError:
 # Try to import aig_config for type strings, handle if not found.
 try:
     # Adjust this import path based on your actual project structure
-    from G2PT.configs import aig_config
+    from ..G2PT.configs.aig import aig_config
 
     AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
     AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS

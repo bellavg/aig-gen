@@ -13,7 +13,7 @@ MODEL_NAME="GraphDF" # Choose: "GraphDF", "GraphAF", or "GraphEBM"
 # --- Paths ---
 # CHECKPOINT_PATH="GraphDF/rand_gen_aig_ckpts/graphdf_rand_gen_ckpt_epoch_50.pth" # Example for GraphDF
 # CHECKPOINT_PATH="GraphAF/rand_gen_aig_ckpts/rand_gen_ckpt_epoch_50.pth" # Example for GraphAF
-CHECKPOINT_PATH="GraphDF/rand_gen_aig_ckpts/rand_gen_ckpt_epoch_50.pt" # Example for GraphEBM
+CHECKPOINT_PATH="GraphDF/rand_gen_aig_ckpts/rand_gen_ckpt_50.pth" # Example for GraphEBM
 # Ensure the path above points to your actual trained model checkpoint
 
 SAMPLING_OUTPUT_DIR="generated_aigs" # Directory to save the generated pickle file
