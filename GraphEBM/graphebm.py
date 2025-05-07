@@ -214,7 +214,7 @@ class GraphEBM(Generator):
         while generated_count < n_samples and attempts < max_attempts:
             attempts += 1
             if attempts % (max_attempts // 20 if max_attempts >= 20 else 1) == 0:
-                print(f"Attempt {attempts}/{max_attempts}, Generated {generated_count}/{n_samples}")
+                print(f"Attempt {attempts}/{max_attempts}, Generated {generated_count}/{num_samples}")
 
             # Initialize single sample
             gen_x_orig_shape = torch.rand(1, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)  # (1, F, N)
@@ -315,13 +315,13 @@ class GraphEBM(Generator):
                 generated_aig_graphs.append(aig_graph)
                 generated_count += 1
                 if generated_count % 10 == 0 or generated_count == n_samples:
-                    print(f"GraphEBM: Successfully generated {generated_count}/{n_samples} AIGs.")
+                    print(f"GraphEBM: Successfully generated {generated_count}/{num_samples} AIGs.")
             # else: # Optional log for graphs below min size
             # print(f"Attempt {attempts}: Generated graph with {num_actual_nodes} actual nodes (min required: {num_min_nodes}). Skipping.")
 
         if generated_count < n_samples:
             print(
-                f"Warning: GraphEBM generated only {generated_count} AIGs after {max_attempts} attempts (target was {n_samples}).")
+                f"Warning: GraphEBM generated only {generated_count} AIGs after {max_attempts} attempts (target was {num_samples}).")
 
         # Save the generated graphs
         try:

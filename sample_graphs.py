@@ -14,7 +14,7 @@ try:
     from GraphDF import GraphDF
     from GraphAF import GraphAF
     # GraphEBM (Keep if used, ensure it's compatible)
-    # from GraphEBM import GraphEBM # Example import
+    from GraphEBM import GraphEBM # Example import
 except ImportError as e:
     print(f"Error importing base model classes (GraphDF, GraphAF): {e}")
     print("Please ensure GraphDF/GraphAF models are correctly placed and importable.")
