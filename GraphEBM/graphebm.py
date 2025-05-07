@@ -68,6 +68,7 @@ class Generator():
 
         raise NotImplementedError("The function run_const_prop_opt is not implemented!")
 
+
 class GraphEBM(Generator):
     r"""
         The method class for GraphEBM algorithm proposed in the paper `GraphEBM: Molecular Graph Generation with Energy-Based Models <https://arxiv.org/abs/2102.00546>`_. This class provides interfaces for running random generation, goal-directed generation (including property

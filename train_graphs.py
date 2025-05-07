@@ -14,9 +14,10 @@ try:
     # Import the models
     from GraphDF import GraphDF  # Assuming GraphDF.py or a GraphDF package exists
     from GraphAF import GraphAF  # From the GraphAF directory/package
+    from GraphEBM import GraphEBM  # For GraphEBM
 except ImportError as e:
     print(f"Error importing necessary modules: {e}")
-    print("Please ensure 'ggraph' is installed, your AIGDatasetLoader class is accessible, "
+    print("Please ensure 'ggraph' (including dig.ggraph) is installed, your AIGDatasetLoader class is accessible, "
           "and GraphDF/GraphAF models are correctly placed and importable.")
     exit()
 # --- End Imports ---
@@ -24,50 +25,43 @@ except ImportError as e:
 
 # --- Hardcoded Configuration Dictionary ---
 # This configuration will be used for the selected model.
-# Parameters specific to one model (e.g., deq_coeff for GraphAF)
-# will be ignored by other models if they don't use them.
 conf = {
     "data_name": "aig",  # Used for processed data path structure
     "model": {
-        # Common parameters
-        "max_size": 64,  # Max nodes for AIG dataset
-        "edge_unroll": 12,
-        "node_dim": 4,  # MUST match AIGDataset processing (e.g., CONST0, PI, AND, PO for AIG)
-        "bond_dim": 3,  # MUST match AIGDataset processing (e.g., REG, INV, NO-EDGE for AIG)
-        # For GraphAF, this usually includes a virtual/no-edge type.
-        # If AIG data provides 3 explicit edge types (including a "no-edge" category), this is fine.
-        # GraphAF's RGCN uses edge_dim = bond_dim - 1 for actual bond weights.
-        "num_flow_layer": 12,
-        "num_rgcn_layer": 3,
-        "nhid": 128,
-        "nout": 128,
+        # Common parameters potentially used by all models
+        "max_size": 64,  # Max nodes for AIG dataset (GraphEBM: n_atom)
+        "node_dim": 4,  # Node feature dimension (AIG: CONST0, PI, AND, PO) (GraphEBM: n_atom_type)
+        "bond_dim": 3,  # Edge feature dimension (AIG: REG, INV, NO-EDGE) (GraphEBM: n_edge_type)
         "use_gpu": True,  # This will be updated based on device availability
 
-        # GraphAF specific parameters (from your example GraphAF config)
-        # These will be in model_conf_dict passed to GraphAF
-        "deq_coeff": 0.9,
-        "st_type": "exp",
-        "use_df": False  # Assuming this is 'use_discrete_flow' or similar for GraphAF's GraphFlowModel
+        # GraphDF/GraphAF specific parameters
+        "edge_unroll": 12,  # GraphAF/GraphDF
+        "num_flow_layer": 12,  # GraphAF/GraphDF
+        "num_rgcn_layer": 3,  # GraphAF/GraphDF
+        "nhid": 128,  # GraphAF/GraphDF (hidden size for RGCN/STNet)
+        "nout": 128,  # GraphAF/GraphDF (output size for RGCN)
+        "deq_coeff": 0.9,  # GraphAF
+        "st_type": "exp",  # GraphAF
+        "use_df": False  # GraphAF
     },
-    # EBM specific model parameters (add if training EBM)
-    # "model_ebm": {
-    #     "hidden": 128
-    # },
+    "model_ebm": {  # GraphEBM specific model parameters
+        "hidden": 64  # Hidden dimension for GraphEBM's internal networks
+    },
     "lr": 0.001,
     "weight_decay": 0,
-    "batch_size": 128,  # User's current setting
+    "batch_size": 128,
     "max_epochs": 50,
     "save_interval": 5,
     "save_dir": "GraphDF/rand_gen_aig_ckpts",  # This will be dynamically overwritten
-    # EBM specific training parameters (add if training EBM)
-    # "train_ebm": {
-    #     "c": 0.01,
-    #     "ld_step": 60,
-    #     "ld_noise": 0.005,
-    #     "ld_step_size": 10,
-    #     "clamp": True,
-    #     "alpha": 0.1
-    # },
+
+    "train_ebm": {  # GraphEBM specific training parameters from your example
+        "c": 0.0,  # Coefficient for energy term (0 for unconditional)
+        "ld_step": 150,  # Langevin dynamics steps
+        "ld_noise": 0.005,  # Langevin dynamics noise level
+        "ld_step_size": 30,  # Langevin dynamics step size
+        "clamp": True,  # Whether to clamp generated values
+        "alpha": 1.0  # Weight for reconstruction loss (if applicable)
+    },
     # Generation parameters (not used directly during training by train_rand_gen)
     # "num_min_node_gen": 5,
     # "num_max_node_gen": 64,
@@ -97,11 +91,10 @@ def main(args):
     # --- Instantiate Dataset using AIGDatasetLoader ---
     print("Instantiating AIGDatasetLoader...")
     try:
-        # Root should point to the directory containing the 'aig/processed/train' structure
         dataset = AIGDatasetLoader(
             root=args.data_root,
-            name=conf.get('data_name', 'aig'),  # Get name from conf or default
-            dataset_type="train"  # Load the training split
+            name=conf.get('data_name', 'aig'),
+            dataset_type="train"
         )
         print(f"Number of training graphs loaded: {len(dataset)}")
         if len(dataset) == 0:
@@ -120,8 +113,6 @@ def main(args):
     # --- End Dataset ---
 
     # --- Create DataLoader ---
-    # DenseDataLoader requires 'num_atom' attribute in the Data object,
-    # which _process_graph in AIGDatasetLoader should have added.
     loader = DenseDataLoader(dataset, batch_size=conf['batch_size'], shuffle=True)
     print(f"Created DataLoader with batch size {conf['batch_size']}.")
     # --- End DataLoader ---
@@ -131,84 +122,78 @@ def main(args):
     runner = None
     if args.model == 'GraphDF':
         runner = GraphDF()
-        # get_model is called within train_rand_gen for GraphDF if that's its internal structure
     elif args.model == 'GraphAF':
         runner = GraphAF()
-        # GraphAF().get_model is called within its train_rand_gen method
-    # elif args.model == 'GraphEBM':
-    # GraphEBM needs parameters during __init__
-    # try:
-    #     # Check if EBM specific config exists
-    #     if 'model_ebm' not in conf:
-    #          raise KeyError("Missing 'model_ebm' block in configuration for GraphEBM model.")
-    #
-    #     model_params = conf['model_ebm']
-    #     runner = GraphEBM(
-    #         n_atom=conf['model']['max_size'],
-    #         n_atom_type=conf['model']['node_dim'],
-    #         n_edge_type=conf['model']['bond_dim'],
-    #         hidden=model_params['hidden'],
-    #         device=device
-    #     )
-    # except KeyError as e:
-    #     print(f"Error: Missing required parameter {e} in config for GraphEBM initialization.")
-    #     exit()
+    elif args.model == 'GraphEBM':
+        try:
+            runner = GraphEBM(
+                n_atom=conf['model']['max_size'],
+                n_atom_type=conf['model']['node_dim'],
+                n_edge_type=conf['model']['bond_dim'],
+                hidden=conf['model_ebm']['hidden'],
+                device=device  # Pass the torch device object
+            )
+        except KeyError as e:
+            print(f"Error: Missing required parameter {e} in config for GraphEBM initialization.")
+            exit()
+        except Exception as e:
+            print(f"Error instantiating GraphEBM: {e}")
+            exit()
     else:
         print(f"Error: Unknown model type '{args.model}'. Choose from the available options.")
         exit()
 
-    if runner is None:
+    if runner is None:  # Should not happen if model is in choices, but as a safeguard
         print(f"Failed to instantiate model runner for {args.model}")
         exit()
     # --- End Model Instantiation ---
 
     # --- Start Training ---
-    # Dynamically set save_dir based on the model name
     save_dir = f"{args.model}/rand_gen_{conf.get('data_name', 'default_data')}_ckpts"
-    conf['save_dir'] = save_dir  # Update conf in case any part of the runner uses it directly
+    conf['save_dir'] = save_dir
 
     os.makedirs(save_dir, exist_ok=True)
     print(f"Model checkpoints will be saved in: {save_dir}")
 
     print(f"Starting training for {args.model}...")
     if args.model == 'GraphDF' or args.model == 'GraphAF':
-        # Both GraphDF and GraphAF (from your provided structure) should have this method
+        # GraphDF and GraphAF use model_conf_dict for internal model setup
         runner.train_rand_gen(
             loader=loader,
             lr=conf['lr'],
             wd=conf['weight_decay'],
             max_epochs=conf['max_epochs'],
-            model_conf_dict=conf['model'],  # Pass the 'model' sub-dictionary
+            model_conf_dict=conf['model'],
             save_interval=conf['save_interval'],
             save_dir=save_dir
         )
-    # elif args.model == 'GraphEBM': # Keep EBM logic commented if not being used
-    #     try:
-    #         # Check if EBM specific training config exists
-    #         if 'train_ebm' not in conf:
-    #             raise KeyError("Missing 'train_ebm' block in configuration for GraphEBM training.")
-    #
-    #         train_params = conf['train_ebm']
-    #         runner.train_rand_gen( # Assuming GraphEBM also has a compatible train_rand_gen
-    #             loader=loader,
-    #             lr=conf['lr'],
-    #             wd=conf['weight_decay'],
-    #             max_epochs=conf['max_epochs'],
-    #             c=train_params['c'],
-    #             ld_step=train_params['ld_step'],
-    #             ld_noise=train_params['ld_noise'],
-    #             ld_step_size=train_params['ld_step_size'],
-    #             clamp=train_params['clamp'],
-    #             alpha=train_params['alpha'],
-    #             save_interval=conf['save_interval'],
-    #             save_dir=save_dir
-    #         )
-    #     except KeyError as e:
-    #         print(f"Error: Missing required parameter {e} in config for GraphEBM training.")
-    #         exit()
-    #     except AttributeError:
-    #         print(f"Error: {args.model} runner does not have a compatible train_rand_gen method for EBM.")
-    #         exit()
+    elif args.model == 'GraphEBM':
+        try:
+            train_ebm_params = conf['train_ebm']
+            runner.train_rand_gen(
+                dataloader=loader,  # GraphEBM's train_rand_gen expects 'dataloader'
+                lr=conf['lr'],
+                wd=conf['weight_decay'],
+                max_epochs=conf['max_epochs'],
+                c=train_ebm_params['c'],
+                ld_step=train_ebm_params['ld_step'],
+                ld_noise=train_ebm_params['ld_noise'],
+                ld_step_size=train_ebm_params['ld_step_size'],
+                clamp=train_ebm_params['clamp'],
+                alpha=train_ebm_params['alpha'],
+                save_interval=conf['save_interval'],
+                save_dir=save_dir
+            )
+        except KeyError as e:
+            print(f"Error: Missing required parameter {e} in 'train_ebm' config for GraphEBM training.")
+            exit()
+        except AttributeError:
+            print(f"Error: {args.model} runner does not have a compatible train_rand_gen method or "
+                  "there's an issue with its parameters.")
+            exit()
+        except Exception as e:
+            print(f"An unexpected error occurred during GraphEBM training: {e}")
+            exit()
 
     print("Training finished.")
     # --- End Training ---
@@ -217,9 +202,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train graph generation models on pre-processed AIG dataset.")
     parser.add_argument('--model', type=str, default='GraphDF',
-                        choices=['GraphDF', 'GraphAF', 'GraphEBM'],  # Added GraphAF
+                        choices=['GraphDF', 'GraphAF', 'GraphEBM'],
                         help='Model to train (GraphDF, GraphAF, or GraphEBM)')
-    # Removed --config_file and --aig_config_path arguments
     parser.add_argument('--data_root', default="./data/",
                         help="Root directory containing the pre-processed AIG structure (e.g., 'data/aig/processed/train/data.pt').")
     parser.add_argument('--device', type=str, default='cpu', choices=['cuda', 'cpu'],

@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=graphaf  # Changed job name for GraphAF
+#SBATCH --job-name=graphebm  # Changed job name for GraphAF
 #SBATCH --partition=gpu_h100       # Specify the appropriate partition here (adjust if needed)
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00            # Adjust time limit if needed
-#SBATCH --output=./slurm_logs/graphaf_aig_train_%j.out # Changed log file name for GraphAF
+#SBATCH --output=./slurm_logs/graphebm_aig_train_%j.out # Changed log file name for GraphAF
 
 
 # --- Configuration ---
 # Choose the model to train
-MODEL_NAME="GraphAF" # Set to GraphAF
+MODEL_NAME="GraphEBM" # Set to GraphAF
 
 # Choose the device ('cuda' or 'cpu')
 # The script will try to use cuda if requested and available, otherwise fallback to cpu
