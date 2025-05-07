@@ -39,7 +39,7 @@ conf = {
     # },
     "lr": 0.001,
     "weight_decay": 0,
-    "batch_size": 32,
+    "batch_size": 128,
     "max_epochs": 50, # Increased example value
     "save_interval": 5, # Increased example value
     "save_dir": "GraphDF/rand_gen_aig_ckpts", # Default save directory

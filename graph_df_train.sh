@@ -45,7 +45,7 @@ echo "Conda environment activated."
 # Run the training script using srun
 # -u ensures unbuffered output, which is good for logs
 echo "Starting training script for model: ${MODEL_NAME}..."
-srun python -u train_graphdf.py \
+srun python -u train_graphs.py \
     --device ${REQUESTED_DEVICE}
 
 train_status=$? # Capture the exit status of the python script
