@@ -1,6 +1,5 @@
-
 #!/bin/bash
-#SBATCH --job-name=ggraph_aig_train  # Changed job name
+#SBATCH --job-name=graphdf  # Changed job name
 #SBATCH --partition=gpu_h100       # Specify the appropriate partition here (adjust if needed)
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00            # Adjust time limit if needed
