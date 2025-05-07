@@ -1,1 +1,1 @@
-# aig_gen
+python -u train_graphs.py --model_type GraphEBM  --data_root "./data/" --lr 0.0001 --ebm_alpha 1.0 --ebm_ld_step_size 0.1 --ebm_ld_noise 0.005 --ebm_ld_step 100 --ebm_c 0.01 --ebm_clamp_lgd_grad --weight_decay 1e-5 --batch_size 64 --max_epochs 100 --save_interval 5
