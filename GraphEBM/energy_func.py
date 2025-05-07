@@ -75,7 +75,7 @@ class GraphConv(nn.Module):
 
     def __init__(self, in_channels, out_channels, num_edge_type, std, bound=True, add_self=False):
         super(GraphConv, self).__init__()
-        
+
         self.add_self = add_self
         if self.add_self:
             self.linear_node = spectral_norm(nn.Linear(in_channels, out_channels), std=std, bound=bound)
@@ -85,11 +85,11 @@ class GraphConv(nn.Module):
         self.out_ch = out_channels
 
     def forward(self, adj, h):
-        mb, node, _ = h.shape 
+        mb, node, _ = h.shape
         if self.add_self:
-            h_node = self.linear_node(h) 
+            h_node = self.linear_node(h)
         m = self.linear_edge(h)
-        m = m.reshape(mb, node, self.out_ch, self.num_edge_type) 
+        m = m.reshape(mb, node, self.out_ch, self.num_edge_type)
         m = m.permute(0, 3, 1, 2) # m: (batchsize, edge_type, node, ch)
         hr = torch.matmul(adj, m)  # hr: (batchsize, edge_type, node, ch)
         hr = hr.sum(dim=1)   # hr: (batchsize, node, ch)
@@ -97,14 +97,14 @@ class GraphConv(nn.Module):
             return hr+h_node  #
         else:
             return hr
-    
-    
-    
+
+
+
 
 
 class EnergyFunc(nn.Module):
 
-    def __init__(self, n_atom_type, hidden, num_edge_type=4, swish=True, depth=2, add_self=False, dropout=0):
+    def __init__(self, n_atom_type, hidden, num_edge_type=3, swish=True, depth=2, add_self=False, dropout=0):
         super(EnergyFunc, self).__init__()
 
         self.depth = depth
@@ -113,14 +113,14 @@ class EnergyFunc(nn.Module):
         self.swish = swish
         self.dropout = dropout
         self.linear = nn.Linear(hidden, 1)
-            
-        
+
+
     def forward(self, adj, h):
-        h = h.permute(0, 2, 1)
+        #h = h.permute(0, 2, 1)
         out = self.graphconv1(adj, h)
-            
+
         out = F.dropout(out, p=self.dropout, training=self.training)
-        
+
         if self.swish:
             out = swish(out)
         else:
@@ -129,14 +129,14 @@ class EnergyFunc(nn.Module):
 
         for i in range(self.depth):
             out = self.graphconv[i](adj, out)
-                
+
             out = F.dropout(out, p=self.dropout, training=self.training)
             if self.swish:
                 out = swish(out)
             else:
                 out = F.relu(out)
-        
+
         out = out.sum(1) # (batchsize, node, ch) --> (batchsize, ch)
         out = self.linear(out)
-        
+
         return out # Energy value (batchsize, 1)
