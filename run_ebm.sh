@@ -1,19 +1,59 @@
 #!/bin/bash
-#SBATCH --job-name=graphebm_stable_v1 # New name for stability test
-#SBATCH --partition=gpu_h100
+#SBATCH --job-name=graphebm_full_pipeline
+#SBATCH --partition=gpu_h100 # Or your specific GPU partition
 #SBATCH --gpus=1
-#SBATCH --time=12:00:00
-#SBATCH --output=./slurm_logs/graphebm_aig_train_stable_v1_%j.out
-
+#SBATCH --time=18:00:00 # Increased time for train + sample + eval
+#SBATCH --output=./slurm_logs/graphebm_aig_pipeline_%j.out
+#SBATCH --error=./slurm_logs/graphebm_aig_pipeline_%j.err # Separate error file
 
 # --- Configuration ---
 MODEL_NAME="GraphEBM"
+CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
+DATA_ROOT="./data/"       # Root directory for processed data (e.g., data/aig/processed/train)
+TRAIN_DATA_DIR="./data/aig" # Base directory for training data (for novelty eval, contains data_meta.json and train/)
 REQUESTED_DEVICE="cuda"
-CONDA_ENV_NAME="g2pt-aig"
+
+# Training Hyperparameters (Using stable settings)
+LR=5e-5
+EBM_ALPHA=1.0
+EBM_LD_STEP_SIZE=0.01
+EBM_LD_NOISE=0.005
+EBM_LD_STEP=100
+EBM_C=0.01
+EBM_CLAMP_LGD_GRAD="--ebm_clamp_lgd_grad" # Pass the flag to enable
+WEIGHT_DECAY=1e-5
+BATCH_SIZE=64
+MAX_EPOCHS=100 # Adjust as needed
+SAVE_INTERVAL=10 # Maybe save less frequently during full pipeline run
+GRAD_CLIP_VALUE=1.0
+
+# Generation Parameters
+NUM_SAMPLES=1000
+NUM_MIN_NODES=5 # Minimum nodes for generated graphs
+CKPT_SAVE_DIR="${MODEL_NAME}/rand_gen_aig_ckpts" # Must match train_graphs.py logic
+# Construct expected final checkpoint path
+FINAL_CKPT_PATH="${CKPT_SAVE_DIR}/epoch_${MAX_EPOCHS}.pt"
+GEN_OUTPUT_PKL="${MODEL_NAME}_generated_aigs_${NUM_SAMPLES}.pkl"
 
 # --- End Configuration ---
 
+# --- Helper Function for Error Checking ---
+check_exit_code() {
+  exit_code=$1
+  step_name=$2
+  if [ $exit_code -ne 0 ]; then
+    echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
+    # Optional: print last few lines of the output log for quick diagnosis
+    echo "Last 50 lines of output:"
+    tail -n 50 "./slurm_logs/graphebm_aig_pipeline_${SLURM_JOB_ID}.out"
+    exit $exit_code
+  fi
+  echo "Step '${step_name}' completed successfully."
+}
+# --- End Helper Function ---
 
+
+# --- Setup ---
 mkdir -p slurm_logs
 echo "Log directory ensured: ./slurm_logs"
 
@@ -24,64 +64,77 @@ echo "Modules loaded."
 
 echo "Activating conda environment: ${CONDA_ENV_NAME}..."
 source activate ${CONDA_ENV_NAME}
-conda_status=$?
-if [ $conda_status -ne 0 ]; then
-    echo "Error: Failed to activate conda environment '${CONDA_ENV_NAME}'. Exiting."
-    exit 1
-fi
+check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
+# --- End Setup ---
 
-echo "Starting training script for model: ${MODEL_NAME} on device: ${REQUESTED_DEVICE} with stability adjustments..."
 
+# === STEP 1: Training ===
+echo "--- Starting Step 1: Training ${MODEL_NAME} ---"
 srun python -u train_graphs.py \
     --model_type ${MODEL_NAME} \
     --device ${REQUESTED_DEVICE} \
-    --data_root "./data/" \
-    `# --- Stability Adjustments ---` \
-    `# Reduced Learning Rate` \
-    --lr 5e-5 \
-    `# Alternatives for lr: 1e-5 (if still unstable), 0.0001 (if 5e-5 is too slow AND stable)` \
-    \
-    `# Reduced Langevin Dynamics Step Size` \
-    --ebm_ld_step_size 0.01 \
-    `# Alternatives for ebm_ld_step_size: 0.001 (if 0.01 still unstable), 0.1 (original value if stable)` \
-    \
-    `# Gradient Clipping for Model Parameters (ensure train_graphs.py uses this)` \
-    --grad_clip_value 1.0 \
-    `# Alternatives for grad_clip_value: 5.0, or remove if not needed/causing issues` \
-    \
-    `# --- Parameters Aligned with GraphEBM Paper ---` \
-    --ebm_alpha 1.0 \
-    --ebm_ld_noise 0.005 \
-    --ebm_ld_step 100 \
-    `# Alternatives for ebm_ld_step: 150 or 200 if ld_step_size is very small` \
-    --ebm_c 0.01 \
-    --ebm_clamp_lgd_grad \
-    \
-    `# --- General training parameters ---` \
-    --weight_decay 1e-5 \
-    --batch_size 64 \
-    `# Paper uses 128, can try if memory allows and training is stable` \
-    --max_epochs 100 \
-    `# Paper trains for "up to 20 epochs", can reduce if convergence is fast & stable` \
-    --save_interval 5 \
-    \
-    `# --- EBM Model Structure parameters (ensure these match your EnergyFunc defaults or are desired) ---` \
-    `# These are passed to GraphEBM constructor in train_graphs.py` \
-    `# --ebm_hidden 64 ` \
-    `# --ebm_depth 2 ` \
-    `# --ebm_swish_act ` \
-    `# --ebm_add_self ` \
-    `# --ebm_dropout 0.0 ` \
-    `# --ebm_n_power_iterations 1`
+    --data_root ${DATA_ROOT} \
+    --lr ${LR} \
+    --ebm_alpha ${EBM_ALPHA} \
+    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
+    --ebm_ld_noise ${EBM_LD_NOISE} \
+    --ebm_ld_step ${EBM_LD_STEP} \
+    --ebm_c ${EBM_C} \
+    ${EBM_CLAMP_LGD_GRAD} \
+    --weight_decay ${WEIGHT_DECAY} \
+    --batch_size ${BATCH_SIZE} \
+    --max_epochs ${MAX_EPOCHS} \
+    --save_interval ${SAVE_INTERVAL} \
+    --grad_clip_value ${GRAD_CLIP_VALUE} \
+    `# Add other necessary args for train_graphs.py if needed (e.g., --ebm_hidden)`
 
-train_status=$?
+check_exit_code $? "Training"
+echo "--- Finished Step 1: Training ---"
 
-if [ $train_status -ne 0 ]; then
-    echo "Error: Training script failed with exit code ${train_status}."
-    echo "Last 50 lines of output:"
-    tail -n 50 ./slurm_logs/graphebm_aig_train_stable_v1_${SLURM_JOB_ID}.out
-    exit $train_status
+
+# === STEP 2: Generation ===
+echo "--- Starting Step 2: Generating ${NUM_SAMPLES} Samples ---"
+if [ ! -f "${FINAL_CKPT_PATH}" ]; then
+    echo "Error: Expected checkpoint file not found after training: ${FINAL_CKPT_PATH}"
+    exit 1
 fi
 
-echo "Training script finished successfully."
+# Assuming sample_graphs.py exists and takes these arguments
+# You MUST adapt the sample_graphs.py call to match its actual arguments
+srun python -u sample_graphs.py \
+    --model_type ${MODEL_NAME} \
+    --device ${REQUESTED_DEVICE} \
+    --checkpoint_path "${FINAL_CKPT_PATH}" \
+    --n_samples ${NUM_SAMPLES} \
+    --output_pickle_path "${GEN_OUTPUT_PKL}" \
+    --num_min_nodes ${NUM_MIN_NODES} \
+    `# Pass necessary EBM generation params matching training` \
+    --ebm_c ${EBM_C} \
+    --ebm_ld_step ${EBM_LD_STEP} \
+    --ebm_ld_noise ${EBM_LD_NOISE} \
+    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
+    ${EBM_CLAMP_LGD_GRAD} \
+    `# Add other necessary args for sample_graphs.py if needed (e.g., --ebm_hidden)`
+
+check_exit_code $? "Generation"
+echo "--- Finished Step 2: Generation (Output: ${GEN_OUTPUT_PKL}) ---"
+
+
+# === STEP 3: Evaluation ===
+echo "--- Starting Step 3: Evaluating Generated Samples ---"
+if [ ! -f "${GEN_OUTPUT_PKL}" ]; then
+    echo "Error: Expected generated pickle file not found: ${GEN_OUTPUT_PKL}"
+    exit 1
+fi
+
+srun python -u evaluate_aigs.py \
+    "${GEN_OUTPUT_PKL}" \
+    --train_data_dir "${TRAIN_DATA_DIR}" \
+    `# Add other necessary args for evaluate_aigs.py if needed`
+
+check_exit_code $? "Evaluation"
+echo "--- Finished Step 3: Evaluation ---"
+
+
+echo "--- Full Pipeline Completed Successfully ---"
