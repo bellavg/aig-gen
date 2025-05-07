@@ -2,7 +2,7 @@
 #SBATCH --job-name=graphdf_aig_full_v1 # Updated job name for full pipeline
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
-#SBATCH --time=05:00:00 # Increased time for gen + eval
+#SBATCH --time=08:00:00 # Increased time for gen + eval
 #SBATCH --output=./slurm_logs/graphdf_aig_full_tuned_v1_%j.out # Updated log file name
 
 
