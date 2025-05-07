@@ -18,7 +18,7 @@ logger = logging.getLogger("evaluate_g2pt_aigs")
 
 # --- Import the AIG configuration ---
 try:
-    from configs import aig as aig_config
+    from data import aig_config as aig_config
 except ImportError:
     logger.error("Failed to import AIG configuration from 'configs.aig'. Ensure it's accessible.")
     # Provide default values or exit if config is critical

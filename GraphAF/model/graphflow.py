@@ -13,7 +13,7 @@ class GraphFlowModel(nn.Module):
         self.max_size = model_conf_dict['max_size']
         self.edge_unroll = model_conf_dict.get('edge_unroll', 12)  # Default if not in conf
         self.node_dim = model_conf_dict['node_dim']
-        self.bond_dim = model_conf_dict['bond_dim']  # For AIG, this is num_edge_types
+        self.bond_dim = model_conf_dict['bond_dim']  # For AIG, this is num_edge_types (e.g., 3 for REG, INV, NO_EDGE)
         self.deq_coeff = model_conf_dict.get('deq_coeff', 0.9)  # Default if not in conf
 
         # Initialize masks for the autoregressive generation process
@@ -37,7 +37,7 @@ class GraphFlowModel(nn.Module):
             num_flow_layer=model_conf_dict.get('num_flow_layer', 12),
             graph_size=self.max_size,
             num_node_type=self.node_dim,
-            num_edge_type=self.bond_dim,
+            num_edge_type=self.bond_dim,  # This is num_channels for adj matrix (e.g., 3 for AIG)
             num_rgcn_layer=model_conf_dict.get('num_rgcn_layer', 3),
             nhid=model_conf_dict.get('nhid', 128),
             nout=model_conf_dict.get('nout', 128)
@@ -82,7 +82,7 @@ class GraphFlowModel(nn.Module):
 
     def generate_aig_raw_data(self, max_nodes, temperature, device):
         """
-        Generates raw node features and adjacency matrix for a single AIG.
+        Generates raw node features and a list of typed edges for a single AIG.
         This implements the core autoregressive generation logic of GraphAF,
         adapted for AIGs (directed graphs, specific node types).
 
@@ -95,71 +95,66 @@ class GraphFlowModel(nn.Module):
             tuple:
                 - raw_node_features (torch.Tensor): Shape (max_nodes, self.node_dim).
                                                     Contains scores/probabilities for each node type.
-                - raw_adj_matrix (torch.Tensor): Shape (max_nodes, max_nodes).
-                                                 Represents the directed adjacency matrix (binary).
-                                                 adj[i, j] = 1 if edge i -> j.
+                - typed_edges_generated (list): List of tuples (source_idx, target_idx, edge_type_idx),
+                                                where edge_type_idx is 0 for 'EDGE_REG', 1 for 'EDGE_INV'.
                 - actual_num_nodes (int): The actual number of nodes generated for this AIG.
         """
         with torch.no_grad():
             # Ensure the flow_core (MaskedGraphAF) is on the correct device
-            # This should ideally be handled when GraphFlowModel is moved to a device.
-            # If using DataParallel, self.flow_core.module is the actual model.
             flow_core_model = self.flow_core.module if isinstance(self.flow_core, nn.DataParallel) else self.flow_core
-            # flow_core_model.to(device) # Ensure sub-model is on device
+            # The model should already be on a device from __init__ or by manual .to(device) call on GraphFlowModel instance
+            # flow_core_model.to(device) # This line might be redundant if GraphFlowModel instance is already moved.
 
             # 1. Initialize prior distributions for node and edge latents
+            # self.node_dim is expected to be 4 for AIG (CONST0, PI, AND, PO)
             prior_node_dist = torch.distributions.normal.Normal(
                 torch.zeros([self.node_dim], device=device),
                 temperature * torch.ones([self.node_dim], device=device)
             )
-            # For AIG, bond_dim is the number of edge types.
-            # If AIGs have one directed edge type + "no edge", bond_dim could be 2.
-            # If bond_dim from conf is 3 (e.g. REG, INV, NO-EDGE for AIGs), this is used.
+            # self.bond_dim is expected to be 3 for AIG (REG, INV, NO_EDGE channels)
             prior_edge_dist = torch.distributions.normal.Normal(
                 torch.zeros([self.bond_dim], device=device),
                 temperature * torch.ones([self.bond_dim], device=device)
             )
 
-            # 2. Initialize current node features and adjacency matrix
+            # 2. Initialize current node features and adjacency matrix for flow input
             # Node features for flow_core.reverse: (1, max_nodes, self.node_dim)
             cur_node_features = torch.zeros([1, max_nodes, self.node_dim], device=device)
             # Adjacency features for flow_core.reverse: (1, self.bond_dim, max_nodes, max_nodes)
+            # This represents the one-hot encoding of edge states (REG, INV, NO_EDGE)
             cur_adj_features_for_flow = torch.zeros([1, self.bond_dim, max_nodes, max_nodes], device=device)
-            # Output binary adjacency matrix: (max_nodes, max_nodes)
-            output_adj_matrix_binary = torch.zeros([max_nodes, max_nodes], device=device)
+
+            # Store the actual generated typed edges (source, target, type_index)
+            # type_index: 0 for 'EDGE_REG', 1 for 'EDGE_INV' (as per aig_config.EDGE_TYPE_KEYS)
+            typed_edges_generated = []
 
             actual_num_nodes = 0
             # AIG_STOP_NODE_TYPE_INDEX = -1 # Define if you have a special stop node type
-            # e.g., if the last index in aig_node_types means stop.
 
             # 3. Autoregressive generation loop
-            for i in range(max_nodes):  # Iterate up to the model's capacity
+            for i in range(max_nodes):  # Iterate up to the model's capacity (self.max_size)
                 # a. Generate node `i`
                 latent_node_sample = prior_node_dist.sample().view(1, -1)  # Shape (1, self.node_dim)
 
                 # The reverse method expects inputs shaped for a batch size of 1
                 generated_node_i_features = flow_core_model.reverse(
-                    x=cur_node_features,  # Current state of all node features
-                    adj=cur_adj_features_for_flow,  # Current state of all edge features
-                    latent=latent_node_sample,
+                    x=cur_node_features,  # Current state of all node features (1, max_nodes, node_dim)
+                    adj=cur_adj_features_for_flow,
+                    # Current state of all edge features (1, bond_dim, max_nodes, max_nodes)
+                    latent=latent_node_sample,  # Latent sample for current node (1, node_dim)
                     mode=0  # Mode 0 for node generation
                 ).view(-1)  # Flatten to (self.node_dim)
 
                 cur_node_features[0, i, :] = generated_node_i_features
-
-                # Simple stopping condition: if a node is all zeros after generation (less likely with noise)
-                # or if a specific "stop" type is generated.
-                # For now, we assume generation continues and rely on num_min_nodes in GraphAF for filtering.
                 actual_num_nodes = i + 1
 
-                # Example for explicit stop node (if you define one, e.g., last type is stop)
+                # Optional: Implement a stopping condition based on a special "stop" node type
                 # current_node_type_idx = torch.argmax(generated_node_i_features).item()
                 # if current_node_type_idx == AIG_STOP_NODE_TYPE_INDEX:
                 #     actual_num_nodes = i # i nodes were generated before stop
                 #     break
 
-                # b. Generate edges for node `i` from/to previous nodes
-                # Determine the range of previous nodes to connect to based on edge_unroll
+                # b. Generate edges for node `i` from/to previous nodes (j < i)
                 if i > 0:  # No edges for the first node
                     start_node_for_edges = 0
                     if i >= self.edge_unroll:
@@ -168,56 +163,78 @@ class GraphFlowModel(nn.Module):
                     for prev_node_idx in range(start_node_for_edges, i):
                         latent_edge_sample = prior_edge_dist.sample().view(1, -1)  # Shape (1, self.bond_dim)
 
-                        # edge_index for AIG: [source, target]. Let's assume prev_node_idx -> i
+                        # edge_index for AIG: [source, target]. Here, prev_node_idx -> i
                         edge_idx_tensor = torch.tensor([[prev_node_idx, i]], device=device).long()
 
+                        # generated_edge_features will have shape (self.bond_dim), e.g., 3 for AIG
+                        # These are scores for each category (e.g., REG, INV, NO_EDGE)
                         generated_edge_features = flow_core_model.reverse(
                             x=cur_node_features,
                             adj=cur_adj_features_for_flow,
-                            latent=latent_edge_sample,
+                            latent=latent_edge_sample,  # Latent sample for current edge (1, bond_dim)
                             mode=1,  # Mode 1 for edge generation
-                            edge_index=edge_idx_tensor
+                            edge_index=edge_idx_tensor  # Specifies which edge (u,v) to generate
                         ).view(-1)  # Flatten to (self.bond_dim)
 
-                        # Determine edge presence from generated_edge_features
-                        # This depends on how AIG edge types are mapped to bond_dim.
-                        # If bond_dim is 3 (e.g., REG, INV, NO-EDGE for AIG)
-                        # and indices 0 and 1 mean an edge exists, and 2 means no edge.
-                        chosen_edge_type_idx = torch.argmax(generated_edge_features).item()
+                        # chosen_edge_category_idx: 0 for REG, 1 for INV, 2 for NO_EDGE (if bond_dim=3)
+                        # This index corresponds to the channel in cur_adj_features_for_flow
+                        chosen_edge_category_idx = torch.argmax(generated_edge_features).item()
 
                         # --- AIG Edge Interpretation Logic ---
-                        # This is crucial and dataset-dependent.
-                        # Example: if bond_dim is 3 (e.g. type0=EDGE, type1=INV_EDGE, type2=NO_EDGE)
-                        # Or if bond_dim is 2 (type0=EDGE, type1=NO_EDGE)
-                        # Or if bond_dim is 1 (score > threshold means edge)
-                        aig_edge_exists = False
-                        if self.bond_dim == 1:  # Single score for edge presence
-                            if generated_edge_features[0] > 0.0:  # Threshold, assuming positive means edge
-                                aig_edge_exists = True
-                        elif self.bond_dim == 2:  # E.g., [EDGE_SCORE, NO_EDGE_SCORE]
-                            if chosen_edge_type_idx == 0:  # Index 0 means edge
-                                aig_edge_exists = True
-                        elif self.bond_dim >= 3:  # E.g. [TYPE_A, TYPE_B, NO_EDGE]
-                            # Assuming the last index means "NO_EDGE"
-                            if chosen_edge_type_idx < (self.bond_dim - 1):
-                                aig_edge_exists = True
-                        # --- End AIG Edge Interpretation ---
+                        # Map chosen_edge_category_idx to actual_edge_type_index for storage in NetworkX graph
+                        # actual_edge_type_index: 0 for 'EDGE_REG', 1 for 'EDGE_INV'
+                        actual_aig_edge_type_index = -1
 
-                        if aig_edge_exists:
-                            output_adj_matrix_binary[prev_node_idx, i] = 1.0  # Directed edge prev_node_idx -> i
-                            # Update cur_adj_features_for_flow for subsequent steps
-                            # This ensures the flow model sees the edge that was just added.
-                            # The one-hot encoding here should match what the model expects during training.
-                            cur_adj_features_for_flow[0, chosen_edge_type_idx, prev_node_idx, i] = 1.0
-                            # For undirected models, you might also set [i, prev_node_idx], but AIGs are directed.
-                            # If your model was trained on symmetric adj for flow, adjust accordingly.
-                            # cur_adj_features_for_flow[0, chosen_edge_type_idx, i, prev_node_idx] = 1.0
+                        # Assuming self.bond_dim is 3, representing channels for:
+                        # Channel 0: EDGE_REG
+                        # Channel 1: EDGE_INV
+                        # Channel 2: NO_EDGE
+                        # This order must match how the training data (inp_adj_features) was constructed.
+                        if self.bond_dim == 3:
+                            if chosen_edge_category_idx == 0:  # Corresponds to 'EDGE_REG'
+                                actual_aig_edge_type_index = 0
+                            elif chosen_edge_category_idx == 1:  # Corresponds to 'EDGE_INV'
+                                actual_aig_edge_type_index = 1
+                            # If chosen_edge_category_idx == 2 (NO_EDGE), actual_aig_edge_type_index remains -1
+
+                        elif self.bond_dim == 2:
+                            # This case implies a different encoding, e.g.:
+                            # Channel 0: EDGE_REG, Channel 1: EDGE_INV (NO_EDGE is implicit if neither is chosen, or handled differently)
+                            # OR Channel 0: EDGE_EXISTS (type decided by another mechanism), Channel 1: NO_EDGE
+                            # For AIGs with distinct REG/INV types, bond_dim=3 (REG, INV, NO_EDGE) is clearer.
+                            # If bond_dim is 2, the mapping to 'EDGE_REG'/'EDGE_INV' needs to be defined.
+                            # Example: if 0 means REG and 1 means INV.
+                            if chosen_edge_category_idx == 0:
+                                actual_aig_edge_type_index = 0  # Example: REG
+                            elif chosen_edge_category_idx == 1:
+                                actual_aig_edge_type_index = 1  # Example: INV
+                            print(
+                                f"Warning: AIG generation with bond_dim={self.bond_dim}. Ensure mapping to REG/INV is correct.")
+
+                        else:
+                            print(
+                                f"Error: Unsupported bond_dim ({self.bond_dim}) for AIG edge type interpretation. Expected 2 or 3.")
+                            # Handle error or skip edge, or default to no edge
+
+                        # If an actual AIG edge type (REG or INV) was chosen:
+                        if actual_aig_edge_type_index != -1:
+                            typed_edges_generated.append((prev_node_idx, i, actual_aig_edge_type_index))
+
+                        # Update cur_adj_features_for_flow with the one-hot encoding of the *chosen category*
+                        # This includes REG, INV, or NO_EDGE, to condition subsequent generation steps.
+                        # chosen_edge_category_idx is the index in the one-hot vector for cur_adj_features_for_flow.
+                        if 0 <= chosen_edge_category_idx < self.bond_dim:
+                            cur_adj_features_for_flow[0, chosen_edge_category_idx, prev_node_idx, i] = 1.0
+                            # For directed AIGs, we only set adj[u,v].
+                        else:
+                            # This should not happen if chosen_edge_category_idx comes from argmax of scores of size bond_dim
+                            print(
+                                f"Warning: chosen_edge_category_idx {chosen_edge_category_idx} is out of bounds for bond_dim {self.bond_dim}.")
 
             # 4. Prepare outputs
             raw_node_features_output = cur_node_features.squeeze(0)  # Shape (max_nodes, self.node_dim)
-            # output_adj_matrix_binary is already (max_nodes, max_nodes)
 
-            return raw_node_features_output, output_adj_matrix_binary, actual_num_nodes
+            return raw_node_features_output, typed_edges_generated, actual_num_nodes
 
     def initialize_masks(self, max_node_unroll, max_edge_unroll):
         """
@@ -230,7 +247,7 @@ class GraphFlowModel(nn.Module):
             tuple: node_masks, adj_masks, link_prediction_index, flow_core_edge_masks
         """
         num_masks = int(max_node_unroll + (max_edge_unroll - 1) * max_edge_unroll / 2 + (
-                    max_node_unroll - max_edge_unroll) * max_edge_unroll)
+                max_node_unroll - max_edge_unroll) * max_edge_unroll)
         num_mask_edge = int(num_masks - max_node_unroll)
 
         node_masks1 = torch.zeros([max_node_unroll, max_node_unroll]).bool()
@@ -341,11 +358,11 @@ class GraphFlowModel(nn.Module):
         # log p(z) = -0.5 * (log(2*pi) + z^2) per dimension
         # self.prior_ln_var is 0, so prior variance is 1.
         ll_node = -0.5 * (
-                    torch.log(2 * self.constant_pi) + self.prior_ln_var + torch.exp(-self.prior_ln_var) * (z[0] ** 2))
+                torch.log(2 * self.constant_pi) + self.prior_ln_var + torch.exp(-self.prior_ln_var) * (z[0] ** 2))
         ll_node = ll_node.sum(-1)  # Sum over latent dimensions for each sample in batch (B)
 
         ll_edge = -0.5 * (
-                    torch.log(2 * self.constant_pi) + self.prior_ln_var + torch.exp(-self.prior_ln_var) * (z[1] ** 2))
+                torch.log(2 * self.constant_pi) + self.prior_ln_var + torch.exp(-self.prior_ln_var) * (z[1] ** 2))
         ll_edge = ll_edge.sum(-1)  # Sum over latent dimensions for each sample in batch (B)
 
         # Total log-likelihood log p(x) = log p(z) + log |det(dz/dx)|
@@ -380,5 +397,3 @@ class GraphFlowModel(nn.Module):
         if total_latent_dims == 0: return torch.tensor(0.0, device=ll_node.device)
 
         return -(torch.mean(ll_node + ll_edge) / total_latent_dims)
-
-

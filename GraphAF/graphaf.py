@@ -1,10 +1,23 @@
 import os
 import torch
 import torch.nn as nn
-# from rdkit import Chem
-from .model import GraphFlowModel
+# from rdkit import Chem # Not needed for AIGs
+from .model import GraphFlowModel  # Assuming .model points to the directory containing graphflow.py
 from .train_utils import adjust_learning_rate, DataIterator
 import pickle
+import networkx as nx
+
+# Try to import aig_config for type strings, handle if not found.
+try:
+    from G2PT.configs import aig_config  # Adjust this import path if necessary
+
+    AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
+    AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
+except ImportError:
+    print("Warning: G2PT.configs.aig_config not found. Using default AIG type keys.")
+    AIG_NODE_TYPE_KEYS = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO']  # Default
+    AIG_EDGE_TYPE_KEYS = ['EDGE_REG', 'EDGE_INV']  # Default
+
 
 class Generator():
     r"""
@@ -66,33 +79,112 @@ class GraphAF(Generator):
         The method class for GraphAF algorithm proposed in the paper `GraphAF: a Flow-based Autoregressive Model for Molecular Graph Generation <https://arxiv.org/abs/2001.09382>`_. This class provides interfaces for running random generation, property
         optimization, and constrained optimization with GraphAF. Please refer to the `example codes <https://github.com/divelab/DIG/tree/dig-stable/examples/ggraph/GraphAF>`_ for usage examples.
     """
+
     def __init__(self):
         super(GraphAF, self).__init__()
         self.model = None
-    
 
     def get_model(self, task, model_conf_dict, checkpoint_path=None):
-        if model_conf_dict['use_gpu'] and not torch.cuda.is_available():
-            model_conf_dict['use_gpu'] = False
-        if task == 'rand_gen':
+        # Determine the device based on model_conf_dict and availability
+        use_gpu_config = model_conf_dict.get('use_gpu', False)
+        if use_gpu_config and not torch.cuda.is_available():
+            print("Warning: 'use_gpu' is True in config, but CUDA is not available. Falling back to CPU.")
+            model_conf_dict['use_gpu'] = False  # Ensure model_conf_dict reflects actual device use
+        elif not use_gpu_config:
+            model_conf_dict['use_gpu'] = False  # Explicitly set to False if not specified or False
+
+        # Instantiate the model
+        # The task string 'rand_gen' should correctly instantiate GraphFlowModel
+        if task == 'rand_gen':  # Or other tasks if GraphFlowModel handles them
             self.model = GraphFlowModel(model_conf_dict)
         else:
-            raise ValueError('Task {} is not supported in GraphDF!'.format(task))
+            # If you have different model classes for different tasks, handle them here
+            raise ValueError('Task {} is not supported or model instantiation is not defined for it.'.format(task))
+
+        # Load checkpoint if provided
         if checkpoint_path is not None:
-            self.model.load_state_dict(torch.load(checkpoint_path))
-    
+            try:
+                # Determine map_location based on where the model will run
+                device_to_load_on = torch.device("cuda" if model_conf_dict['use_gpu'] else "cpu")
+                state_dict = torch.load(checkpoint_path, map_location=device_to_load_on)
+
+                # Handle DataParallel wrapper if present in checkpoint
+                if isinstance(self.model, nn.DataParallel) or any(key.startswith('module.') for key in state_dict):
+                    # If current model is not DataParallel but checkpoint is, strip 'module.'
+                    if not isinstance(self.model, nn.DataParallel) and all(
+                            key.startswith('module.') for key in state_dict):
+                        new_state_dict = {k[7:]: v for k, v in state_dict.items()}
+                        self.model.load_state_dict(new_state_dict)
+                    # If current model is DataParallel and checkpoint is not, it might load fine or need adjustment
+                    # If both are DataParallel or both are not (and no 'module.' prefix), load directly
+                    else:
+                        self.model.load_state_dict(state_dict)
+                else:  # Neither model nor checkpoint seems to be from DataParallel, or model is not yet wrapped
+                    self.model.load_state_dict(state_dict)
+                print(f"Successfully loaded checkpoint from {checkpoint_path} to device {device_to_load_on}")
+
+            except Exception as e:
+                print(f"Error loading checkpoint from {checkpoint_path}: {e}")
+                raise  # Re-raise the exception to halt if loading fails
+
+        # After loading state_dict, explicitly move the model to the target device
+        # This is important especially if the checkpoint was saved on a different device type
+        # or if DataParallel is used.
+        final_device = torch.device("cuda" if model_conf_dict['use_gpu'] and torch.cuda.is_available() else "cpu")
+        if self.model is not None:
+            self.model.to(final_device)
+            print(f"GraphAF model assigned to device: {final_device}")
+        else:
+            print("Error: Model is None after get_model call.")
 
     def load_pretrain_model(self, path):
-        load_key = torch.load(path)
-        for key in load_key.keys():
-            if key in self.model.state_dict().keys():
-                self.model.state_dict()[key].copy_(load_key[key].detach().clone())
+        # This method might be redundant if get_model handles checkpoint loading robustly.
+        # For safety, ensuring device consistency here too.
+        try:
+            # Determine device from model if it exists, otherwise default to CPU for loading
+            current_model_device = next(self.model.parameters()).device if self.model and len(
+                list(self.model.parameters())) > 0 else torch.device("cpu")
+            load_key = torch.load(path, map_location=current_model_device)
 
+            # If model is wrapped in DataParallel
+            is_model_dataparallel = isinstance(self.model, nn.DataParallel)
+            actual_model_state_dict = self.model.module.state_dict() if is_model_dataparallel else self.model.state_dict()
+
+            # Check if checkpoint keys are prefixed with 'module.'
+            checkpoint_is_dataparallel = any(key.startswith('module.') for key in load_key.keys())
+
+            temp_load_dict = {}
+            for key_ckpt, value_ckpt in load_key.items():
+                key_model = key_ckpt
+                if checkpoint_is_dataparallel and not is_model_dataparallel:  # ckpt has 'module.', model doesn't
+                    key_model = key_ckpt[7:] if key_ckpt.startswith('module.') else key_ckpt
+                elif not checkpoint_is_dataparallel and is_model_dataparallel:  # ckpt no 'module.', model has
+                    # This case is tricky, usually load_state_dict handles it if strict=False,
+                    # or one might need to prefix model keys. For simplicity, assume direct match or model handles it.
+                    pass  # Keep key_model as key_ckpt
+
+                if key_model in actual_model_state_dict:
+                    if actual_model_state_dict[key_model].shape == value_ckpt.shape:
+                        temp_load_dict[key_model] = value_ckpt.detach().clone()
+                    else:
+                        print(
+                            f"Shape mismatch for key {key_model}: model {actual_model_state_dict[key_model].shape}, checkpoint {value_ckpt.shape}. Skipping.")
+                else:
+                    print(f"Key {key_model} (from ckpt key {key_ckpt}) not found in model state_dict. Skipping.")
+
+            if is_model_dataparallel:
+                self.model.module.load_state_dict(temp_load_dict, strict=False)
+            else:
+                self.model.load_state_dict(temp_load_dict, strict=False)
+            print(f"Loaded pretrain model from {path} with {len(temp_load_dict)} matching keys.")
+
+        except Exception as e:
+            print(f"Error in load_pretrain_model from {path}: {e}")
 
     def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict, save_interval, save_dir):
         r"""
             Running training for random generation task.
-            
+
             Args:
                 loader: The data loader for loading training samples. It is supposed to use dig.ggraph.dataset.QM9/ZINC250k
                     as the dataset class, and apply torch_geometric.data.DenseDataLoader to it to form the data loader.
@@ -105,57 +197,69 @@ class GraphAF(Generator):
                 save_dir (str): The directory to save the model parameters.
         """
 
-        self.get_model('rand_gen', model_conf_dict)
+        self.get_model('rand_gen', model_conf_dict)  # Model is moved to device in get_model
         self.model.train()
+
+        # Determine device from model_conf_dict for optimizer and data
+        device = torch.device("cuda" if model_conf_dict.get('use_gpu', False) and torch.cuda.is_available() else "cpu")
+
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=lr, weight_decay=wd)
         if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
+            os.makedirs(save_dir, exist_ok=True)  # Use exist_ok=True
 
-        for epoch in range(1, max_epochs+1):
+        for epoch in range(1, max_epochs + 1):
             total_loss = 0
-            for batch, data_batch in enumerate(loader):
+            batch_count = 0
+            for batch_idx, data_batch in enumerate(loader):
                 optimizer.zero_grad()
-                inp_node_features = data_batch.x #(B, N, node_dim)
-                inp_adj_features = data_batch.adj #(B, 4, N, N)
-                if model_conf_dict['use_gpu']:
-                    inp_node_features = inp_node_features.cuda()
-                    inp_adj_features = inp_adj_features.cuda()
-                
+                # Move data to the same device as the model
+                inp_node_features = data_batch.x.to(device)  # (B, N, node_dim)
+                inp_adj_features = data_batch.adj.to(device)  # (B, bond_dim, N, N)
+                # For AIG, bond_dim is 3 (REG, INV, NO_EDGE)
+
                 out_z, out_logdet = self.model(inp_node_features, inp_adj_features)
                 loss = self.model.log_prob(out_z, out_logdet)
                 loss.backward()
                 optimizer.step()
 
-                total_loss += loss.to('cpu').item()
-                if batch % 500 == 0:
-                    print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
+                total_loss += loss.item()  # No need to move to CPU if already scalar
+                batch_count += 1
+                if batch_idx % 500 == 0:  # Use batch_idx for iteration number
+                    print('Training Epoch {} | Iteration {} | loss {}'.format(epoch, batch_idx, loss.item()))
 
-            avg_loss = total_loss / (batch + 1)
-            print("Training | Average loss {}".format(avg_loss))
-            
+            if batch_count > 0:
+                avg_loss = total_loss / batch_count
+                print("Training Epoch {} | Average loss {}".format(epoch, avg_loss))
+            else:
+                print(f"Training Epoch {epoch} | No data processed.")
+
             if epoch % save_interval == 0:
-                torch.save(self.model.state_dict(), os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))
-
+                # Save model state dict (handles DataParallel correctly)
+                model_state_to_save = self.model.module.state_dict() if isinstance(self.model,
+                                                                                   nn.DataParallel) else self.model.state_dict()
+                torch.save(model_state_to_save, os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))
+                print(
+                    f"Saved model checkpoint at epoch {epoch} to {os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch))}")
 
     def run_rand_gen(self, model_conf_dict, checkpoint_path,
                      num_samples=100, num_min_nodes=5,
-                     # num_max_nodes_config is implicitly model_conf_dict['max_size'] used by GraphFlowModel
-                     temperature=0.75, aig_node_types=None,
-                     output_pickle_path="GraphAF_generated_aigs.pkl"):  # Default filename changed
+                     temperature=0.75, aig_node_type_strings=None,  # Renamed for clarity
+                     output_pickle_path="GraphAF_generated_aigs.pkl"):
         r"""
         Running AIG graph generation for random generation task using GraphAF.
 
         Args:
             model_conf_dict (dict): Python dict for configuring model hyperparameters.
-                                    Must include 'node_dim' and 'max_size'.
+                                    Must include 'node_dim' (e.g., 4 for AIGs) and 'max_size'.
+                                    'bond_dim' (e.g., 3 for AIGs) is also crucial for the model.
             checkpoint_path (str): Path to the saved model checkpoint file.
             num_samples (int, optional): Number of AIGs to generate. (default: 100)
             num_min_nodes (int, optional): Minimum number of actual nodes in generated AIGs. (default: 5)
-            temperature (float, optional): Temperature for sampling in the internal generation. (default: 0.75)
-            aig_node_types (list, optional): List of AIG node type strings.
+            temperature (float, optional): Temperature for sampling. (default: 0.75)
+            aig_node_type_strings (list, optional): List of AIG node type strings.
                                              Length must match model_conf_dict['node_dim'].
-                                             Example: ['CONST0', 'PI', 'AND', 'PO'].
-                                             If None, defaults to generic types based on node_dim.
+                                             Example: ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO'].
+                                             If None, uses defaults from AIG_NODE_TYPE_KEYS.
             output_pickle_path (str, optional): Full path to save the list of generated AIGs.
                                                 (default: "GraphAF_generated_aigs.pkl")
 
@@ -164,76 +268,86 @@ class GraphAF(Generator):
         """
         node_dim_config = model_conf_dict.get('node_dim')
         max_size_config = model_conf_dict.get('max_size')
+        bond_dim_config = model_conf_dict.get('bond_dim')  # Important for AIG generation
 
-        if node_dim_config is None or max_size_config is None:
-            raise ValueError("model_conf_dict must contain 'node_dim' and 'max_size'.")
+        if node_dim_config is None or max_size_config is None or bond_dim_config is None:
+            raise ValueError("model_conf_dict must contain 'node_dim', 'max_size', and 'bond_dim'.")
 
-        if aig_node_types is None:
-            aig_node_types = [f"TYPE_{i}" for i in range(node_dim_config)]
-            print(
-                f"Warning: aig_node_types not provided. Using generic types based on node_dim={node_dim_config}: {aig_node_types}")
+        if aig_node_type_strings is None:
+            aig_node_type_strings = AIG_NODE_TYPE_KEYS  # Use imported or default
+            print(f"Using AIG node type strings: {aig_node_type_strings}")
 
-        if len(aig_node_types) != node_dim_config:
+        # Define AIG edge type strings based on your config (these are for the final NetworkX graph)
+        # The model internally uses bond_dim (e.g., 3 channels: REG, INV, NO_EDGE)
+        # The conversion function will map generated edge category indices to these strings.
+        # Typically, index 0 -> 'EDGE_REG', index 1 -> 'EDGE_INV'
+        aig_edge_type_strings = AIG_EDGE_TYPE_KEYS  # Should be ['EDGE_REG', 'EDGE_INV']
+
+        if len(aig_node_type_strings) != node_dim_config:
             raise ValueError(
-                f"Length of aig_node_types ({len(aig_node_types)}) must match model_conf_dict['node_dim'] ({node_dim_config}).")
+                f"Length of aig_node_type_strings ({len(aig_node_type_strings)}) must match model_conf_dict['node_dim'] ({node_dim_config}).")
 
-        # Initialize or get the model, ensuring it's on the correct device
-        self.get_model('rand_gen_aig', model_conf_dict, checkpoint_path)
-        self.model.eval()  # Set model to evaluation mode
+        # Initialize or get the model. 'rand_gen' task should instantiate GraphFlowModel.
+        # The model is moved to the correct device within get_model.
+        self.get_model('rand_gen', model_conf_dict, checkpoint_path)
+        self.model.eval()
 
         generated_aig_graphs = []
         generated_count = 0
         attempts = 0
-        # Increase max_attempts if generation is often filtered out by num_min_nodes
-        max_attempts = num_samples * 10
+        max_attempts = num_samples * 20  # Increased attempts for better chance of meeting num_min_nodes
 
-        print(f"Attempting to generate {num_samples} AIGs (min nodes: {num_min_nodes})...")
+        print(f"Attempting to generate {num_samples} AIGs (min nodes: {num_min_nodes}, max_size: {max_size_config})...")
 
-        # Determine device for generation calls from the model itself
+        # Determine device for generation calls from the model itself (it's already on this device)
         try:
-            generation_device = next(self.model.parameters()).device
-        except StopIteration:  # Model has no parameters
+            # Check if model has parameters and get device of the first one
+            if len(list(self.model.parameters())) > 0:
+                generation_device = next(self.model.parameters()).device
+            else:  # Model has no parameters, fallback to config (should not happen for GraphFlowModel)
+                generation_device = torch.device(
+                    "cuda" if model_conf_dict.get('use_gpu', False) and torch.cuda.is_available() else "cpu")
+        except StopIteration:
             generation_device = torch.device(
                 "cuda" if model_conf_dict.get('use_gpu', False) and torch.cuda.is_available() else "cpu")
+
         print(f"Generation will run on device: {generation_device}")
 
         while generated_count < num_samples and attempts < max_attempts:
             attempts += 1
+            if attempts % (max_attempts // 20 if max_attempts >= 20 else 1) == 0:
+                print(f"Attempt {attempts}/{max_attempts}, Generated {generated_count}/{num_samples}")
 
             if not hasattr(self.model, 'generate_aig_raw_data'):
                 raise NotImplementedError(
                     "The internal model (GraphFlowModel) does not have the required "
-                    "'generate_aig_raw_data(self, max_nodes, temperature, device)' method for AIG generation. "
-                    "This method needs to be implemented in GraphFlowModel to return "
-                    "(raw_node_features_tensor, raw_adj_matrix_tensor, actual_num_nodes_generated)."
+                    "'generate_aig_raw_data(self, max_nodes, temperature, device)' method. "
+                    "This method should return (raw_node_features_tensor, typed_edges_list, actual_num_nodes)."
                 )
 
             try:
-                # self.model.max_size comes from model_conf_dict['max_size']
-                # raw_node_features: (max_size, node_dim)
-                # raw_adj_matrix: (max_size, max_size) - representing directed edges
-                # actual_nodes: int
-                raw_node_features, raw_adj_matrix, actual_nodes = \
-                    self.model.generate_aig_raw_data(max_nodes=max_size_config,  # Model's capacity
+                # generate_aig_raw_data now returns (raw_node_features, typed_edges_list, actual_nodes)
+                raw_node_features, typed_edges_list, actual_nodes = \
+                    self.model.generate_aig_raw_data(max_nodes=max_size_config,
                                                      temperature=temperature,
                                                      device=generation_device)
             except Exception as e:
                 print(f"Error during self.model.generate_aig_raw_data (attempt {attempts}): {e}")
-                if attempts % (max_attempts // 10 if max_attempts > 10 else 1) == 0:  # Log progress periodically
-                    print(f"Generation progress: {generated_count}/{num_samples} after {attempts} attempts.")
+                # Optionally add a small delay or specific error handling here
                 continue
 
             if actual_nodes >= num_min_nodes:
-                aig_graph = self._convert_raw_to_aig_digraph(raw_node_features, raw_adj_matrix, actual_nodes,
-                                                             aig_node_types)
+                # Pass both node and edge type strings to the conversion function
+                aig_graph = self._convert_raw_to_aig_digraph(raw_node_features,
+                                                             typed_edges_list,
+                                                             actual_nodes,
+                                                             aig_node_type_strings,
+                                                             aig_edge_type_strings)
                 if aig_graph is not None:
                     generated_aig_graphs.append(aig_graph)
                     generated_count += 1
                     if generated_count % 10 == 0 or generated_count == num_samples:
                         print(f"Successfully generated {generated_count}/{num_samples} AIGs.")
-
-            if attempts > 0 and attempts % (max_attempts // 20 if max_attempts > 20 else 1) == 0:  # Log progress
-                print(f"Generation progress: {generated_count}/{num_samples} after {attempts} attempts.")
 
         if generated_count < num_samples:
             print(
@@ -241,8 +355,8 @@ class GraphAF(Generator):
 
         try:
             output_dir = os.path.dirname(output_pickle_path)
-            if output_dir and not os.path.exists(output_dir):  # Create directory if it doesn't exist
-                os.makedirs(output_dir)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
                 print(f"Created directory for output: {output_dir}")
 
             with open(output_pickle_path, 'wb') as f:
@@ -253,53 +367,66 @@ class GraphAF(Generator):
 
         return generated_aig_graphs
 
-
-    def _convert_raw_to_aig_digraph(self, node_features_tensor, adj_matrix_tensor, num_actual_nodes, aig_node_types):
+    def _convert_raw_to_aig_digraph(self, node_features_tensor, typed_edges_list,
+                                    num_actual_nodes, aig_node_type_strings, aig_edge_type_strings):
         """
-        Converts raw model output (node features and adjacency matrix for a single graph)
+        Converts raw model output (node features and a list of typed edges)
         to a NetworkX DiGraph for AIGs.
 
         Args:
             node_features_tensor (torch.Tensor): Tensor of shape (max_nodes, node_dim)
-                                                 representing node type probabilities or one-hot encodings.
-            adj_matrix_tensor (torch.Tensor): Tensor of shape (max_nodes, max_nodes)
-                                              representing the directed adjacency matrix (binary or scores).
+                                                 representing node type probabilities/scores.
+            typed_edges_list (list): List of tuples (source_idx, target_idx, edge_type_idx),
+                                     where edge_type_idx is 0 for 'EDGE_REG', 1 for 'EDGE_INV'.
             num_actual_nodes (int): The actual number of nodes in the graph (up to max_nodes).
-            aig_node_types (list): List of AIG node type strings (e.g., ['CONST0', 'PI', 'AND', 'PO']).
+            aig_node_type_strings (list): List of AIG node type strings (e.g., ['NODE_CONST0', ...]).
+            aig_edge_type_strings (list): List of AIG edge type strings (e.g., ['EDGE_REG', 'EDGE_INV']).
 
         Returns:
             nx.DiGraph: A NetworkX directed graph representing the AIG, or None if conversion fails.
         """
         graph = nx.DiGraph()
-
-        node_features = node_features_tensor.cpu().detach()
-        adj_matrix = adj_matrix_tensor.cpu().detach()  # Shape: (max_nodes, max_nodes)
+        node_features = node_features_tensor.cpu().detach()  # Ensure on CPU for numpy/python operations
 
         # Add nodes up to num_actual_nodes
         for i in range(num_actual_nodes):
             try:
+                # Determine node type by taking argmax of the feature vector for node i
                 node_type_idx = torch.argmax(node_features[i]).item()
-                if 0 <= node_type_idx < len(aig_node_types):
-                    node_type_label = aig_node_types[node_type_idx]
+                if 0 <= node_type_idx < len(aig_node_type_strings):
+                    node_type_label = aig_node_type_strings[node_type_idx]
                 else:
                     print(
-                        f"Warning: Node {i} has invalid type index {node_type_idx}. Max index: {len(aig_node_types) - 1}. Setting type to UNKNOWN.")
-                    node_type_label = "UNKNOWN"
+                        f"Warning: Node {i} has invalid type index {node_type_idx} (max allowed: {len(aig_node_type_strings) - 1}). Setting type to 'UNKNOWN_NODE_TYPE'.")
+                    node_type_label = "UNKNOWN_NODE_TYPE"  # Or handle as an error
                 graph.add_node(i, type=node_type_label)
             except IndexError:
-                print(f"Warning: Index error accessing node_features for node {i}. Skipping node.")
-                return None  # Or handle more gracefully
+                print(
+                    f"Error: Index out of bounds when accessing node_features for node {i}. num_actual_nodes={num_actual_nodes}, node_features.shape={node_features.shape}. Skipping graph.")
+                return None
+            except Exception as e:
+                print(f"Error processing node {i}: {e}. Skipping graph.")
+                return None
 
-        # Add directed edges among the actual nodes
-        for i in range(num_actual_nodes):
-            for j in range(num_actual_nodes):
-                # Assuming adj_matrix contains scores/probabilities that can be thresholded,
-                # or is already binary.
-                if adj_matrix[i, j] > 0.5:
-                    graph.add_edge(i, j)
+        # Add typed directed edges from the typed_edges_list
+        for u, v, edge_type_idx in typed_edges_list:
+            # Ensure source and target nodes are within the actual number of nodes
+            if u < num_actual_nodes and v < num_actual_nodes:
+                if 0 <= edge_type_idx < len(aig_edge_type_strings):
+                    edge_type_label = aig_edge_type_strings[edge_type_idx]
+                    graph.add_edge(u, v, type=edge_type_label)
+                else:
+                    print(
+                        f"Warning: Edge ({u}->{v}) has invalid edge_type_idx {edge_type_idx} (max allowed: {len(aig_edge_type_strings) - 1}). Adding edge without 'type' attribute.")
+                    graph.add_edge(u, v)  # Add edge without type if index is bad
+            else:
+                print(
+                    f"Warning: Skipping edge ({u}->{v}) because node indices are out of range for actual_num_nodes={num_actual_nodes}.")
+
         return graph
 
-    #
+    # --- Methods for property optimization (train_prop_opt, run_prop_opt, etc.) are unchanged ---
+    # ... (original property optimization methods would be here) ...
     # def train_prop_optim(self, lr, wd, max_iters, warm_up, model_conf_dict, pretrain_path, save_interval, save_dir):
     #     r"""
     #         Running fine-tuning for property optimization task.
@@ -570,3 +697,4 @@ class GraphAF(Generator):
     #             print('Optimized {} molecules'.format(batch_cnt+1))
     #
     #     return mols_0, mols_2, mols_4, mols_6
+
