@@ -2,7 +2,7 @@ import os
 import json
 import argparse
 import torch
-from torch_geometric.loader import DenseDataLoader # Changed from .data import DenseDataLoader
+from torch_geometric.loader import DenseDataLoader
 import warnings
 import os.path as osp
 
@@ -11,7 +11,7 @@ try:
     from data.aig_dataset import AIGDatasetLoader
     from GraphDF import GraphDF # Assuming these are in the current dir or PYTHONPATH
     from GraphAF import GraphAF
-    from GraphEBM import GraphEBM
+    from GraphEBM import GraphEBM # This should be the one from graphebm_main_script_shape_fix
 except ImportError as e:
     print(f"Error importing necessary modules: {e}")
     print("Please ensure 'ggraph' (including dig.ggraph) is installed, your AIGDatasetLoader class is accessible, "
@@ -40,26 +40,27 @@ base_conf = {
         "use_df": False
     },
     "model_ebm": { # GraphEBM specific model parameters
-        "hidden": 64,      # Hidden dim for EnergyFunc's GraphConv layers
-        "depth": 2,        # Number of additional GraphConv layers (L=3 total with graphconv1)
-        "swish_act": True, # Use Swish activation in EnergyFunc
-        "add_self": False, # Add self-connections in GraphConv
-        "dropout": 0.0,    # Dropout rate in EnergyFunc
-        "n_power_iterations": 1 # Power iterations for Spectral Norm
+        "hidden": 64,
+        "depth": 2,
+        "swish_act": True,
+        "add_self": False,
+        "dropout": 0.0,
+        "n_power_iterations": 1
     },
     "lr": 0.001,
     "weight_decay": 0,
     "batch_size": 128,
     "max_epochs": 50,
     "save_interval": 5,
-    "save_dir": "GraphDF/rand_gen_aig_ckpts", # Will be overwritten
+    "grad_clip_value": None, # Default for gradient clipping of model parameters
+    "save_dir": "GraphDF/rand_gen_aig_ckpts",
 
     "train_ebm": { # GraphEBM specific training parameters
         "c": 0.0,
         "ld_step": 150,
         "ld_noise": 0.005,
         "ld_step_size": 30,
-        "clamp_lgd_grad": True, # Changed from "clamp"
+        "clamp_lgd_grad": True,
         "alpha": 1.0
     }
 }
@@ -78,6 +79,7 @@ def main(args):
     conf['batch_size'] = args.batch_size
     conf['max_epochs'] = args.max_epochs
     conf['save_interval'] = args.save_interval
+    conf['grad_clip_value'] = args.grad_clip_value # Get grad_clip_value from args
 
     # GraphAF/GraphDF specific model params
     conf['model']['edge_unroll'] = args.edge_unroll
@@ -96,14 +98,13 @@ def main(args):
     conf['model_ebm']['dropout'] = args.ebm_dropout
     conf['model_ebm']['n_power_iterations'] = args.ebm_n_power_iterations
 
-
     # GraphEBM specific training params from args
     conf['train_ebm']['c'] = args.ebm_c
     conf['train_ebm']['ld_step'] = args.ebm_ld_step
     conf['train_ebm']['ld_noise'] = args.ebm_ld_noise
     conf['train_ebm']['ld_step_size'] = args.ebm_ld_step_size
     conf['train_ebm']['alpha'] = args.ebm_alpha
-    conf['train_ebm']['clamp_lgd_grad'] = args.ebm_clamp_lgd_grad # Updated to use the new arg
+    conf['train_ebm']['clamp_lgd_grad'] = args.ebm_clamp_lgd_grad
 
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("Warning: CUDA requested but not available. Using CPU.")
@@ -141,9 +142,9 @@ def main(args):
     print(f"Instantiating model: {args.model_type}")
     runner = None
     if args.model_type == 'GraphDF':
-        runner = GraphDF() # Assuming GraphDF() takes no args or uses a global config
+        runner = GraphDF()
     elif args.model_type == 'GraphAF':
-        runner = GraphAF() # Assuming GraphAF() takes no args or uses a global config
+        runner = GraphAF()
     elif args.model_type == 'GraphEBM':
         try:
             runner = GraphEBM(
@@ -179,7 +180,6 @@ def main(args):
 
     print(f"Starting training for {args.model_type}...")
     if args.model_type == 'GraphDF' or args.model_type == 'GraphAF':
-        # Assuming these models have a train_rand_gen method with this signature
         runner.train_rand_gen(
             loader=loader,
             lr=conf['lr'],
@@ -200,17 +200,17 @@ def main(args):
                 ld_step=conf['train_ebm']['ld_step'],
                 ld_noise=conf['train_ebm']['ld_noise'],
                 ld_step_size=conf['train_ebm']['ld_step_size'],
-                clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'], # Corrected argument name
+                clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
                 alpha=conf['train_ebm']['alpha'],
                 save_interval=conf['save_interval'],
-                save_dir=conf['save_dir']
+                save_dir=conf['save_dir'],
+                grad_clip_value=conf['grad_clip_value'] # Pass grad_clip_value here
             )
         except KeyError as e:
-            print(f"Error: Missing required parameter {e} in 'train_ebm' config for GraphEBM training.")
+            print(f"Error: Missing required parameter {e} for GraphEBM training.")
             exit(1)
         except AttributeError as e:
-            print(f"Error: {args.model_type} runner does not have a compatible train_rand_gen method or "
-                  f"there's an issue with its parameters: {e}")
+            print(f"Error: {args.model_type} runner: {e}")
             exit(1)
         except Exception as e:
             print(f"An unexpected error occurred during GraphEBM training: {e}")
@@ -236,6 +236,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=base_conf['batch_size'])
     parser.add_argument('--max_epochs', type=int, default=base_conf['max_epochs'])
     parser.add_argument('--save_interval', type=int, default=base_conf['save_interval'])
+    parser.add_argument('--grad_clip_value', type=float, default=base_conf['grad_clip_value'],
+                        help='Value for gradient norm clipping for the main optimizer. None or 0 to disable.')
+
 
     # GraphAF/GraphDF Specific
     parser.add_argument('--edge_unroll', type=int, default=base_conf['model']['edge_unroll'])
@@ -247,20 +250,12 @@ if __name__ == "__main__":
     parser.add_argument('--st_type', type=str, default=base_conf['model']['st_type'], choices=['exp', 'sigmoid', 'softplus'])
 
     # GraphEBM Model Hyperparameters
-    parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'],
-                        help="Hidden dimension for GraphEBM's EnergyFunc.")
-    parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'],
-                        help="Depth of GraphEBM's EnergyFunc (number of extra GCN layers). L=depth+1.")
-    # For boolean flags like swish_act, add_self for EnergyFunc
-    parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction, default=base_conf['model_ebm']['swish_act'],
-                        help="Use Swish activation in GraphEBM's EnergyFunc.")
-    parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction, default=base_conf['model_ebm']['add_self'],
-                        help="Use self-connections in GraphEBM's GraphConv layers.")
-    parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'],
-                        help="Dropout rate in GraphEBM's EnergyFunc.")
-    parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'],
-                        help="Number of power iterations for Spectral Norm in GraphEBM.")
-
+    parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'])
+    parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'])
+    parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction, default=base_conf['model_ebm']['swish_act'])
+    parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction, default=base_conf['model_ebm']['add_self'])
+    parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'])
+    parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'])
 
     # GraphEBM Training Hyperparameters
     parser.add_argument('--ebm_c', type=float, default=base_conf['train_ebm']['c'])
@@ -268,11 +263,8 @@ if __name__ == "__main__":
     parser.add_argument('--ebm_ld_noise', type=float, default=base_conf['train_ebm']['ld_noise'])
     parser.add_argument('--ebm_ld_step_size', type=float, default=base_conf['train_ebm']['ld_step_size'])
     parser.add_argument('--ebm_alpha', type=float, default=base_conf['train_ebm']['alpha'])
-    # For ebm_clamp_lgd_grad (boolean flag)
     parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
-                        default=base_conf['train_ebm']['clamp_lgd_grad'],
-                        help='Enable/disable gradient clamping during Langevin dynamics for GraphEBM.')
-
+                        default=base_conf['train_ebm']['clamp_lgd_grad'])
 
     args = parser.parse_args()
     main(args)
