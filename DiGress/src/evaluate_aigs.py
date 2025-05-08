@@ -16,11 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("evaluate_aigs_pkl")
 
 # --- Import the AIG configuration ---
-try:
-    # Assuming aig_config.py is accessible
-    import datasets.aig_config as aig_config
-except ImportError:
-    import G2PT.configs.aig as aig_config
+import aig_config
 
 # --- Constants from Config or Fallbacks ---
 if aig_config:

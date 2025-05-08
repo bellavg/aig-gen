@@ -23,57 +23,35 @@ import utils
 
 # --- Try to import AIG config for mappings ---
 # Use relative import assuming aig_config.py is in the same directory
-try:
-    from . import aig_config as aig_cfg # Changed to relative import
-    # --- Fallback logic remains the same ---
-    NODE_INDEX_TO_ENCODING = {
-        i: np.array(aig_cfg.NODE_TYPE_ENCODING[key], dtype=np.float32)
-        for i, key in enumerate(aig_cfg.NODE_TYPE_KEYS)
-    }
-    # Corrected EDGE_INDEX_TO_ENCODING to match AIG config (2 types + NoEdge)
-    EDGE_INDEX_TO_ENCODING = {
-        0: np.array([1., 0., 0.], dtype=np.float32) # NoEdge encoding (needs 3 dims if output is 3)
-    }
-    # Ensure the output dimension matches the number of edge types + NoEdge
-    num_edge_output_classes = len(aig_cfg.EDGE_TYPE_KEYS) + 1 # +1 for NoEdge
-    for i, key in enumerate(aig_cfg.EDGE_TYPE_KEYS):
-         # Create one-hot encoding based on the final output dimension
-         one_hot = np.zeros(num_edge_output_classes, dtype=np.float32)
-         one_hot[i + 1] = 1.0 # Index 0 is NoEdge, indices 1, 2 are REG, INV
-         EDGE_INDEX_TO_ENCODING[i + 1] = one_hot
 
-    print("Successfully loaded AIG config for conversion.")
-except ImportError:
-    print("WARNING: Could not import aig_config using relative import. Using fallback mappings.")
-    NODE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(4)], dtype=np.float32) for i in range(4)}
-    EDGE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(3)], dtype=np.float32) for i in range(3)} # Assuming 3 output classes (NoEdge, REG, INV)
-except AttributeError:
-     print("WARNING: aig_config missing attributes. Using fallback mappings.")
-     NODE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(4)], dtype=np.float32) for i in range(4)}
-     EDGE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(3)], dtype=np.float32) for i in range(3)}
+import aig_config as aig_cfg
+# --- Fallback logic remains the same ---
+NODE_INDEX_TO_ENCODING = {
+    i: np.array(aig_cfg.NODE_TYPE_ENCODING[key], dtype=np.float32)
+    for i, key in enumerate(aig_cfg.NODE_TYPE_KEYS)
+}
+# Corrected EDGE_INDEX_TO_ENCODING to match AIG config (2 types + NoEdge)
+EDGE_INDEX_TO_ENCODING = {
+    0: np.array([1., 0., 0.], dtype=np.float32) # NoEdge encoding (needs 3 dims if output is 3)
+}
+# Ensure the output dimension matches the number of edge types + NoEdge
+num_edge_output_classes = len(aig_cfg.EDGE_TYPE_KEYS) + 1 # +1 for NoEdge
+for i, key in enumerate(aig_cfg.EDGE_TYPE_KEYS):
+     # Create one-hot encoding based on the final output dimension
+     one_hot = np.zeros(num_edge_output_classes, dtype=np.float32)
+     one_hot[i + 1] = 1.0 # Index 0 is NoEdge, indices 1, 2 are REG, INV
+     EDGE_INDEX_TO_ENCODING[i + 1] = one_hot
 
-# --- Import evaluation functions ---
-try:
-    # Assuming evaluate_aigs.py is in the same directory
-    from .evaluate_aigs import ( # Changed to relative import
-        calculate_structural_aig_metrics,
-        count_pi_po_paths,
-        calculate_uniqueness,
-        calculate_novelty,
-        load_training_graphs_from_pkl,
-        NODE_PI, NODE_PO, NODE_CONST0
-    )
-    print("Successfully imported evaluation functions from evaluate_aigs.")
-except ImportError as e:
-    print(f"ERROR: Could not import functions from evaluate_aigs.py: {e}")
-    print("Evaluation in on_test_epoch_end will be skipped.")
-    # --- Fallback functions remain the same ---
-    def calculate_structural_aig_metrics(*args, **kwargs): return {'is_structurally_valid': 0.0, 'constraints_failed': ['Import Failed']}
-    def count_pi_po_paths(*args, **kwargs): return {}
-    def calculate_uniqueness(*args, **kwargs): return 0.0, 0
-    def calculate_novelty(*args, **kwargs): return 0.0, 0
-    def load_training_graphs_from_pkl(*args, **kwargs): return None
-    NODE_PI, NODE_PO, NODE_CONST0 = "NODE_PI", "NODE_PO", "NODE_CONST0"
+# Assuming evaluate_aigs.py is in the same directory
+from evaluate_aigs import ( # Changed to relative import
+    calculate_structural_aig_metrics,
+    count_pi_po_paths,
+    calculate_uniqueness,
+    calculate_novelty,
+    load_training_graphs_from_pkl,
+    NODE_PI, NODE_PO, NODE_CONST0
+)
+
 
 eval_logger = logging.getLogger("internal_aig_evaluation")
 eval_logger.setLevel(logging.INFO)
