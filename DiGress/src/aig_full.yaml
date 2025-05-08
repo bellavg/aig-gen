@@ -1,0 +1,79 @@
+# Combined Configuration for AIG Dataset
+
+# --- General Settings ---
+# Based on general_default.yaml and overrides from nx_graphs/comm20 experiments
+general:
+  name: 'aig_diffusion_run_1' # Give your experiment a unique name
+  gpus: 1                     # Adjust based on your hardware
+  wandb: 'online'             # 'online', 'offline', or 'disabled'
+
+  # Logging and Checkpointing
+  log_every_steps: 50
+  check_val_every_n_epochs: 10  # How often to run validation NLL calculation
+  save_every_n_epochs: 20       # How often to save checkpoints (adjust based on training time)
+  run_test_after_train: True    # Run your evaluation at the end of training
+  progress_bar: True            # Show progress bars
+
+  # Sampling Settings (primarily for the final test evaluation)
+  # These control how many samples are generated *at the end of testing* for your evaluation
+  final_model_samples_to_generate: 1000 # Number of AIGs to generate for final evaluation
+  # final_model_samples_to_save: 0      # Not needed as you evaluate directly
+  # final_model_chains_to_save: 0       # Not needed
+
+  # --- Settings below might not be needed if sampling/viz is fully removed ---
+  # --- but keep them for now in case the model code still references them ---
+  samples_to_generate: 64       # Samples generated during validation (if enabled in model code)
+  samples_to_save: 0            # Don't save intermediate visualizations
+  chains_to_save: 0             # Don't save intermediate chains
+  number_chain_steps: 10        # Reduced, as chains aren't saved/used
+
+  # Resume/Test Configuration (set via command line or leave as null)
+  resume: null                  # Path to checkpoint for resuming training (relative to output dir)
+  test_only: null               # Path to checkpoint for testing only
+  evaluate_all_checkpoints: False # Whether to test all checkpoints in the test_only dir
+
+# --- Training Settings ---
+# Based on train_default.yaml and overrides from comm20 experiment
+train:
+  n_epochs: 500                 # Adjust based on convergence
+  batch_size: 64                # Adjust based on GPU memory and dataset size
+  lr: 0.0002                    # Learning rate
+  weight_decay: 1e-12           # Weight decay for optimizer
+  clip_grad: null               # Gradient clipping (e.g., 1.0 or null to disable)
+  save_model: True              # Save checkpoints
+  save_top_k: 3                 # Save top 3 checkpoints based on validation NLL
+  num_workers: 4                # Dataloader workers (adjust based on CPU/system)
+  ema_decay: 0                  # Exponential Moving Average (0 to disable)
+  optimizer: adamw              # Optimizer type
+  seed: 42                      # Reproducibility seed
+
+# --- Model Settings ---
+# Based on model/discrete.yaml and overrides from comm20 experiment
+model:
+  type: 'discrete'              # Essential for AIGs with discrete types
+  transition: 'marginal'        # Or 'uniform'. 'marginal' uses dataset statistics.
+  model: 'graph_tf'             # The Graph Transformer model
+
+  # Diffusion Hyperparameters
+  diffusion_steps: 500          # Number of diffusion steps (T)
+  diffusion_noise_schedule: 'cosine' # Noise schedule type
+
+  # Transformer Architecture (Adjust based on AIG complexity and resources)
+  n_layers: 6                   # Number of transformer layers
+  hidden_mlp_dims: {'X': 128, 'E': 64, 'y': 64} # Dimensions of MLPs within the transformer
+  hidden_dims: {'dx': 128, 'de': 32, 'dy': 64, 'n_head': 4, 'dim_ffX': 128, 'dim_ffE': 64, 'dim_ffy': 128} # Core transformer dimensions
+
+  # Loss Weighting (Weights for Edge and Global features relative to Node features)
+  # Since AIGs don't have global features (y), the second value is likely irrelevant.
+  # You might only need to tune the first value (edge loss weight).
+  lambda_train: [1, 0]          # Example: Weight edge loss equally to node loss [lambda_E, lambda_y]
+
+  # Extra Features (Set to null as analysis/extra features are removed/disabled)
+  extra_features: null
+
+# --- Dataset Settings ---
+dataset:
+  name: 'aig'                   # Your dataset name (must match main.py logic)
+  datadir: './digress_dataset'           # Path to your dataset's root directory (containing raw/ and processed/)
+  # Add any specific dataset args needed by AIGDataModule or AIGDatasetInfos if you added them
+  # e.g., filter: False

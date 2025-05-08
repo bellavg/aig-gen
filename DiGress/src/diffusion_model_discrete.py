@@ -24,7 +24,7 @@ from . import utils
 
 # --- Try to import AIG config for mappings ---
 try:
-    import G2PT.configs.aig as aig_cfg
+    import aig_config as aig_cfg
     NODE_INDEX_TO_ENCODING = {
         i: np.array(aig_cfg.NODE_TYPE_ENCODING[key], dtype=np.float32)
         for i, key in enumerate(aig_cfg.NODE_TYPE_KEYS)
@@ -46,7 +46,7 @@ except AttributeError:
 
 # --- Import evaluation functions ---
 try:
-    from evaluate_aigs import (
+    from ....evaluate_aigs import (
         calculate_structural_aig_metrics,
         count_pi_po_paths,
         calculate_uniqueness,
@@ -68,7 +68,9 @@ except ImportError as e:
 eval_logger = logging.getLogger("internal_aig_evaluation")
 eval_logger.setLevel(logging.INFO)
 
+
 class DiscreteDenoisingDiffusion(pl.LightningModule):
+    # __init__ remains the same as the previous version
     def __init__(self, cfg, dataset_infos, train_metrics, extra_features, domain_features, sampling_metrics=None, visualization_tools=None): # Added defaults
         super().__init__()
 
@@ -176,8 +178,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
     def training_step(self, data, i):
         if not hasattr(data, 'edge_index') or data.edge_index.numel() == 0:
-            # print("Found a batch with no edges or invalid data. Skipping.") # Less verbose
-            return {'loss': torch.tensor(0.0, device=self.device, requires_grad=True)} # Return zero loss
+            return {'loss': torch.tensor(0.0, device=self.device, requires_grad=True)}
         try:
             dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
             dense_data = dense_data.mask(node_mask)
@@ -196,7 +197,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
              print(f"Error in training_step: {e}")
              return {'loss': torch.tensor(0.0, device=self.device, requires_grad=True)}
 
-
     def validation_step(self, data, i):
         try:
             dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
@@ -208,9 +208,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return {'loss': nll}
         except Exception as e:
              print(f"Error in validation_step: {e}")
-             # Return a default value or handle appropriately
-             return {'loss': torch.tensor(float('inf'), device=self.device)} # Indicate error with inf loss
-
+             return {'loss': torch.tensor(float('inf'), device=self.device)}
 
     def test_step(self, data, i):
         try:
@@ -234,7 +232,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         to_log = self.train_loss.log_epoch_metrics()
         log_freq = getattr(self.cfg.general, 'log_every_n_epochs_train_end', 1)
         if self.current_epoch % log_freq == 0:
-             # Check if keys exist before accessing
              x_ce = to_log.get('train_epoch/x_CE', 0)
              e_ce = to_log.get('train_epoch/E_CE', 0)
              y_ce = to_log.get('train_epoch/y_CE', 0)
@@ -248,7 +245,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                  except Exception as e:
                       print(f"Error logging train metrics: {e}")
 
-
     def on_validation_epoch_start(self) -> None:
         self.val_nll.reset()
         self.val_X_kl.reset()
@@ -257,7 +253,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.val_E_logp.reset()
 
     def on_validation_epoch_end(self) -> None:
-        # Compute metrics safely
+        # Compute NLL and KL metrics
         try:
             val_nll_value = self.val_nll.compute()
             val_x_kl_value = self.val_X_kl.compute() * self.T
@@ -265,18 +261,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             val_x_logp_value = self.val_X_logp.compute()
             val_e_logp_value = self.val_E_logp.compute()
         except Exception as e:
-            print(f"Error computing validation metrics: {e}")
-            # Set default values or handle error
-            val_nll_value = torch.tensor(float('inf')) # Use inf to indicate error
+            print(f"Error computing validation NLL/KL metrics: {e}")
+            val_nll_value = torch.tensor(float('inf'))
             val_x_kl_value, val_e_kl_value, val_x_logp_value, val_e_logp_value = 0.0, 0.0, 0.0, 0.0
 
-
+        # Log NLL and KL metrics
         if wandb.run:
             wandb.log({"val/epoch_NLL": val_nll_value,
                        "val/X_kl": val_x_kl_value,
                        "val/E_kl": val_e_kl_value,
                        "val/X_logp": val_x_logp_value,
-                       "val/E_logp": val_e_logp_value}, commit=True)
+                       "val/E_logp": val_e_logp_value}, commit=False) # Commit later with validity
 
         self.print(f"Epoch {self.current_epoch}: Val NLL {val_nll_value :.2f}")
         self.log("val/epoch_NLL", val_nll_value, sync_dist=True)
@@ -285,11 +280,68 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self.best_val_nll = val_nll_value
         self.print(f'Val NLL: {val_nll_value:.4f} \t Best val NLL: {self.best_val_nll:.4f}')
 
-        # --- REMOVED Sampling during validation ---
+        # --- Perform Validity Check during Validation ---
         self.val_counter += 1
-        # The sampling loop that was here has been removed.
+        # Use separate config flags for validation sampling
+        val_samples_to_generate = getattr(self.cfg.general, 'val_samples_to_generate', 64) # Default 64
+        sample_every_val = getattr(self.cfg.general, 'sample_every_val', 1) # Default 1
 
-    # --- Test Epoch End (Modified for Direct AIG Evaluation) ---
+        if self.val_counter % sample_every_val == 0 and val_samples_to_generate > 0:
+            self.print("Sampling graphs for validation validity check...")
+            start = time.time()
+            samples_left_to_generate = val_samples_to_generate
+            generated_samples_raw = []
+            ident = 0
+            batch_size_sample = self.cfg.train.batch_size # Or a specific val batch size
+
+            while samples_left_to_generate > 0:
+                # self.print(f'\rGenerating val batch {ident // batch_size_sample + 1}...', end='', flush=True)
+                to_generate = min(samples_left_to_generate, batch_size_sample)
+                try:
+                    batch_samples_raw = self.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
+                                                          save_final=0, keep_chain=0, number_chain_steps=0)
+                    generated_samples_raw.extend(batch_samples_raw)
+                except Exception as e:
+                     print(f"\nError during validation sampling batch starting at ID {ident}: {e}")
+                ident += to_generate
+                samples_left_to_generate -= to_generate
+            # self.print(f"\nGenerated {len(generated_samples_raw)} raw samples for validation.")
+
+            # --- Convert and Check Validity ---
+            generated_nx_graphs = []
+            for i, sample_data in enumerate(generated_samples_raw):
+                try:
+                    nx_graph = self.convert_to_nx(sample_data[0], sample_data[1])
+                    if nx_graph is not None: generated_nx_graphs.append(nx_graph)
+                except Exception as e: pass # Ignore conversion errors for validation check
+
+            num_generated = len(generated_nx_graphs)
+            num_valid = 0
+            if num_generated > 0:
+                for graph in generated_nx_graphs:
+                     try:
+                         # Only check validity, not other metrics
+                         struct_metrics = calculate_structural_aig_metrics(graph)
+                         if struct_metrics.get('is_structurally_valid', 0.0) > 0.5:
+                             num_valid += 1
+                     except Exception as e:
+                          # print(f"Error during validity check: {e}") # Less verbose
+                          pass # Ignore errors in validity check for robustness
+
+                validity_fraction = num_valid / num_generated
+                self.print(f"Validation Validity Check: {num_valid}/{num_generated} ({validity_fraction*100:.2f}%)")
+                if wandb.run:
+                    wandb.log({"val/validity": validity_fraction}, commit=True) # Commit validity with NLL
+            else:
+                 self.print("No graphs generated for validation validity check.")
+                 if wandb.run:
+                     wandb.log({"val/validity": 0.0}, commit=True) # Log 0 validity
+
+
+            self.print(f'Validation sampling & validity check done. Took {time.time() - start:.2f} seconds.')
+
+
+    # --- Test Epoch End (Unchanged - performs full V.U.N.) ---
     def on_test_epoch_end(self) -> None:
         """ Measure likelihood on a test set and evaluate using imported functions. """
         self.print("\n--- Test Evaluation ---")
@@ -307,7 +359,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         log_dict = {"test/epoch_NLL": test_nll_value, "test/X_kl": test_x_kl_value, "test/E_kl": test_e_kl_value,
                     "test/X_logp": test_x_logp_value, "test/E_logp": test_e_logp_value}
         if wandb.run:
-            wandb.log(log_dict, commit=True) # Commit test NLL metrics
+            wandb.log(log_dict, commit=False) # Commit later with VUN
 
         self.print(f"Test NLL: {test_nll_value:.2f} -- Test KL (X E): {test_x_kl_value:.2f}, {test_e_kl_value:.2f}")
 
@@ -321,16 +373,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             current_batch_num = ident // batch_size_sample + 1
             self.print(f'\rGenerating batch {current_batch_num}...', end='', flush=True)
             to_generate = min(samples_left_to_generate, batch_size_sample)
-
             try:
                 batch_samples_raw = self.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
                                                       save_final=0, keep_chain=0, number_chain_steps=0)
                 generated_samples_raw.extend(batch_samples_raw)
             except Exception as e:
                  print(f"\nError during sampling batch starting at ID {ident}: {e}")
-                 # Decide whether to break or continue
-                 # break # Option: stop sampling on error
-
             ident += to_generate
             samples_left_to_generate -= to_generate
         self.print(f"\nGenerated {len(generated_samples_raw)} raw samples.")
@@ -353,40 +401,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # --- Load Training Data for Novelty ---
         train_graphs = None
         try:
-            # Construct path relative to the dataset config datadir
             train_data_dir_for_eval = os.path.join(self.cfg.dataset.datadir, "raw")
             train_data_prefix_for_eval = "real_aigs_part_"
-            num_train_files_for_eval = 4 # Assuming first 4 are training
-
-            # Get project base path robustly
-            try:
-                 # Assumes standard output structure like outputs/YYYY-MM-DD/HH-MM-SS
-                 # Adjust if your output structure differs
-                 project_base_path = pathlib.Path(os.getcwd()).parents[2]
-            except IndexError:
-                 # Fallback if not in expected output structure (e.g., running directly from src)
-                 project_base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
-
+            num_train_files_for_eval = 4
+            project_base_path = pathlib.Path(os.getcwd()).parents[2] # Adjust if needed
             abs_train_data_dir = os.path.join(project_base_path, train_data_dir_for_eval)
-
 
             if os.path.exists(abs_train_data_dir):
                  self.print(f"Loading training graphs from: {abs_train_data_dir}")
-                 train_graphs = load_training_graphs_from_pkl(
-                     abs_train_data_dir,
-                     train_data_prefix_for_eval,
-                     num_train_files_for_eval
-                 )
+                 train_graphs = load_training_graphs_from_pkl(abs_train_data_dir, train_data_prefix_for_eval, num_train_files_for_eval)
                  if train_graphs is None: self.print("Failed to load training graphs.")
                  elif not train_graphs: self.print("Loaded 0 training graphs.")
                  else: self.print(f"Loaded {len(train_graphs)} training graphs.")
             else:
                  self.print(f"Training data directory not found: {abs_train_data_dir}")
-
         except Exception as e:
             self.print(f"Error loading training graphs: {e}")
 
-        # --- Perform Direct Evaluation ---
+        # --- Perform Direct Evaluation (Full V.U.N.) ---
         self.print("Starting internal evaluation...")
         num_total = len(generated_nx_graphs)
         valid_graphs = []
@@ -438,6 +470,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
              print(f"Uniqueness (U) among valid    : N/A")
              print(f"Novelty (N) among valid       : N/A")
 
+        # (Keep the detailed metric printing as before)
         print("\n--- Average Structural Metrics (All Generated Graphs) ---")
         for key, values in sorted(aggregate_metrics.items()):
             if key == 'is_structurally_valid': continue
@@ -483,6 +516,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
 
     # --- Core Diffusion Logic (Unchanged) ---
+    # ... (kl_prior, compute_Lt, reconstruction_logp, apply_noise, compute_val_loss, forward, sample_batch, sample_p_zs_given_zt, compute_extra_data) ...
+    # --- Keep these methods exactly as they were in the previous version ---
     def kl_prior(self, X, E, node_mask):
         ones = torch.ones((X.size(0), 1), device=X.device)
         Ts = self.T * ones
@@ -518,8 +553,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         prob_true_X, prob_true_E, prob_pred_X, prob_pred_E = diffusion_utils.mask_distributions(
             true_X=prob_true.X, true_E=prob_true.E, pred_X=prob_pred.X, pred_E=prob_pred.E, node_mask=node_mask
         )
+        # KL divergence expects log probabilities as input
         kl_x = F.kl_div(input=prob_pred_X.log(), target=prob_true_X, reduction='none')
         kl_e = F.kl_div(input=prob_pred_E.log(), target=prob_true_E, reduction='none')
+
         kl_x_batch_sum = diffusion_utils.sum_except_batch(kl_x)
         kl_e_batch_sum = diffusion_utils.sum_except_batch(kl_e)
         # Update metrics with batch sums
@@ -616,8 +653,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         #                 "val_test/Lt_batch": loss_all_t_batch.mean(), # Mean over batch
         #                 "val_test/log_pn_batch": log_pN.mean(), # Mean over batch
         #                 "val_test/L0_batch": loss_term_0_batch.mean(), # Mean over batch
-        #                 'val_test/batch_nll': nll.item()}, commit=False)
-        return nll # Return mean NLL for the batch
+        #                 'val_test/batch_nll': nll.item()}, commit=False) # Log final NLL for the batch
+        return nll
 
 
     def forward(self, noisy_data, extra_data, node_mask):
@@ -742,4 +779,3 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.test_E_kl.reset()
         self.test_X_logp.reset()
         self.test_E_logp.reset()
-

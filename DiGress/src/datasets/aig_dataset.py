@@ -128,6 +128,7 @@ class AIGDataModule(AbstractDataModule):
     def __getitem__(self, item):
         return self.inner[item]
 
+
 class AIGDatasetInfos(AbstractDatasetInfos):
     """Provides metadata and distributions for the AIG dataset."""
     def __init__(self, datamodule, cfg):

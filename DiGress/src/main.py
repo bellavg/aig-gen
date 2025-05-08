@@ -105,7 +105,7 @@ def get_resume_adaptive(cfg, model_kwargs):
         return cfg, None
 
 
-@hydra.main(version_base='1.3', config_path='../configs', config_name='config')
+@hydra.main(version_base='1.3', config_path='..', config_name='aig_full.yaml')
 def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
 
