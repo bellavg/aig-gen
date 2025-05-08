@@ -71,28 +71,36 @@ def main(args):
     conf['train_ebm'] = base_conf['train_ebm'].copy()
 
     # --- Update Configuration from Arguments ---
+    # General training params
     conf['lr'] = getattr(args, 'lr', conf['lr'])
     conf['weight_decay'] = getattr(args, 'weight_decay', conf['weight_decay'])
     conf['batch_size'] = getattr(args, 'batch_size', conf['batch_size'])
     conf['max_epochs'] = getattr(args, 'max_epochs', conf['max_epochs'])
     conf['save_interval'] = getattr(args, 'save_interval', conf['save_interval'])
     conf['grad_clip_value'] = getattr(args, 'grad_clip_value', conf['grad_clip_value'])
+    conf['data_name'] = args.dataset_name
+
+    # Model-specific params (GraphAF/GraphDF)
     conf['model']['edge_unroll'] = getattr(args, 'edge_unroll', conf['model']['edge_unroll'])
     conf['model']['num_flow_layer'] = getattr(args, 'num_flow_layer', conf['model']['num_flow_layer'])
     conf['model']['num_rgcn_layer'] = getattr(args, 'num_rgcn_layer', conf['model']['num_rgcn_layer'])
     conf['model']['nhid'] = getattr(args, 'gaf_nhid', conf['model']['nhid'])
     conf['model']['nout'] = getattr(args, 'gaf_nout', conf['model']['nout'])
-    conf['model']['deq_coeff'] = getattr(args, 'deq_coeff', conf['model']['deq_coeff'])
 
-    # CORRECTED st_type handling:
-    # Only update from args if args.st_type is not None (i.e., was actually provided)
+    # CORRECTED handling for optional float/str args to prevent None overwriting defaults
+    if args.deq_coeff is not None:
+        conf['model']['deq_coeff'] = args.deq_coeff
     if args.st_type is not None:
         conf['model']['st_type'] = args.st_type
-    # Otherwise, conf['model']['st_type'] retains its value from base_conf (i.e., "exp")
 
+    # Ensure node/bond dimensions are set (e.g., from config or defaults)
     conf['model']['node_dim'] = getattr(aig_config, 'NUM_NODE_FEATURES', 4)
-    conf['model']['bond_dim'] = getattr(aig_config, 'NUM_EDGE_FEATURES', 2) + 1
+    conf['model']['bond_dim'] = getattr(aig_config, 'NUM_EDGE_FEATURES', 2) + 1  # +1 for no-edge channel
+
+    # Set flag for GraphDF if applicable
     if args.model_type == 'GraphDF': conf['model']['use_df'] = True
+
+    # Model-specific params (GraphEBM)
     conf['model_ebm']['hidden'] = getattr(args, 'ebm_hidden', conf['model_ebm']['hidden'])
     conf['model_ebm']['depth'] = getattr(args, 'ebm_depth', conf['model_ebm']['depth'])
     conf['model_ebm']['swish_act'] = getattr(args, 'ebm_swish_act', conf['model_ebm']['swish_act'])
@@ -100,14 +108,15 @@ def main(args):
     conf['model_ebm']['dropout'] = getattr(args, 'ebm_dropout', conf['model_ebm']['dropout'])
     conf['model_ebm']['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations',
                                                       conf['model_ebm']['n_power_iterations'])
+    # EBM Training params
     conf['train_ebm']['c'] = getattr(args, 'ebm_c', conf['train_ebm']['c'])
     conf['train_ebm']['ld_step'] = getattr(args, 'ebm_ld_step', conf['train_ebm']['ld_step'])
     conf['train_ebm']['ld_noise'] = getattr(args, 'ebm_ld_noise', conf['train_ebm']['ld_noise'])
     conf['train_ebm']['ld_step_size'] = getattr(args, 'ebm_ld_step_size', conf['train_ebm']['ld_step_size'])
     conf['train_ebm']['alpha'] = getattr(args, 'ebm_alpha', conf['train_ebm']['alpha'])
     conf['train_ebm']['clamp_lgd_grad'] = getattr(args, 'ebm_clamp_lgd_grad', conf['train_ebm']['clamp_lgd_grad'])
-    conf['data_name'] = args.dataset_name
 
+    # --- Device Setup ---
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("Warning: CUDA requested but not available. Using CPU.")
         device = torch.device('cpu')
@@ -119,7 +128,7 @@ def main(args):
         print("Using CPU.")
     conf['model']['use_gpu'] = (device.type == 'cuda')
 
-    # --- Dataset Loading (Training Only for this script example) ---
+    # --- Dataset Loading ---
     print(f"\nLoading pre-processed dataset from root: {args.data_root}, name: {args.dataset_name}")
     try:
         print("Instantiating AIGPreprocessedDatasetLoader for Training...")
@@ -148,51 +157,82 @@ def main(args):
     train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
     print(f"Created Training DataLoader with batch size {conf['batch_size']}.")
 
+    # --- Model Instantiation ---
     print(f"Instantiating model runner: {args.model_type}")
     runner = None
     if args.model_type == 'GraphDF':
-        runner = GraphDF()
+        runner = GraphDF()  # Assuming GraphDF() takes no args or uses conf internally
     elif args.model_type == 'GraphAF':
-        runner = GraphAF()
+        runner = GraphAF()  # Assuming GraphAF() takes no args or uses conf internally
     elif args.model_type == 'GraphEBM':
         try:
-            runner = GraphEBM(n_atom=conf['model']['max_size'], n_atom_type=conf['model']['node_dim'],
-                              n_edge_type=conf['model']['bond_dim'], **conf['model_ebm'], device=device)
+            # Pass EBM specific config and device
+            runner = GraphEBM(n_atom=conf['model']['max_size'],
+                              n_atom_type=conf['model']['node_dim'],
+                              n_edge_type=conf['model']['bond_dim'],
+                              **conf['model_ebm'],
+                              device=device)
         except Exception as e:
             print(f"Error instantiating GraphEBM: {e}");
             exit(1)
     else:
         print(f"Error: Unknown model type '{args.model_type}'.");
         exit(1)
-    if runner is None: print(f"Failed to instantiate model runner for {args.model_type}"); exit(1)
 
+    if runner is None:
+        print(f"Failed to instantiate model runner for {args.model_type}");
+        exit(1)
+
+    # --- Save Directory Setup ---
     if args.save_dir:
         save_dir = args.save_dir
     else:
-        default_save_dir_base = "outputs"
+        # Construct default save dir if not provided
+        default_save_dir_base = "outputs"  # Relative to where script is run
         model_specific_path = f"{args.model_type}/rand_gen_{args.dataset_name}_ckpts"
         save_dir = osp.join(default_save_dir_base, model_specific_path)
+
+    # Ensure save_dir is absolute if it was relative, using the CWD
+    # Note: If using SBATCH, CWD is usually SLURM_SUBMIT_DIR, so this makes it absolute from there.
+    save_dir = osp.abspath(save_dir)
     os.makedirs(save_dir, exist_ok=True)
     print(f"Model checkpoints will be saved in: {save_dir}")
 
+    # --- Training ---
     print(f"\n--- Starting Training ({args.model_type} on {args.dataset_name}) ---")
     print(f"Delegating training loop to runner: {args.model_type}.train_rand_gen")
     try:
         if args.model_type == 'GraphDF' or args.model_type == 'GraphAF':
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
                 f"{args.model_type} runner missing 'train_rand_gen' method.")
+            # Pass the relevant parts of the configuration to the training method
             runner.train_rand_gen(
-                loader=train_loader, lr=conf['lr'], wd=conf['weight_decay'], max_epochs=conf['max_epochs'],
-                model_conf_dict=conf['model'], save_interval=conf['save_interval'], save_dir=save_dir
+                loader=train_loader,
+                lr=conf['lr'],
+                wd=conf['weight_decay'],
+                max_epochs=conf['max_epochs'],
+                model_conf_dict=conf['model'],  # Pass model config
+                save_interval=conf['save_interval'],
+                save_dir=save_dir,
+                grad_clip_value=conf['grad_clip_value']  # Pass grad_clip if runner uses it
             )
         elif args.model_type == 'GraphEBM':
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
                 f"{args.model_type} runner missing 'train_rand_gen' method.")
+            # Pass EBM specific training parameters
             runner.train_rand_gen(
-                loader=train_loader, lr=conf['lr'], wd=conf['weight_decay'], max_epochs=conf['max_epochs'],
-                c=conf['train_ebm']['c'], ld_step=conf['train_ebm']['ld_step'], ld_noise=conf['train_ebm']['ld_noise'],
-                ld_step_size=conf['train_ebm']['ld_step_size'], clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
-                alpha=conf['train_ebm']['alpha'], save_interval=conf['save_interval'], save_dir=save_dir,
+                loader=train_loader,
+                lr=conf['lr'],
+                wd=conf['weight_decay'],
+                max_epochs=conf['max_epochs'],
+                c=conf['train_ebm']['c'],
+                ld_step=conf['train_ebm']['ld_step'],
+                ld_noise=conf['train_ebm']['ld_noise'],
+                ld_step_size=conf['train_ebm']['ld_step_size'],
+                clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
+                alpha=conf['train_ebm']['alpha'],
+                save_interval=conf['save_interval'],
+                save_dir=save_dir,
                 grad_clip_value=conf['grad_clip_value']
             )
         else:
@@ -226,49 +266,62 @@ if __name__ == "__main__":
 
     # --- Optional Overrides & Configuration ---
     parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device for training.')
-    parser.add_argument('--save_dir', type=str, default=None, help='Override default save directory.')
+    parser.add_argument('--save_dir', type=str, default=None,
+                        help='Override default save directory. If relative, it will be relative to the execution directory.')
 
     # --- Training Hyperparameters ---
-    parser.add_argument('--lr', type=float, help=f"Learning rate (default: {base_conf['lr']}).")
-    parser.add_argument('--weight_decay', type=float, help=f"Weight decay (default: {base_conf['weight_decay']}).")
-    parser.add_argument('--batch_size', type=int, help=f"Batch size (default: {base_conf['batch_size']}).")
-    parser.add_argument('--max_epochs', type=int, help=f"Maximum training epochs (default: {base_conf['max_epochs']}).")
-    parser.add_argument('--save_interval', type=int,
+    parser.add_argument('--lr', type=float, default=base_conf['lr'],
+                        help=f"Learning rate (default: {base_conf['lr']}).")
+    parser.add_argument('--weight_decay', type=float, default=base_conf['weight_decay'],
+                        help=f"Weight decay (default: {base_conf['weight_decay']}).")
+    parser.add_argument('--batch_size', type=int, default=base_conf['batch_size'],
+                        help=f"Batch size (default: {base_conf['batch_size']}).")
+    parser.add_argument('--max_epochs', type=int, default=base_conf['max_epochs'],
+                        help=f"Maximum training epochs (default: {base_conf['max_epochs']}).")
+    parser.add_argument('--save_interval', type=int, default=base_conf['save_interval'],
                         help=f"Save checkpoints every N epochs (default: {base_conf['save_interval']}).")
-    parser.add_argument('--grad_clip_value', type=float,
+    parser.add_argument('--grad_clip_value', type=float, default=base_conf['grad_clip_value'],
                         help=f"Max norm for gradient clipping (default: {base_conf['grad_clip_value']}). 0 or None to disable.")
 
     # --- Model Architecture Hyperparameters ---
-    parser.add_argument('--num_flow_layer', type=int,
+    # Note: edge_unroll is essential and required
+    parser.add_argument('--num_flow_layer', type=int, default=base_conf['model']['num_flow_layer'],
                         help=f"Number of flow layers (default: {base_conf['model']['num_flow_layer']}).")
-    parser.add_argument('--num_rgcn_layer', type=int,
+    parser.add_argument('--num_rgcn_layer', type=int, default=base_conf['model']['num_rgcn_layer'],
                         help=f"Number of RGCN layers (default: {base_conf['model']['num_rgcn_layer']}).")
-    parser.add_argument('--gaf_nhid', type=int, help=f"Hidden dim for GAF/GDF (default: {base_conf['model']['nhid']}).")
-    parser.add_argument('--gaf_nout', type=int, help=f"Output dim for GAF/GDF (default: {base_conf['model']['nout']}).")
-    parser.add_argument('--deq_coeff', type=float,
-                        help=f"Dequantization coefficient (default: {base_conf['model']['deq_coeff']}).")
+    parser.add_argument('--gaf_nhid', type=int, default=base_conf['model']['nhid'],
+                        help=f"Hidden dim for GAF/GDF (default: {base_conf['model']['nhid']}).")
+    parser.add_argument('--gaf_nout', type=int, default=base_conf['model']['nout'],
+                        help=f"Output dim for GAF/GDF (default: {base_conf['model']['nout']}).")
+    parser.add_argument('--deq_coeff', type=float,  # No default here, handled in main()
+                        help=f"Dequantization coefficient (default from base_conf: {base_conf['model']['deq_coeff']}).")
     parser.add_argument('--st_type', type=str, choices=['exp', 'sigmoid', 'softplus'],
-                        help=f"ST network type (default: {base_conf['model']['st_type']}).")  # Default is 'exp'
-    parser.add_argument('--ebm_hidden', type=int, help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
-    parser.add_argument('--ebm_depth', type=int, help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
+                        # No default here, handled in main()
+                        help=f"ST network type (default from base_conf: {base_conf['model']['st_type']}).")
+    # EBM specific architecture args
+    parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'],
+                        help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
+    parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'],
+                        help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
     parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction,
                         default=base_conf['model_ebm']['swish_act'], help="Use Swish activation in EBM.")
     parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction,
                         default=base_conf['model_ebm']['add_self'], help="Add self-connections in EBM.")
-    parser.add_argument('--ebm_dropout', type=float,
+    parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'],
                         help=f"EBM dropout (default: {base_conf['model_ebm']['dropout']}).")
-    parser.add_argument('--ebm_n_power_iterations', type=int,
+    parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'],
                         help=f"EBM power iterations (default: {base_conf['model_ebm']['n_power_iterations']}).")
 
     # --- EBM Training Hyperparameters ---
-    parser.add_argument('--ebm_c', type=float, help=f"EBM dequant scale (default: {base_conf['train_ebm']['c']}).")
-    parser.add_argument('--ebm_ld_step', type=int,
+    parser.add_argument('--ebm_c', type=float, default=base_conf['train_ebm']['c'],
+                        help=f"EBM dequant scale (default: {base_conf['train_ebm']['c']}).")
+    parser.add_argument('--ebm_ld_step', type=int, default=base_conf['train_ebm']['ld_step'],
                         help=f"EBM Langevin steps (default: {base_conf['train_ebm']['ld_step']}).")
-    parser.add_argument('--ebm_ld_noise', type=float,
+    parser.add_argument('--ebm_ld_noise', type=float, default=base_conf['train_ebm']['ld_noise'],
                         help=f"EBM Langevin noise std (default: {base_conf['train_ebm']['ld_noise']}).")
-    parser.add_argument('--ebm_ld_step_size', type=float,
+    parser.add_argument('--ebm_ld_step_size', type=float, default=base_conf['train_ebm']['ld_step_size'],
                         help=f"EBM Langevin step size (default: {base_conf['train_ebm']['ld_step_size']}).")
-    parser.add_argument('--ebm_alpha', type=float,
+    parser.add_argument('--ebm_alpha', type=float, default=base_conf['train_ebm']['alpha'],
                         help=f"EBM regularization weight (default: {base_conf['train_ebm']['alpha']}).")
     parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
                         default=base_conf['train_ebm']['clamp_lgd_grad'], help="Clamp Langevin gradients.")
