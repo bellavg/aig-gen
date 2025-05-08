@@ -13,7 +13,7 @@ CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name (update if different)
 # Assumes you submit the job from this directory, otherwise provide an absolute path
 PROJECT_DIR=$(pwd)
 # Path to the main script within the project directory
-MAIN_SCRIPT="$src/main.py"
+MAIN_SCRIPT="src/main.py"
 # Name of the experiment config file (relative to configs/experiment/)
 EXPERIMENT_CONFIG="aig_full" # Corresponds to configs/experiment/aig_full.yaml
 
