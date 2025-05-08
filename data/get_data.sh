@@ -8,9 +8,24 @@
 # --- Configuration ---
 CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 
+# --- Data Paths ---
+RAW_PKL_DIR="./aigs"       # *** Directory containing input PKL files ***
+OUTPUT_ROOT_DIR="./aigs_pyg" # *** Root directory for processed output ***
+DATASET_NAME="aig"              # *** Name for the dataset subfolder ***
+FILE_PREFIX="real_aigs_part_"      # *** Prefix of your PKL files ***
+
+# --- Processing Parameters ---
+NUM_AUGMENTATIONS=2 # Number of augmentations for the training set
+
+# --- File Allocation ---
+# Define how many PKL files go into each split
+NUM_TRAIN_FILES=4
+NUM_VAL_FILES=1
+NUM_TEST_FILES=1
+
 # --- Script Name ---
 # *** Ensure this is the correct name of your processing script ***
-PROCESS_SCRIPT="digress_data_processing.py"
+PROCESS_SCRIPT="aig_dataset.py"
 
 # --- End Configuration ---
 
@@ -36,6 +51,17 @@ echo "Conda environment activated."
 # --- End Setup ---
 
 
+# === Run Processing Script ===
+echo "========================================"
+echo "Starting AIG PKL to PyG Processing"
+echo "========================================"
+echo " - Raw PKL Directory : ${RAW_PKL_DIR}"
+echo " - Output Root       : ${OUTPUT_ROOT_DIR}"
+echo " - Dataset Name      : ${DATASET_NAME}"
+echo " - File Prefix       : ${FILE_PREFIX}"
+echo " - Augmentations     : ${NUM_AUGMENTATIONS} (for training split)"
+echo " - File Splits (T/V/T): ${NUM_TRAIN_FILES}/${NUM_VAL_FILES}/${NUM_TEST_FILES}"
+echo "----------------------------------------"
 
 # Check if the script exists
 if [ ! -f "${PROCESS_SCRIPT}" ]; then
@@ -44,8 +70,28 @@ if [ ! -f "${PROCESS_SCRIPT}" ]; then
 fi
 
 # Execute the processing script
-srun python -u ${PROCESS_SCRIPT}
+srun python -u ${PROCESS_SCRIPT} \
+    --raw_dir "${RAW_PKL_DIR}" \
+    --output_root "${OUTPUT_ROOT_DIR}" \
+    --dataset_name "${DATASET_NAME}" \
+    --file_prefix "${FILE_PREFIX}" \
+    --num_augmentations ${NUM_AUGMENTATIONS} \
+    --num_train_files ${NUM_TRAIN_FILES} \
+    --num_val_files ${NUM_VAL_FILES} \
+    --num_test_files ${NUM_TEST_FILES}
 
+process_status=$?
+
+if [ $process_status -ne 0 ]; then
+    echo "Error: Processing script failed with exit code ${process_status}."
+    echo "Check log file: ./slurm_logs/process_aig_pyg_${SLURM_JOB_ID}.out"
+    exit $process_status
+fi
+
+echo "----------------------------------------"
+echo "Processing script finished successfully."
+echo "Processed data should be in: ${OUTPUT_ROOT_DIR}/${DATASET_NAME}/processed/"
+echo "========================================"
 
 # Deactivate environment (optional)
 # conda deactivate
