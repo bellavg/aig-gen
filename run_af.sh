@@ -85,8 +85,6 @@ mkdir -p "${SLURM_SUBMIT_DIR}/slurm_logs"
 mkdir -p ${SAVE_DIR}
 mkdir -p ${GEN_OUTPUT_DIR}
 
-echo "Waiting for 120 seconds to allow filesystem to synchronize..."
-sleep 120 # Wait for 2 minutes
 
 echo "--- Path Diagnostics ---"
 echo "SLURM_SUBMIT_DIR: ${SLURM_SUBMIT_DIR}"
