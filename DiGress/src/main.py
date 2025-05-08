@@ -5,6 +5,7 @@ import warnings
 import torch
 torch.cuda.empty_cache()
 import hydra
+import tqdm
 from omegaconf import DictConfig, OmegaConf # Added OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint

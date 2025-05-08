@@ -3,6 +3,9 @@ import torch
 import re # For sorting filenames naturally
 from torch_geometric.data import Data, Dataset
 import pathlib
+import pickle
+import tqdm
+
 # Assuming your aig_cfg is accessible
 try:
     # Adjust this import path if your config is located elsewhere
@@ -28,7 +31,7 @@ try:
     from .abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 except ImportError:
     # Adjust path if aig_dataset.py is not in the same directory as abstract_dataset.py
-    from src.datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
+    from abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 
 
 # --- AIG Dataset Class (Using Standard Dataset) ---
