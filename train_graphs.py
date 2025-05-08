@@ -18,7 +18,7 @@ import traceback # For error logging
 # --- Dataset and Model Imports ---
 try:
     # Use the dataset class with debugging prints
-    from aig_dataset_debug import AIGProcessedAugmentedDataset # *** Assuming file is named aig_dataset_debug.py ***
+    from data.aig_dataset import AIGProcessedAugmentedDataset # *** Assuming file is named aig_dataset_debug.py ***
     from GraphDF import GraphDF
     from GraphAF import GraphAF
     from GraphEBM import GraphEBM
