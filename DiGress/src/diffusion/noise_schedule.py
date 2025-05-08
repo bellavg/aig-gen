@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from .. import utils
+from . import utils
 from . import diffusion_utils
 
 

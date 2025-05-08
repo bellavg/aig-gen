@@ -1,5 +1,5 @@
-from ..diffusion.distributions import DistributionNodes
-from ..utils import to_dense
+from .distributions import DistributionNodes
+from utils import to_dense
 import torch
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader

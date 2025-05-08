@@ -24,14 +24,9 @@ from metrics.abstract_metrics import TrainAbstractMetricsDiscrete # Only need di
 # from diffusion_model import LiftedDenoisingDiffusion # Not needed if only using discrete
 from diffusion_model_discrete import DiscreteDenoisingDiffusion
 from diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
-
+from datasets.aig_dataset import AIGDataModule, AIGDatasetInfos
 # --- AIG Dataset Imports ---
 # Import your custom AIG classes directly
-try:
-     from datasets.aig_dataset import AIGDataModule, AIGDatasetInfos
-except ImportError:
-     # Try alternative relative path if main.py is not in src
-     from .datasets.aig_dataset import AIGDataModule, AIGDatasetInfos
 
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
@@ -105,7 +100,7 @@ def get_resume_adaptive(cfg, model_kwargs):
         return cfg, None
 
 
-@hydra.main(version_base='1.3', config_path='..', config_name='aig_full.yaml')
+@hydra.main(version_base='1.3', config_path='./', config_name='aig_full.yaml')
 def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
 

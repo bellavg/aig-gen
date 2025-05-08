@@ -17,10 +17,10 @@ from tqdm import tqdm # Added for evaluation progress
 from models.transformer_model import GraphTransformer
 from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete,\
     MarginalUniformTransition
-from .diffusion import diffusion_utils
+from diffusion import diffusion_utils
 from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
-from . import utils
+import utils
 
 # --- Try to import AIG config for mappings ---
 try:
@@ -46,7 +46,7 @@ except AttributeError:
 
 # --- Import evaluation functions ---
 try:
-    from ....evaluate_aigs import (
+    from evaluate_aigs import (
         calculate_structural_aig_metrics,
         count_pi_po_paths,
         calculate_uniqueness,

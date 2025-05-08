@@ -22,7 +22,7 @@ except ImportError:
         }
     aig_cfg = FallbackAigCfg()
 
-from abstract_dataset import AbstractDataModule, AbstractDatasetInfos
+from .abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 
 # --- AIG Dataset Class (Using Standard Dataset) ---
 

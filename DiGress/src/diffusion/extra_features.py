@@ -1,5 +1,5 @@
 import torch
-from .. import utils
+from . import utils
 
 
 class DummyExtraFeatures:
