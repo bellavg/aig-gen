@@ -329,13 +329,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         # Compute NLL and KL metrics (Standard DiGress NLL calculation)
+        # Compute NLL and KL metrics
         try:
+            # Attempt to compute metrics directly. If validation_step failed consistently,
+            # compute() might raise an error if called before update(), which is caught below.
             val_nll_value = self.val_nll.compute()
-            # Ensure metrics were updated before computing
-            if self.val_X_kl.total == 0 or self.val_E_kl.total == 0 or self.val_X_logp.total == 0 or self.val_E_logp.total == 0:
-                 print("Warning: Validation metrics seem to have no updates. NLL/KL might be inaccurate.")
-                 # Handle case where no valid batches were processed
-                 if self.val_nll.total == 0: val_nll_value = torch.tensor(float('inf'))
+            val_x_kl_value = self.val_X_kl.compute() * self.T
+            val_e_kl_value = self.val_E_kl.compute() * self.T
+            val_x_logp_value = self.val_X_logp.compute()
+            val_e_logp_value = self.val_E_logp.compute()
+
+        # Catch potential errors during .compute() if metrics weren't updated
+        # Also catches the specific error if compute is called before update
+        except (RuntimeError, Exception) as e:
+            print(f"Error computing validation NLL/KL metrics (possibly due to failed steps): {e}")
+            # If NLL compute failed, likely means no steps succeeded
+            if isinstance(self.val_nll.compute(), torch.Tensor) and torch.isnan(
+                    self.val_nll.compute()).any():  # Check if compute returns NaN
+                val_nll_value = torch.tensor(float('nan'))
+            else:  # Otherwise set to Inf or handle based on specific error if needed
+                val_nll_value = torch.tensor(float('inf'))
+
+            val_x_kl_value, val_e_kl_value, val_x_logp_value, val_e_logp_value = 0.0, 0.0, 0.0, 0.0
+            # You might still see the UserWarning about compute before update, but this handles the crash.
 
             val_x_kl_value = self.val_X_kl.compute() * self.T if self.val_X_kl.total > 0 else 0.0
             val_e_kl_value = self.val_E_kl.compute() * self.T if self.val_E_kl.total > 0 else 0.0
