@@ -8,8 +8,8 @@ from torch.nn.modules.normalization import LayerNorm
 from torch.nn import functional as F
 from torch import Tensor
 
-from .. import utils
-from ..diffusion import diffusion_utils
+from . import utils
+from . import diffusion_utils
 from .layers import Xtoy, Etoy, masked_softmax
 
 
