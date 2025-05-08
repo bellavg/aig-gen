@@ -2,7 +2,7 @@
 #SBATCH --job-name=process_aig_pyg    # Job name for processing
 #SBATCH --partition=gpu_h100         # Or a CPU partition if preferred/available
 #SBATCH --gpus=1                     # Processing might not need GPU, but keeps env consistent
-#SBATCH --time=02:00:00              # Adjust time as needed (processing can take time)
+#SBATCH --time=00:59:99              # Adjust time as needed (processing can take time)
 #SBATCH --mem=32G                    # Request sufficient memory for loading/processing graphs
 #SBATCH --output=./slurm_logs/process_aig_pyg_%j.out # Log file
 
