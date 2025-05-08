@@ -6,8 +6,8 @@ from .rgcn import RGCN  # Assuming RGCN is in .rgcn
 
 
 class DisGraphAF(nn.Module):
-    def __init__(self, mask_node, mask_edge, index_select_edge, num_flow_layer=12, graph_size=38,
-                 num_node_type=9, num_edge_type=4, use_bn=True, num_rgcn_layer=3, nhid=128, nout=128):
+    def __init__(self, mask_node, mask_edge, index_select_edge, num_flow_layer=12, graph_size=64,
+                 num_node_type=4, num_edge_type=3, use_bn=True, num_rgcn_layer=3, nhid=128, nout=128):
         '''
         Discrete Graph Autoregressive Flow model.
         Args:
