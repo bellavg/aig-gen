@@ -284,9 +284,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
              # Calculate combined loss from logged components
              x_ce = to_log.get('train_epoch/x_CE', 0)
              e_ce = to_log.get('train_epoch/E_CE', 0)
-             y_ce = to_log.get('train_epoch/y_CE', 0) # Will be 0 for AIG
-             loss_val = x_ce + e_ce + y_ce
-             self.print(f"Epoch {self.current_epoch}: Train Loss {loss_val:.3f} (X: {x_ce:.3f}, E: {e_ce:.3f}) ({time.time() - self.start_epoch_time:.1f}s)")
+             y_ce = to_log.get('train_epoch/y_CE', 0) # Should be 0 or -1 for AIG
+             # Ensure components are tensors before summing
+             x_ce_tensor = torch.tensor(x_ce) if not isinstance(x_ce, torch.Tensor) else x_ce
+             e_ce_tensor = torch.tensor(e_ce) if not isinstance(e_ce, torch.Tensor) else e_ce
+             y_ce_tensor = torch.tensor(y_ce) if not isinstance(y_ce, torch.Tensor) else y_ce
+
+             # Handle potential -1 values from failed computes
+             x_ce_val = x_ce_tensor.item() if x_ce_tensor.numel() == 1 and x_ce_tensor.item() != -1 else 0.0
+             e_ce_val = e_ce_tensor.item() if e_ce_tensor.numel() == 1 and e_ce_tensor.item() != -1 else 0.0
+             y_ce_val = y_ce_tensor.item() if y_ce_tensor.numel() == 1 and y_ce_tensor.item() != -1 else 0.0
+
+             # Calculate the sum of valid components
+             loss_val = x_ce_val + e_ce_val + y_ce_val
+
+             # --- ADDED DEBUG PRINT ---
+             self.print(f"Epoch {self.current_epoch}: DEBUG - X_CE={x_ce_val:.3f}, E_CE={e_ce_val:.3f}, Y_CE={y_ce_val:.3f}, Calculated Sum={loss_val:.3f}")
+             # --- END DEBUG PRINT ---
+
+             # Original print statement (now uses the same calculated loss_val)
+             self.print(f"Epoch {self.current_epoch}: Train Loss {loss_val:.3f} (X: {x_ce_val:.3f}, E: {e_ce_val:.3f}) ({time.time() - self.start_epoch_time:.1f}s)")
 
              # Log AIG-specific metrics if available
              if self.train_metrics and hasattr(self.train_metrics, 'log_epoch_metrics'):
