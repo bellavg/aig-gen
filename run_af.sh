@@ -124,13 +124,6 @@ srun python -u ${TRAIN_SCRIPT} \
     --save_dir ${SAVE_DIR} \
     --edge_unroll ${EDGE_UNROLL} \
     --grad_clip_value ${GRAD_CLIP} \
-    --num_augmentations ${NUM_AUGMENTATIONS} \
-    `# *** Added required raw file arguments ***` \
-    --raw_data_dir ${RAW_DATA_DIR} \
-    --raw_file_prefix ${RAW_FILE_PREFIX} \
-    --num_train_files ${NUM_TRAIN_FILES} \
-    --num_val_files ${NUM_VAL_FILES} \
-    --num_test_files ${NUM_TEST_FILES} \
     `# Add other model architecture params passed to train_graphs.py if they differ from defaults` \
     --num_flow_layer ${NUM_FLOW_LAYER} \
     --num_rgcn_layer ${NUM_RGCN_LAYER} \
