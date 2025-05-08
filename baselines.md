@@ -6,7 +6,7 @@ Baselines to test
 - DiGress
 - dig
   - Graph-DF
-  - JTVAE
+  - Graph-AF
   - GraphEBM
 - LayerDAG
 - GRAPHARM
