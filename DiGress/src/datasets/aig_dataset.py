@@ -9,22 +9,10 @@ from tqdm import tqdm
 # Assuming your aig_cfg is accessible
 try:
     # Adjust this import path if your config is located elsewhere
-    import G2PT.configs.aig as aig_cfg
+    import aig_config as aig_cfg
 except ImportError:
-    print("Error importing G2PT.configs.aig. Using fallback.")
-    # Fallback definitions (same as before)
-    class FallbackAigCfg:
-        MAX_NODE_COUNT = 64
-        NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-        EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
-        NODE_TYPE_ENCODING = {
-            "NODE_CONST0": [1.0, 0.0, 0.0, 0.0], "NODE_PI": [0.0, 1.0, 0.0, 0.0],
-            "NODE_AND": [0.0, 0.0, 1.0, 0.0], "NODE_PO": [0.0, 0.0, 0.0, 1.0]
-        }
-        EDGE_LABEL_ENCODING = {
-            "EDGE_REG": [1.0, 0.0], "EDGE_INV": [0.0, 1.0]
-        }
-    aig_cfg = FallbackAigCfg()
+    from . import aig_config as aig_cfg
+
 
 # Make sure abstract_dataset is importable
 try:
