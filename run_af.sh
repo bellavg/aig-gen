@@ -14,18 +14,15 @@ CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 # --- Data Configuration ---
 # Use SLURM_SUBMIT_DIR to construct paths, assuming job is submitted from the project root.
 # SLURM_SUBMIT_DIR is an absolute path.
-# CORRECTED: Reinstated "data/" prefix based on user's directory structure.
 DATA_ROOT_PROCESSED="${SLURM_SUBMIT_DIR}/data/aigs_pyg"
 DATASET_NAME="aig"
 
-# CORRECTED: Reinstated "data/" prefix
 RAW_DATA_DIR="${SLURM_SUBMIT_DIR}/data/aigs"
 RAW_FILE_PREFIX="real_aigs_part_"
 NUM_TRAIN_FILES=4
 NUM_VAL_FILES=1
 NUM_TEST_FILES=1
 
-# CORRECTED: Reinstated "data/" prefix
 TRAIN_DATA_DIR_FOR_NOVELTY="${SLURM_SUBMIT_DIR}/data/aigs"
 
 # --- Training Hyperparameters ---
@@ -38,7 +35,6 @@ EDGE_UNROLL=25
 GRAD_CLIP=1.0
 NUM_AUGMENTATIONS=5
 
-# Save Directory (made absolute relative to submission directory)
 SAVE_DIR_REL="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts"
 SAVE_DIR=$(realpath -m "${SLURM_SUBMIT_DIR}/${SAVE_DIR_REL}")
 
@@ -56,15 +52,14 @@ NUM_SAMPLES=1000
 TEMPERATURE_AF=0.75
 MIN_NODES=5
 
-# Generation Output Directory (made absolute relative to submission directory)
-GEN_OUTPUT_DIR_REL="./generated_graphs" # This is relative to SLURM_SUBMIT_DIR
+GEN_OUTPUT_DIR_REL="./generated_graphs"
 GEN_OUTPUT_DIR=$(realpath -m "${SLURM_SUBMIT_DIR}/${GEN_OUTPUT_DIR_REL}")
 
 GEN_PICKLE_FILENAME="${MODEL_NAME}_generated_${NUM_SAMPLES}_temp${TEMPERATURE_AF}_epoch${MAX_EPOCHS}_${SLURM_JOB_ID}.pkl"
 GEN_PICKLE_PATH="${GEN_OUTPUT_DIR}/${GEN_PICKLE_FILENAME}"
 
 # --- Script Names ---
-TRAIN_SCRIPT="train_graphs.py" # Should be in SLURM_SUBMIT_DIR or accessible via $PATH
+TRAIN_SCRIPT="train_graphs.py"
 GEN_SCRIPT="sample_graphs.py"
 EVAL_SCRIPT="evaluate_aigs.py"
 # --- End Configuration ---
@@ -77,7 +72,6 @@ check_exit_code() {
   if [ $exit_code -ne 0 ]; then
     echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
     echo "Last 50 lines of output from slurm log:"
-    # SLURM CWD is typically SLURM_SUBMIT_DIR by default.
     tail -n 50 "${SLURM_SUBMIT_DIR}/slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out"
     exit $exit_code
   fi
@@ -87,24 +81,24 @@ check_exit_code() {
 
 
 # --- Setup ---
-# Output directories are now relative to SLURM_SUBMIT_DIR and then made absolute by realpath.
 mkdir -p "${SLURM_SUBMIT_DIR}/slurm_logs"
 mkdir -p ${SAVE_DIR}
 mkdir -p ${GEN_OUTPUT_DIR}
 
+echo "Waiting for 120 seconds to allow filesystem to synchronize..."
+sleep 120 # Wait for 2 minutes
+
 echo "--- Path Diagnostics ---"
 echo "SLURM_SUBMIT_DIR: ${SLURM_SUBMIT_DIR}"
-echo "Current PWD: $(pwd)" # Should be SLURM_SUBMIT_DIR by default
-echo "DATA_ROOT_PROCESSED (used by Python script): ${DATA_ROOT_PROCESSED}" # Corrected path
-echo "RAW_DATA_DIR (used by Python script): ${RAW_DATA_DIR}" # Corrected path
+echo "Current PWD: $(pwd)"
+echo "DATA_ROOT_PROCESSED (used by Python script): ${DATA_ROOT_PROCESSED}"
+echo "RAW_DATA_DIR (used by Python script): ${RAW_DATA_DIR}"
 echo "SAVE_DIR (used by Python script): ${SAVE_DIR}"
 echo "GEN_OUTPUT_DIR (used by Python script): ${GEN_OUTPUT_DIR}"
 
-# Define the expected file path based on the corrected SLURM_SUBMIT_DIR strategy
 EXPECTED_TRAIN_FILE_SLURM_PATH="${DATA_ROOT_PROCESSED}/${DATASET_NAME}/processed/train_processed_data.pt"
 echo "Checking for train_processed_data.pt at (SLURM_SUBMIT_DIR based, corrected): ${EXPECTED_TRAIN_FILE_SLURM_PATH}"
 ls -ld "${EXPECTED_TRAIN_FILE_SLURM_PATH}" || echo "File not found or inaccessible at SLURM_SUBMIT_DIR based path (corrected)."
-# Also list the directory contents to check for subtle name issues or existence
 echo "Listing contents of directory: $(dirname "${EXPECTED_TRAIN_FILE_SLURM_PATH}")"
 ls -l "$(dirname "${EXPECTED_TRAIN_FILE_SLURM_PATH}")"
 echo "--- End Path Diagnostics ---"
@@ -125,6 +119,7 @@ echo "Conda environment activated."
 echo "========================================"
 echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
 echo "========================================"
+# ... (rest of the script remains the same) ...
 echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
 echo " - Dataset Name: ${DATASET_NAME}"
 echo " - Raw Data Dir: ${RAW_DATA_DIR}"
@@ -137,7 +132,6 @@ echo " - Grad Clip: ${GRAD_CLIP}"
 echo " - Save Directory: ${SAVE_DIR}"
 echo "----------------------------------------"
 
-# Ensure script paths are correct, assuming they are in SLURM_SUBMIT_DIR
 srun python -u "${SLURM_SUBMIT_DIR}/${TRAIN_SCRIPT}" \
     --model_type ${MODEL_NAME} \
     --device ${REQUESTED_DEVICE} \
