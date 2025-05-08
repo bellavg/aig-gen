@@ -17,7 +17,7 @@ import time
 # and will contain the created 'processed/' directory.
 DATASET_ROOT_DIR = "./" # Example: Adjust this path
 
-RAW_DIR = os.path.join(DATASET_ROOT_DIR, 'raw_aigs')
+RAW_DIR = os.path.join(DATASET_ROOT_DIR, 'aigs')
 PROCESSED_DIR = os.path.join("./digress_dataset", 'processed')
 RAW_FILENAME_BASE = "real_aigs"
 TOTAL_PARTS = 6
