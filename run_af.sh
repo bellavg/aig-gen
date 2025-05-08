@@ -12,22 +12,21 @@ REQUESTED_DEVICE="cuda"
 CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 
 # --- Data Configuration ---
-# Processed Data Location (for loading)
-DATA_ROOT_PROCESSED_REL="./data/aigs_pyg"    # Relative root dir containing the 'aig' folder
-DATA_ROOT_PROCESSED=$(realpath -m "${DATA_ROOT_PROCESSED_REL}") # Absolute path
-DATASET_NAME="aig"              # The dataset subfolder name (contains 'processed')
+# Use SLURM_SUBMIT_DIR to construct paths, assuming job is submitted from the project root.
+# SLURM_SUBMIT_DIR is an absolute path.
+# CORRECTED: Reinstated "data/" prefix based on user's directory structure.
+DATA_ROOT_PROCESSED="${SLURM_SUBMIT_DIR}/data/aigs_pyg"
+DATASET_NAME="aig"
 
-# Raw Data Location (for dataset context during loading)
-RAW_DATA_DIR_REL="./data/aigs"              # Relative directory containing original PKL files
-RAW_DATA_DIR=$(realpath -m "${RAW_DATA_DIR_REL}") # Absolute path
-RAW_FILE_PREFIX="real_aigs_part_" # Prefix for original PKL files
-NUM_TRAIN_FILES=4                 # Number of PKL files for train split
-NUM_VAL_FILES=1                   # Number of PKL files for val split
-NUM_TEST_FILES=1                  # Number of PKL files for test split
+# CORRECTED: Reinstated "data/" prefix
+RAW_DATA_DIR="${SLURM_SUBMIT_DIR}/data/aigs"
+RAW_FILE_PREFIX="real_aigs_part_"
+NUM_TRAIN_FILES=4
+NUM_VAL_FILES=1
+NUM_TEST_FILES=1
 
-# Training Data Location (for novelty evaluation)
-TRAIN_DATA_DIR_FOR_NOVELTY_REL="./data/aigs" # Relative path for novelty evaluation
-TRAIN_DATA_DIR_FOR_NOVELTY=$(realpath -m "${TRAIN_DATA_DIR_FOR_NOVELTY_REL}") # Absolute path
+# CORRECTED: Reinstated "data/" prefix
+TRAIN_DATA_DIR_FOR_NOVELTY="${SLURM_SUBMIT_DIR}/data/aigs"
 
 # --- Training Hyperparameters ---
 LR=0.0005
@@ -39,11 +38,11 @@ EDGE_UNROLL=25
 GRAD_CLIP=1.0
 NUM_AUGMENTATIONS=5
 
-# Save Directory (made absolute)
-SAVE_DIR_REL="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts" # Relative specific save dir for GraphAF run
-SAVE_DIR=$(realpath -m "${SAVE_DIR_REL}") # Absolute path
+# Save Directory (made absolute relative to submission directory)
+SAVE_DIR_REL="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts"
+SAVE_DIR=$(realpath -m "${SLURM_SUBMIT_DIR}/${SAVE_DIR_REL}")
 
-# Architecture Defaults (Ensure these match training if not overridden)
+# Architecture Defaults
 MAX_SIZE=64
 NODE_DIM=4
 BOND_DIM=3
@@ -52,22 +51,20 @@ NUM_RGCN_LAYER=3
 GAF_NHID=128
 GAF_NOUT=128
 
-# --- Generation Parameters (for final sampling after training) ---
+# --- Generation Parameters ---
 NUM_SAMPLES=1000
 TEMPERATURE_AF=0.75
 MIN_NODES=5
 
-# Generation Output Directory (made absolute)
-GEN_OUTPUT_DIR_REL="./generated_graphs" # Relative separate output dir
-GEN_OUTPUT_DIR=$(realpath -m "${GEN_OUTPUT_DIR_REL}") # Absolute path
+# Generation Output Directory (made absolute relative to submission directory)
+GEN_OUTPUT_DIR_REL="./generated_graphs" # This is relative to SLURM_SUBMIT_DIR
+GEN_OUTPUT_DIR=$(realpath -m "${SLURM_SUBMIT_DIR}/${GEN_OUTPUT_DIR_REL}")
 
-# Include key generation parameters in the filename
-# GEN_PICKLE_PATH will be absolute because GEN_OUTPUT_DIR is now absolute
 GEN_PICKLE_FILENAME="${MODEL_NAME}_generated_${NUM_SAMPLES}_temp${TEMPERATURE_AF}_epoch${MAX_EPOCHS}_${SLURM_JOB_ID}.pkl"
 GEN_PICKLE_PATH="${GEN_OUTPUT_DIR}/${GEN_PICKLE_FILENAME}"
 
 # --- Script Names ---
-TRAIN_SCRIPT="train_graphs.py"
+TRAIN_SCRIPT="train_graphs.py" # Should be in SLURM_SUBMIT_DIR or accessible via $PATH
 GEN_SCRIPT="sample_graphs.py"
 EVAL_SCRIPT="evaluate_aigs.py"
 # --- End Configuration ---
@@ -80,8 +77,8 @@ check_exit_code() {
   if [ $exit_code -ne 0 ]; then
     echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
     echo "Last 50 lines of output from slurm log:"
-    # Ensure this path is correct, relative to job's CWD or make it absolute too if needed
-    tail -n 50 "./slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out"
+    # SLURM CWD is typically SLURM_SUBMIT_DIR by default.
+    tail -n 50 "${SLURM_SUBMIT_DIR}/slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out"
     exit $exit_code
   fi
   echo "Step '${step_name}' completed successfully."
@@ -90,16 +87,29 @@ check_exit_code() {
 
 
 # --- Setup ---
-# The mkdir -p commands will now use absolute paths for SAVE_DIR and GEN_OUTPUT_DIR
-# slurm_logs is still relative here; SBATCH --output handles its main log file path.
-mkdir -p ./slurm_logs # This creates slurm_logs relative to the job's CWD
+# Output directories are now relative to SLURM_SUBMIT_DIR and then made absolute by realpath.
+mkdir -p "${SLURM_SUBMIT_DIR}/slurm_logs"
 mkdir -p ${SAVE_DIR}
 mkdir -p ${GEN_OUTPUT_DIR}
-echo "Log and output directories ensured."
-echo "DATA_ROOT_PROCESSED set to: ${DATA_ROOT_PROCESSED}"
-echo "SAVE_DIR set to: ${SAVE_DIR}"
-echo "GEN_OUTPUT_DIR set to: ${GEN_OUTPUT_DIR}"
 
+echo "--- Path Diagnostics ---"
+echo "SLURM_SUBMIT_DIR: ${SLURM_SUBMIT_DIR}"
+echo "Current PWD: $(pwd)" # Should be SLURM_SUBMIT_DIR by default
+echo "DATA_ROOT_PROCESSED (used by Python script): ${DATA_ROOT_PROCESSED}" # Corrected path
+echo "RAW_DATA_DIR (used by Python script): ${RAW_DATA_DIR}" # Corrected path
+echo "SAVE_DIR (used by Python script): ${SAVE_DIR}"
+echo "GEN_OUTPUT_DIR (used by Python script): ${GEN_OUTPUT_DIR}"
+
+# Define the expected file path based on the corrected SLURM_SUBMIT_DIR strategy
+EXPECTED_TRAIN_FILE_SLURM_PATH="${DATA_ROOT_PROCESSED}/${DATASET_NAME}/processed/train_processed_data.pt"
+echo "Checking for train_processed_data.pt at (SLURM_SUBMIT_DIR based, corrected): ${EXPECTED_TRAIN_FILE_SLURM_PATH}"
+ls -ld "${EXPECTED_TRAIN_FILE_SLURM_PATH}" || echo "File not found or inaccessible at SLURM_SUBMIT_DIR based path (corrected)."
+# Also list the directory contents to check for subtle name issues or existence
+echo "Listing contents of directory: $(dirname "${EXPECTED_TRAIN_FILE_SLURM_PATH}")"
+ls -l "$(dirname "${EXPECTED_TRAIN_FILE_SLURM_PATH}")"
+echo "--- End Path Diagnostics ---"
+
+echo "Log and output directories ensured."
 echo "Loading modules..."
 module load 2024
 module load Anaconda3/2024.06-1
@@ -127,7 +137,8 @@ echo " - Grad Clip: ${GRAD_CLIP}"
 echo " - Save Directory: ${SAVE_DIR}"
 echo "----------------------------------------"
 
-srun python -u ${TRAIN_SCRIPT} \
+# Ensure script paths are correct, assuming they are in SLURM_SUBMIT_DIR
+srun python -u "${SLURM_SUBMIT_DIR}/${TRAIN_SCRIPT}" \
     --model_type ${MODEL_NAME} \
     --device ${REQUESTED_DEVICE} \
     --data_root "${DATA_ROOT_PROCESSED}" \
@@ -144,11 +155,11 @@ srun python -u ${TRAIN_SCRIPT} \
     --num_rgcn_layer ${NUM_RGCN_LAYER} \
     --gaf_nhid ${GAF_NHID} \
     --gaf_nout ${GAF_NOUT}
+check_exit_code $? "Training Step"
 
 
 # === Step 2: Generation ===
 echo ""; echo "========================================"; echo "Starting Generation: ${MODEL_NAME}"; echo "========================================"
-# CHECKPOINT_PATH will be absolute because SAVE_DIR is now absolute
 CHECKPOINT_FILENAME="${MODEL_NAME,,}_ckpt_epoch_${MAX_EPOCHS}.pth"
 CHECKPOINT_PATH="${SAVE_DIR}/${CHECKPOINT_FILENAME}"
 
@@ -160,12 +171,9 @@ if [ ! -f "${CHECKPOINT_PATH}" ]; then
         CHECKPOINT_PATH=${LATEST_CHECKPOINT}
     else
         echo "Error: No checkpoints found in ${SAVE_DIR}. Cannot generate."
-        # exit 1 # Commenting out exit 1 to allow evaluation step to potentially run if needed for debugging
-                   # or if generation is optional. Re-enable if training must succeed for generation.
     fi
 fi
 
-# Proceed with generation only if a checkpoint is found
 if [ -f "${CHECKPOINT_PATH}" ]; then
     echo " - Using Checkpoint: ${CHECKPOINT_PATH}"
     echo " - Number of Samples: ${NUM_SAMPLES}"
@@ -174,7 +182,7 @@ if [ -f "${CHECKPOINT_PATH}" ]; then
     echo " - Output File: ${GEN_PICKLE_PATH}"
     echo "----------------------------------------"
 
-    srun python -u ${GEN_SCRIPT} \
+    srun python -u "${SLURM_SUBMIT_DIR}/${GEN_SCRIPT}" \
         --model ${MODEL_NAME} \
         --checkpoint "${CHECKPOINT_PATH}" \
         --output_file "${GEN_PICKLE_PATH}" \
@@ -190,6 +198,7 @@ if [ -f "${CHECKPOINT_PATH}" ]; then
         --num_rgcn_layer ${NUM_RGCN_LAYER} \
         --gaf_nhid ${GAF_NHID} \
         --gaf_nout ${GAF_NOUT}
+    check_exit_code $? "Generation Step"
 else
     echo "Skipping generation step as no valid checkpoint was found."
 fi
@@ -197,15 +206,15 @@ fi
 
 # === Step 3: Evaluation ===
 echo ""; echo "========================================"; echo "Starting Evaluation"; echo "========================================"
-# Evaluate only if the generated file exists
 if [ -f "${GEN_PICKLE_PATH}" ]; then
     echo " - Evaluating File: ${GEN_PICKLE_PATH}"
     echo " - Training Data Dir (for Novelty): ${TRAIN_DATA_DIR_FOR_NOVELTY}"
     echo "----------------------------------------"
 
-    srun python -u ${EVAL_SCRIPT} \
+    srun python -u "${SLURM_SUBMIT_DIR}/${EVAL_SCRIPT}" \
         "${GEN_PICKLE_PATH}" \
         --train_data_dir "${TRAIN_DATA_DIR_FOR_NOVELTY}"
+    check_exit_code $? "Evaluation Step"
 else
     echo "Skipping evaluation step as generated pickle file '${GEN_PICKLE_PATH}' not found."
 fi
