@@ -8,10 +8,20 @@
 # --- Configuration ---
 MODEL_NAME="GraphEBM"
 CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
-# *** Updated Data Paths ***
+
+# --- Data Configuration ---
+# Processed Data Location (for loading)
 DATA_ROOT="./aigs_pyg/"       # Root directory containing the 'aig' folder
 DATASET_NAME="aig"          # Dataset subfolder name (contains 'processed')
-TRAIN_DATA_DIR="./data/aig" # Base directory for training data (for novelty eval)
+# Raw Data Location (for dataset context during loading)
+RAW_DATA_DIR="./aigs"       # *** ADDED: Directory containing original PKL files ***
+RAW_FILE_PREFIX="real_aigs_part_" # *** ADDED: Prefix for original PKL files ***
+NUM_TRAIN_FILES=4           # *** ADDED: Number of PKL files for train split ***
+NUM_VAL_FILES=1             # *** ADDED: Number of PKL files for val split ***
+NUM_TEST_FILES=1            # *** ADDED: Number of PKL files for test split ***
+# Training Data Location (for novelty evaluation)
+TRAIN_DATA_DIR_FOR_NOVELTY="./data/aig" # Base directory for training data (for novelty eval)
+
 REQUESTED_DEVICE="cuda"
 
 # Training Hyperparameters (Using stable settings)
@@ -27,17 +37,20 @@ BATCH_SIZE=64
 MAX_EPOCHS=100 # Number of epochs to train for
 SAVE_INTERVAL=10 # Save checkpoint frequency
 GRAD_CLIP_VALUE=1.0
-# *** Added Edge Unroll (needed by train_graphs.py model config setup) ***
 EDGE_UNROLL=15 # Default, adjust if a specific structure is intended/required
-# *** Added Num Augmentations (needed by train_graphs.py dataset loading) ***
 NUM_AUGMENTATIONS=5 # Default, adjust to match your dataset processing
+
+# EBM Architecture Defaults (Ensure these match training if not overridden)
+EBM_HIDDEN=64
+EBM_DEPTH=2
+MAX_SIZE=64 # Corresponds to MAX_NODES_PAD
+NODE_DIM=4  # Corresponds to NUM_NODE_FEATURES
+BOND_DIM=3  # Corresponds to NUM_ADJ_CHANNELS
 
 # Generation Parameters
 NUM_SAMPLES=1000
 NUM_MIN_NODES=5 # Minimum nodes for generated graphs
-# *** Updated Save Dir based on DATASET_NAME ***
-CKPT_SAVE_DIR="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts" # Directory where checkpoints are saved by train_graphs.py
-# Use the checkpoint saved at the *end* of the training run
+CKPT_SAVE_DIR="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts" # Directory where checkpoints are saved
 FINAL_CKPT_PATH="${CKPT_SAVE_DIR}/epoch_${MAX_EPOCHS}.pt"
 GEN_OUTPUT_DIR="./generated_graphs" # Separate output dir
 GEN_PICKLE_FILENAME="${MODEL_NAME}_retrained_generated_aigs_${NUM_SAMPLES}_epoch${MAX_EPOCHS}_${SLURM_JOB_ID}.pkl" # Added epoch
@@ -69,9 +82,6 @@ mkdir -p slurm_logs
 mkdir -p ${GEN_OUTPUT_DIR} # Ensure generation output dir exists
 # Note: CKPT_SAVE_DIR will be created by train_graphs.py or its delegated runner method
 echo "Log and output directories ensured: ./slurm_logs, ${GEN_OUTPUT_DIR}"
-# Clean previous checkpoints for a true scratch run? Optional.
-# echo "Removing previous checkpoints in ${CKPT_SAVE_DIR}..."
-# rm -rf "${CKPT_SAVE_DIR}" # Use with caution!
 
 echo "Loading modules..."
 module load 2024
@@ -87,17 +97,21 @@ echo "Conda environment activated."
 
 # === STEP 1: Training ===
 echo "--- Starting Step 1: Training ${MODEL_NAME} from scratch ---"
-# Note: Save directory creation is handled within train_graphs.py or the runner
 
 srun python -u ${TRAIN_SCRIPT} \
     --model_type ${MODEL_NAME} \
     --device ${REQUESTED_DEVICE} \
     --data_root ${DATA_ROOT} \
-    `# *** Added required arguments ***` \
     --dataset_name ${DATASET_NAME} \
     --edge_unroll ${EDGE_UNROLL} \
     --save_dir "${CKPT_SAVE_DIR}" \
     --num_augmentations ${NUM_AUGMENTATIONS} \
+    `# *** Added required raw file arguments ***` \
+    --raw_data_dir ${RAW_DATA_DIR} \
+    --raw_file_prefix ${RAW_FILE_PREFIX} \
+    --num_train_files ${NUM_TRAIN_FILES} \
+    --num_val_files ${NUM_VAL_FILES} \
+    --num_test_files ${NUM_TEST_FILES} \
     `# --- Training Hyperparameters ---` \
     --lr ${LR} \
     --weight_decay ${WEIGHT_DECAY} \
@@ -113,7 +127,9 @@ srun python -u ${TRAIN_SCRIPT} \
     --ebm_c ${EBM_C} \
     ${EBM_CLAMP_LGD_GRAD} \
     `# --- Optional: Pass EBM architecture params if different from defaults ---` \
-    # --ebm_hidden 64 --ebm_depth 2 ...
+    --ebm_hidden ${EBM_HIDDEN} \
+    --ebm_depth ${EBM_DEPTH} \
+    # Add other EBM arch params like --ebm_swish_act if needed
 
 check_exit_code $? "Training"
 echo "--- Finished Step 1: Training ---"
@@ -138,10 +154,12 @@ srun python -u ${GEN_SCRIPT} \
     `# *** Added necessary ARCHITECTURE args for model instantiation ***` \
     `# These MUST match the parameters used during training!` \
     --edge_unroll ${EDGE_UNROLL} \
-    `# Add max_size, node_dim, bond_dim if sample_graphs.py needs them` \
-    # --max_size 64 --node_dim 4 --bond_dim 3 \
-    `# Add EBM architecture params` \
-    # --ebm_hidden 64 --ebm_depth 2 ... \
+    --max_size ${MAX_SIZE} \
+    --node_dim ${NODE_DIM} \
+    --bond_dim ${BOND_DIM} \
+    --ebm_hidden ${EBM_HIDDEN} \
+    --ebm_depth ${EBM_DEPTH} \
+    `# Add other ARCHITECTURE params like --ebm_swish_act if needed` \
     `# --- Pass necessary EBM GENERATION params ---` \
     --ebm_c ${EBM_C} \
     --ebm_ld_step ${EBM_LD_STEP} \
@@ -163,7 +181,7 @@ fi
 # The first argument to evaluate_aigs.py is positional
 srun python -u ${EVAL_SCRIPT} \
     "${GEN_PICKLE_PATH}" \
-    --train_data_dir "${TRAIN_DATA_DIR}" \
+    --train_data_dir "${TRAIN_DATA_DIR_FOR_NOVELTY}" \
     `# Add other necessary args for evaluate_aigs.py if needed`
 
 check_exit_code $? "Evaluation"
@@ -171,3 +189,4 @@ echo "--- Finished Step 3: Evaluation ---"
 
 
 echo "--- Full Pipeline Completed Successfully ---"
+

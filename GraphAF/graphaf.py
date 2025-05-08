@@ -21,7 +21,7 @@ AIG_EDGE_TYPE_KEYS = None
 
 try:
     # Option 1: If aig_config.py is in a sibling 'data' directory (e.g., GraphAF/data/aig_config.py)
-    from ..data import aig_config as aig_config_module  # If graphaf.py is in GraphAF/
+    import aig_config as aig_config_module  # If graphaf.py is in GraphAF/
 
     AIG_NODE_TYPE_KEYS = aig_config_module.NODE_TYPE_KEYS
     AIG_EDGE_TYPE_KEYS = aig_config_module.EDGE_TYPE_KEYS

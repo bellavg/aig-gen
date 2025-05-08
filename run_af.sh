@@ -12,11 +12,16 @@ REQUESTED_DEVICE="cuda"
 CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 
 # --- Data Configuration ---
-# *** Use the same corrected paths as GraphDF script ***
+# Processed Data Location (for loading)
 DATA_ROOT_PROCESSED="./aigs_pyg/"   # Root dir containing the 'aig' folder
 DATASET_NAME="aig"              # The dataset subfolder name (contains 'processed')
-
-# Directory containing ORIGINAL training data (e.g., .bin files) needed ONLY for novelty check in evaluation
+# Raw Data Location (for dataset context during loading)
+RAW_DATA_DIR="./aigs"             # *** ADDED: Directory containing original PKL files ***
+RAW_FILE_PREFIX="real_aigs_part_" # *** ADDED: Prefix for original PKL files ***
+NUM_TRAIN_FILES=4                 # *** ADDED: Number of PKL files for train split ***
+NUM_VAL_FILES=1                   # *** ADDED: Number of PKL files for val split ***
+NUM_TEST_FILES=1                  # *** ADDED: Number of PKL files for test split ***
+# Training Data Location (for novelty evaluation)
 TRAIN_DATA_DIR_FOR_NOVELTY="./data/aigs" # Example: Adjust if needed
 
 # --- Training Hyperparameters ---
@@ -30,6 +35,15 @@ EDGE_UNROLL=25            # *** Crucial: MUST match the intended model architect
 GRAD_CLIP=1.0
 NUM_AUGMENTATIONS=5       # Number of augmentations used for training data
 SAVE_DIR="${MODEL_NAME}/rand_gen_${DATASET_NAME}_ckpts" # Specific save dir for GraphAF run
+
+# Architecture Defaults (Ensure these match training if not overridden)
+MAX_SIZE=64 # Corresponds to MAX_NODES_PAD
+NODE_DIM=4  # Corresponds to NUM_NODE_FEATURES
+BOND_DIM=3  # Corresponds to NUM_ADJ_CHANNELS
+NUM_FLOW_LAYER=12
+NUM_RGCN_LAYER=3
+GAF_NHID=128
+GAF_NOUT=128
 
 # --- Generation Parameters (for final sampling after training) ---
 NUM_SAMPLES=1000          # Number of graphs to generate
@@ -46,8 +60,22 @@ GEN_PICKLE_PATH="${GEN_OUTPUT_DIR}/${GEN_PICKLE_FILENAME}"
 TRAIN_SCRIPT="train_graphs.py" # The simplified script that delegates training
 GEN_SCRIPT="sample_graphs.py"
 EVAL_SCRIPT="evaluate_aigs.py"
-
 # --- End Configuration ---
+
+
+# --- Helper Function for Error Checking ---
+check_exit_code() {
+  exit_code=$1
+  step_name=$2
+  if [ $exit_code -ne 0 ]; then
+    echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
+    echo "Last 50 lines of output from slurm log:"
+    tail -n 50 "./slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out" # Match output file name
+    exit $exit_code
+  fi
+  echo "Step '${step_name}' completed successfully."
+}
+# --- End Helper Function ---
 
 
 # --- Setup ---
@@ -61,8 +89,7 @@ module load Anaconda3/2024.06-1
 echo "Modules loaded."
 echo "Activating conda environment: ${CONDA_ENV_NAME}..."
 source activate ${CONDA_ENV_NAME}
-conda_status=$?
-if [ $conda_status -ne 0 ]; then    echo "Error: Failed to activate conda environment '${CONDA_ENV_NAME}'. Exiting."    exit 1; fi
+check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
 # --- End Setup ---
 
@@ -73,6 +100,7 @@ echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
 echo "========================================"
 echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
 echo " - Dataset Name: ${DATASET_NAME}"
+echo " - Raw Data Dir: ${RAW_DATA_DIR}"
 echo " - Learning Rate: ${LR}"
 echo " - Weight Decay: ${WEIGHT_DECAY}"
 echo " - Batch Size: ${BATCH_SIZE}"
@@ -97,13 +125,18 @@ srun python -u ${TRAIN_SCRIPT} \
     --edge_unroll ${EDGE_UNROLL} \
     --grad_clip_value ${GRAD_CLIP} \
     --num_augmentations ${NUM_AUGMENTATIONS} \
+    `# *** Added required raw file arguments ***` \
+    --raw_data_dir ${RAW_DATA_DIR} \
+    --raw_file_prefix ${RAW_FILE_PREFIX} \
+    --num_train_files ${NUM_TRAIN_FILES} \
+    --num_val_files ${NUM_VAL_FILES} \
+    --num_test_files ${NUM_TEST_FILES} \
     `# Add other model architecture params passed to train_graphs.py if they differ from defaults` \
-    # --num_flow_layer 12 --num_rgcn_layer 3 --gaf_nhid 128 --gaf_nout 128 ...
-
-train_status=$?
-# Simple error check
-if [ $train_status -ne 0 ]; then    echo "Error: Training script failed with exit code ${train_status}." ; tail -n 50 ./slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out ; exit $train_status ; fi
-echo "----------------------------------------"; echo "Training script finished successfully."; echo "========================================"
+    --num_flow_layer ${NUM_FLOW_LAYER} \
+    --num_rgcn_layer ${NUM_RGCN_LAYER} \
+    --gaf_nhid ${GAF_NHID} \
+    --gaf_nout ${GAF_NOUT} \
+    # Add --st_type, --deq_coeff if needed by train_graphs.py
 
 
 # === Step 2: Generation ===
@@ -130,14 +163,17 @@ srun python -u ${GEN_SCRIPT} \
     --temperature_af ${TEMPERATURE_AF} \
     --min_nodes ${MIN_NODES} \
     --device ${REQUESTED_DEVICE} \
+    `# *** Added necessary ARCHITECTURE args for model instantiation ***` \
+    `# These MUST match the parameters used during training!` \
     --edge_unroll ${EDGE_UNROLL} \
-    # --max_size 64 --node_dim 4 --bond_dim 3 ... (Add if sample_graphs.py needs them)
-
-gen_status=$?
-# Simple error check
-if [ $gen_status -ne 0 ]; then echo "Error: Generation script (${GEN_SCRIPT}) failed with exit code ${gen_status}." ; tail -n 50 ./slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out ; exit $gen_status ; fi
-if [ ! -f "${GEN_PICKLE_PATH}" ]; then echo "Error: Generated pickle file '${GEN_PICKLE_PATH}' not found. Cannot evaluate." ; exit 1 ; fi
-echo "----------------------------------------"; echo "Generation script finished successfully."; echo "========================================"
+    --max_size ${MAX_SIZE} \
+    --node_dim ${NODE_DIM} \
+    --bond_dim ${BOND_DIM} \
+    --num_flow_layer ${NUM_FLOW_LAYER} \
+    --num_rgcn_layer ${NUM_RGCN_LAYER} \
+    --gaf_nhid ${GAF_NHID} \
+    --gaf_nout ${GAF_NOUT} \
+    # Add --st_type, --deq_coeff if needed by sample_graphs.py
 
 
 # === Step 3: Evaluation ===
@@ -152,8 +188,3 @@ srun python -u ${EVAL_SCRIPT} \
     --train_data_dir ${TRAIN_DATA_DIR_FOR_NOVELTY} \
     `# Add any other necessary args for evaluate_aigs.py`
 
-eval_status=$?
-# Simple error check
-if [ $eval_status -ne 0 ]; then echo "Error: Evaluation script (${EVAL_SCRIPT}) failed with exit code ${eval_status}." ; tail -n 50 ./slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out ; exit $eval_status ; fi
-echo "----------------------------------------"; echo "Evaluation script finished successfully."; echo "========================================"
-echo "Full pipeline completed."
