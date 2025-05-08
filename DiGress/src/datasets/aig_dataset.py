@@ -4,7 +4,7 @@ import re # For sorting filenames naturally
 from torch_geometric.data import Data, Dataset
 import pathlib
 import pickle
-import tqdm
+from tqdm import tqdm
 
 # Assuming your aig_cfg is accessible
 try:
