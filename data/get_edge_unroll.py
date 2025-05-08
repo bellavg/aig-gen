@@ -1,3 +1,5 @@
+#TODO change to do it from networkx graph
+
 # analyze_aig_degrees.py
 import os
 import torch

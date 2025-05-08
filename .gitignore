@@ -11,6 +11,7 @@ DIG
 *.zip
 !data/aigs/Archive.zip
 !data/aigs/Archive2.zip
+!data/aigs/Archive3.zip
 # Distribution / packaging
 .Python
 .DS_Store
