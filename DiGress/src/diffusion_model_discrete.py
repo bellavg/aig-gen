@@ -9,7 +9,7 @@ import networkx as nx
 import numpy as np
 import pathlib
 import logging
-import traceback  # Added import for traceback printing
+import traceback
 from collections import defaultdict, Counter
 from tqdm import tqdm
 
@@ -18,11 +18,11 @@ from models.transformer_model import GraphTransformer
 from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
 from diffusion import diffusion_utils
 from metrics.train_metrics import TrainLossDiscrete
-from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
+# Corrected import: Use SumExceptBatchMetric instead of SumExceptBatchKL for KL accumulation
+from metrics.abstract_metrics import SumExceptBatchMetric, NLL # Removed SumExceptBatchKL
 import utils
 
 # --- Try to import AIG config for mappings ---
-# Use relative import assuming aig_config.py is in the same directory
 import aig_config as aig_cfg
 
 # --- Fallback logic remains the same ---
@@ -43,7 +43,7 @@ for i, key in enumerate(aig_cfg.EDGE_TYPE_KEYS):
      EDGE_INDEX_TO_ENCODING[i + 1] = one_hot
 
 # Assuming evaluate_aigs.py is in the same directory
-from evaluate_aigs import ( # Changed to relative import
+from evaluate_aigs import (
     calculate_structural_aig_metrics,
     count_pi_po_paths,
     calculate_uniqueness,
@@ -87,16 +87,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         self.dataset_info = dataset_infos
 
-        # Loss and Metrics (Mostly unchanged)
+        # Loss and Metrics
         self.train_loss = TrainLossDiscrete(self.cfg.model.lambda_train)
         self.val_nll = NLL()
-        self.val_X_kl = SumExceptBatchKL()
-        self.val_E_kl = SumExceptBatchKL()
+        # Changed KL metrics to SumExceptBatchMetric to accumulate pre-computed KL sums
+        self.val_X_kl = SumExceptBatchMetric()
+        self.val_E_kl = SumExceptBatchMetric()
         self.val_X_logp = SumExceptBatchMetric()
         self.val_E_logp = SumExceptBatchMetric()
         self.test_nll = NLL()
-        self.test_X_kl = SumExceptBatchKL()
-        self.test_E_kl = SumExceptBatchKL()
+        # Changed KL metrics to SumExceptBatchMetric to accumulate pre-computed KL sums
+        self.test_X_kl = SumExceptBatchMetric()
+        self.test_E_kl = SumExceptBatchMetric()
         self.test_X_logp = SumExceptBatchMetric()
         self.test_E_logp = SumExceptBatchMetric()
 
@@ -244,7 +246,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return {'loss': nll}
         except Exception as e:
              print(f"Error in validation_step {i}: {e}")
-             traceback.print_exc() # <--- ADDED TRACEBACK PRINTING HERE
+             traceback.print_exc() # Keep traceback printing
              return {'loss': torch.tensor(float('inf'), device=self.device)} # Return Inf loss on error
 
     def test_step(self, data, i):
@@ -310,8 +312,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             # Attempt to compute metrics directly. If validation_step failed consistently,
             # compute() might raise an error if called before update(), which is caught below.
             val_nll_value = self.val_nll.compute()
-            val_x_kl_value = self.val_X_kl.compute() * self.T
-            val_e_kl_value = self.val_E_kl.compute() * self.T
+            # Use the corrected metric type (SumExceptBatchMetric)
+            val_x_kl_value = self.val_X_kl.compute() * self.T # Now just averages the sums
+            val_e_kl_value = self.val_E_kl.compute() * self.T # Now just averages the sums
             val_x_logp_value = self.val_X_logp.compute()
             val_e_logp_value = self.val_E_logp.compute()
 
@@ -329,6 +332,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             val_x_kl_value, val_e_kl_value, val_x_logp_value, val_e_logp_value = 0.0, 0.0, 0.0, 0.0
             # You might still see the UserWarning about compute before update, but this handles the crash.
 
+            # Use the corrected metric type (SumExceptBatchMetric)
             val_x_kl_value = self.val_X_kl.compute() * self.T if self.val_X_kl.total > 0 else 0.0
             val_e_kl_value = self.val_E_kl.compute() * self.T if self.val_E_kl.total > 0 else 0.0
             val_x_logp_value = self.val_X_logp.compute() if self.val_X_logp.total > 0 else 0.0
@@ -449,6 +453,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         try:
             test_nll_value = self.test_nll.compute()
             if self.test_nll.total == 0: test_nll_value = torch.tensor(float('inf')) # Handle no updates
+            # Use the corrected metric type (SumExceptBatchMetric)
             test_x_kl_value = self.test_X_kl.compute() * self.T if self.test_X_kl.total > 0 else 0.0
             test_e_kl_value = self.test_E_kl.compute() * self.T if self.test_E_kl.total > 0 else 0.0
             test_x_logp_value = self.test_X_logp.compute() if self.test_X_logp.total > 0 else 0.0
@@ -716,11 +721,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         kl_x_batch_sum = diffusion_utils.sum_except_batch(kl_x)
         kl_e_batch_sum = diffusion_utils.sum_except_batch(kl_e)
 
-        # Update validation/test metrics
+        # Update validation/test metrics using the corrected metric type (SumExceptBatchMetric)
         metric_x_kl = self.test_X_kl if test else self.val_X_kl
         metric_e_kl = self.test_E_kl if test else self.val_E_kl
-        metric_x_kl.update(kl_x_batch_sum)
-        metric_e_kl.update(kl_e_batch_sum)
+        metric_x_kl.update(kl_x_batch_sum) # Now correctly updates SumExceptBatchMetric
+        metric_e_kl.update(kl_e_batch_sum) # Now correctly updates SumExceptBatchMetric
 
         # Return the sum for the current batch (used in NLL calculation)
         return kl_x_batch_sum + kl_e_batch_sum
