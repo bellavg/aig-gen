@@ -11,57 +11,41 @@ import os.path as osp
 import argparse
 import gc
 from tqdm import tqdm
-from typing import List, Tuple, Dict, Any, Deque, Optional # Added Optional
+from typing import List, Tuple, Dict, Any, Deque, Optional
 from collections import Counter, deque
 import random
 
 # --- AIG Model/Data Parameters ---
-# Ensure these match your GraphDF/GraphAF/GraphEBM model expectations.
-MAX_NODES_PAD = 64             # Max nodes for padding (model.max_size)
-NUM_NODE_FEATURES = 4      # Node types: CONST0, PI, AND, PO (one-hot) (model.node_dim)
-NUM_EXPLICIT_EDGE_TYPES = 2 # Edge types: REG, INV
-NUM_ADJ_CHANNELS = NUM_EXPLICIT_EDGE_TYPES + 1 # model.bond_dim
+MAX_NODES_PAD = 64
+NUM_NODE_FEATURES = 4
+NUM_EXPLICIT_EDGE_TYPES = 2
+NUM_ADJ_CHANNELS = NUM_EXPLICIT_EDGE_TYPES + 1
 # --- End AIG Parameters ---
 
 # --- User's Custom Randomized Topological Sort ---
 def custom_randomized_topological_sort(G: nx.DiGraph, random_generator: random.Random) -> List[int]:
-    """
-    Performs a topological sort, randomizing the order of nodes
-    that have the same in-degree at each step.
-    Uses the provided random_generator instance.
-    Raises NetworkXUnfeasible if a cycle is detected.
-    """
-    if not G.is_directed():
-        raise nx.NetworkXError("Topological sort not defined for undirected graphs.")
-
-    in_degree_map = {node: degree for node, degree in G.in_degree()}
-    zero_in_degree_nodes = [node for node, degree in in_degree_map.items() if degree == 0]
-
-    if len(zero_in_degree_nodes) > 1:
-        random_generator.shuffle(zero_in_degree_nodes)
-
+    """ Performs a randomized topological sort. """
+    if not G.is_directed(): raise nx.NetworkXError("Undirected graph.")
+    in_degree_map = {n: d for n, d in G.in_degree()}
+    zero_in_degree_nodes = [n for n, d in in_degree_map.items() if d == 0]
+    if len(zero_in_degree_nodes) > 1: random_generator.shuffle(zero_in_degree_nodes)
     queue: Deque[int] = deque(zero_in_degree_nodes)
     result_order: List[int] = []
-
     while queue:
-        u = queue.popleft()
-        result_order.append(u)
-
+        u = queue.popleft(); result_order.append(u)
         newly_zero_in_degree: List[int] = []
         successors_of_u = [succ for succ in G.successors(u) if succ in G]
         for v in sorted(list(successors_of_u)):
-            in_degree_map[v] -= 1
-            if in_degree_map[v] == 0:
-                newly_zero_in_degree.append(v)
-            elif in_degree_map[v] < 0:
-                raise RuntimeError(f"In-degree became negative for node {v} during topological sort.")
+            # Ensure v exists in the map before decrementing
+            if v in in_degree_map:
+                in_degree_map[v] -= 1
+                if in_degree_map[v] == 0: newly_zero_in_degree.append(v)
+                elif in_degree_map[v] < 0: raise RuntimeError(f"Negative in-degree for {v}")
+            else:
+                 warnings.warn(f"Node {v} (successor of {u}) not found in in_degree_map during topological sort. Graph might be inconsistent.")
 
-        if len(newly_zero_in_degree) > 1:
-            random_generator.shuffle(newly_zero_in_degree)
-
-        for node in newly_zero_in_degree:
-            queue.append(node)
-
+        if len(newly_zero_in_degree) > 1: random_generator.shuffle(newly_zero_in_degree)
+        for node in newly_zero_in_degree: queue.append(node)
     if len(result_order) != G.number_of_nodes():
         missing_nodes = set(G.nodes()) - set(result_order)
         cycle_nodes = {node for node, degree in in_degree_map.items() if degree > 0 and node in G}
@@ -77,125 +61,69 @@ def _convert_nx_to_pyg_data(graph: nx.DiGraph,
                             num_node_features: int,
                             num_adj_channels: int,
                             num_explicit_edge_types: int) -> Data | None:
-    """
-    Converts a single NetworkX graph (from PKL) to a PyTorch Geometric Data object
-    with padding for dense processing. Adjacency matrix follows PyG convention
-    [Channel, Target, Source].
-    """
+    """ Converts NetworkX graph from PKL to PyG Data object with padding. """
+    # (Keep this function exactly as before)
     num_nodes_in_graph = graph.number_of_nodes()
-
-    if num_nodes_in_graph == 0:
-        # warnings.warn("Skipping graph with 0 nodes during PyG conversion.")
-        return None
+    if num_nodes_in_graph == 0: return None
     if num_nodes_in_graph > max_nodes_pad:
-        warnings.warn(f"Skipping graph with {num_nodes_in_graph} nodes (max allowed: {max_nodes_pad}). Graph rejected.")
+        warnings.warn(f"Skipping graph with {num_nodes_in_graph} nodes (> {max_nodes_pad}).")
         return None
 
-    try:
-        node_list = sorted(list(graph.nodes()))
-    except TypeError:
-        node_list = list(graph.nodes())
-        warnings.warn("Graph nodes were not sortable, using arbitrary order for mapping to PyG.")
-
+    try: node_list = sorted(list(graph.nodes()))
+    except TypeError: node_list = list(graph.nodes())
     node_id_map = {old_id: new_id for new_id, old_id in enumerate(node_list)}
 
     node_features_list = []
-    valid_nodes = True
     for old_node_id in node_list:
-        attrs = graph.nodes[old_node_id]
-        node_type_vec_raw = attrs.get('type')
-
-        if node_type_vec_raw is None or not isinstance(node_type_vec_raw, (list, np.ndarray)) or len(
-                node_type_vec_raw) != num_node_features:
-            warnings.warn(
-                f"Node {old_node_id} has invalid 'type' attribute (val: {node_type_vec_raw}, len: {len(node_type_vec_raw) if hasattr(node_type_vec_raw, '__len__') else 'N/A'}, expected_len: {num_node_features}). Skipping graph.")
-            valid_nodes = False;
-            break
+        attrs = graph.nodes[old_node_id]; node_type_vec_raw = attrs.get('type')
+        if node_type_vec_raw is None or not isinstance(node_type_vec_raw, (list, np.ndarray)) or len(node_type_vec_raw) != num_node_features:
+             warnings.warn(f"Node {old_node_id} invalid type. Skipping graph.")
+             return None
         try:
             node_type_vec = np.asarray(node_type_vec_raw, dtype=np.float32)
-            # Use isclose for float comparisons
-            if not (np.isclose(np.sum(node_type_vec), 1.0) and np.all(
-                    (np.isclose(node_type_vec, 0.0)) | (np.isclose(node_type_vec, 1.0)))):
-                warnings.warn(
-                    f"Node {old_node_id} 'type' attribute {node_type_vec_raw} is not a valid one-hot vector. Sum: {np.sum(node_type_vec)}. Skipping graph.")
-                valid_nodes = False;
-                break
-            node_feature_tensor = torch.tensor(node_type_vec, dtype=torch.float)
-            node_features_list.append(node_feature_tensor)
-        except Exception as e:
-            warnings.warn(
-                f"Error processing 'type' for node {old_node_id} ('{node_type_vec_raw}'): {e}. Skipping graph.")
-            valid_nodes = False;
-            break
-    if not valid_nodes or not node_features_list: return None
+            if not (np.isclose(np.sum(node_type_vec), 1.0) and np.all((np.isclose(node_type_vec, 0.0)) | (np.isclose(node_type_vec, 1.0)))):
+                 warnings.warn(f"Node {old_node_id} type not one-hot. Skipping graph.")
+                 return None
+            node_features_list.append(torch.tensor(node_type_vec, dtype=torch.float))
+        except Exception: warnings.warn(f"Node {old_node_id} type conversion error. Skipping graph."); return None
+    if not node_features_list: return None
 
     x_stacked = torch.stack(node_features_list)
     num_padding_nodes = max_nodes_pad - num_nodes_in_graph
     x_padded = F.pad(x_stacked, (0, 0, 0, num_padding_nodes), "constant", 0.0)
 
     adj_matrix = torch.zeros((num_adj_channels, max_nodes_pad, max_nodes_pad), dtype=torch.float)
-    adj_matrix[num_explicit_edge_types, :, :] = 1.0  # Initialize NO_EDGE channel
+    adj_matrix[num_explicit_edge_types, :, :] = 1.0
 
-    valid_edges = True
     for u_old, v_old, attrs in graph.edges(data=True):
         edge_type_vec_raw = attrs.get('type')
-        if edge_type_vec_raw is None or not isinstance(edge_type_vec_raw, (list, np.ndarray)) or len(
-                edge_type_vec_raw) != num_explicit_edge_types:
-            warnings.warn(f"Edge ({u_old}-{v_old}) has invalid 'type' attribute. Skipping graph.")
-            valid_edges = False;
-            break
-
+        if edge_type_vec_raw is None or not isinstance(edge_type_vec_raw, (list, np.ndarray)) or len(edge_type_vec_raw) != num_explicit_edge_types:
+             warnings.warn(f"Edge ({u_old}-{v_old}) invalid type. Skipping graph.")
+             return None
         u_new, v_new = node_id_map.get(u_old), node_id_map.get(v_old)
-        if u_new is None or v_new is None or not (0 <= u_new < num_nodes_in_graph and 0 <= v_new < num_nodes_in_graph):
-            # warnings.warn(f"Edge ({u_old}->{v_old} mapped to {u_new}->{v_new}) has out-of-bounds index. Skipping edge.")
-            continue # Just skip the edge if nodes aren't valid
-
+        if u_new is None or v_new is None or not (0 <= u_new < num_nodes_in_graph and 0 <= v_new < num_nodes_in_graph): continue
         try:
             edge_type_vec = np.asarray(edge_type_vec_raw, dtype=np.float32)
-            if not (np.isclose(np.sum(edge_type_vec), 1.0) and np.all(
-                    (np.isclose(edge_type_vec, 0.0)) | (np.isclose(edge_type_vec, 1.0)))):
-                warnings.warn(f"Edge ({u_old}-{v_old}) 'type' {edge_type_vec_raw} not valid one-hot. Skipping graph.")
-                valid_edges = False;
-                break
+            if not (np.isclose(np.sum(edge_type_vec), 1.0) and np.all((np.isclose(edge_type_vec, 0.0)) | (np.isclose(edge_type_vec, 1.0)))):
+                 warnings.warn(f"Edge ({u_old}-{v_old}) type not one-hot. Skipping graph.")
+                 return None
             edge_channel_index = np.argmax(edge_type_vec).item()
             if not (0 <= edge_channel_index < num_explicit_edge_types):
-                warnings.warn(
-                    f"Edge ({u_old}-{v_old}) type {edge_type_vec_raw} invalid channel index {edge_channel_index}. Skipping graph.")
-                valid_edges = False;
-                break
-
-            # Adjacency: [Channel, Target, Source]
+                 warnings.warn(f"Edge ({u_old}-{v_old}) invalid channel index. Skipping graph.")
+                 return None
             adj_matrix[edge_channel_index, v_new, u_new] = 1.0
-            adj_matrix[num_explicit_edge_types, v_new, u_new] = 0.0 # Mark as not NO_EDGE
-        except Exception as e:
-            warnings.warn(f"Error processing 'type' for edge ({u_old}-{v_old}): {e}. Skipping graph.")
-            valid_edges = False;
-            break
-    if not valid_edges: return None
+            adj_matrix[num_explicit_edge_types, v_new, u_new] = 0.0
+        except Exception: warnings.warn(f"Edge ({u_old}-{v_old}) type conversion error. Skipping graph."); return None
 
-    # Ensure no self-loops in any channel
     no_edge_channel_idx = num_explicit_edge_types
     for k_node_diag in range(max_nodes_pad):
         adj_matrix[no_edge_channel_idx, k_node_diag, k_node_diag] = 0.0
-        for ch in range(num_explicit_edge_types):
-            adj_matrix[ch, k_node_diag, k_node_diag] = 0.0
+        for ch in range(num_explicit_edge_types): adj_matrix[ch, k_node_diag, k_node_diag] = 0.0
 
-    # Create Data object
     data = Data(x=x_padded, adj=adj_matrix, num_nodes=torch.tensor(num_nodes_in_graph, dtype=torch.long))
-
-    # Add graph-level attributes if they exist
     if 'inputs' in graph.graph: data.num_inputs = torch.tensor(graph.graph['inputs'], dtype=torch.long)
     if 'outputs' in graph.graph: data.num_outputs = torch.tensor(graph.graph['outputs'], dtype=torch.long)
     if 'gates' in graph.graph: data.num_gates = torch.tensor(graph.graph['gates'], dtype=torch.long)
-    # Handle output_patterns carefully - only add if convertible
-    if 'output_patterns' in graph.graph and isinstance(graph.graph['output_patterns'], list):
-        try:
-            # Attempt conversion, assuming patterns are padded lists of numbers
-            patterns_tensor = torch.tensor(graph.graph['output_patterns'], dtype=torch.float) # Or long if ints
-            data.output_patterns = patterns_tensor
-        except Exception as e:
-            warnings.warn(f"Could not convert 'output_patterns' to tensor: {e}")
-
     return data
 
 
@@ -214,69 +142,63 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                  transform=None, pre_transform=None, pre_filter=None):
         """
         Initializes the dataset, handling processing or loading.
-
-        Args:
-            root (str): Root directory where the dataset folder (`dataset_name`) resides
-                        or will be created.
-            dataset_name (str): Name of the dataset folder (e.g., 'aig_ds').
-            split (str): Data split: 'train', 'val', or 'test'.
-            raw_dir (Optional[str]): Directory containing raw PKL files.
-                                     Required only if processed data doesn't exist.
-            file_prefix (Optional[str]): Prefix of raw PKL files.
-                                         Required only if processed data doesn't exist.
-            pkl_file_names_for_split (Optional[List[str]]): Specific PKL filenames for this split.
-                                                             Required only if processed data doesn't exist.
-            num_augmentations (int): Number of augmentations to apply during processing.
-                                     Set to 0 for validation/test sets typically.
-            transform: PyG transforms applied after loading.
-            pre_transform: PyG transforms applied before saving processed data.
-            pre_filter: PyG pre-filtering applied before saving processed data.
         """
+        # Store raw info temporarily, needed if super calls process()
+        # These are NOT instance attributes after __init__ finishes unless explicitly set later
+        self._temp_raw_dir = raw_dir
+        self._temp_file_prefix = file_prefix
+        self._temp_pkl_files = pkl_file_names_for_split if pkl_file_names_for_split is not None else []
+
+        # Set essential attributes needed by properties before calling super()
         self.dataset_name = dataset_name
         self.split = split
-        # Store raw info - only used if self.process() is called
-        self.raw_dir = raw_dir
-        self.file_prefix = file_prefix
-        self._raw_file_names_for_this_split = pkl_file_names_for_split if pkl_file_names_for_split is not None else []
-        self.num_augmentations = num_augmentations
+        self.num_augmentations = num_augmentations # Store augmentation info
 
         # The root directory for InMemoryDataset should contain the 'processed' folder
         processed_root = osp.join(root, dataset_name)
 
-        # Call super().__init__ FIRST. It checks processed_paths and calls self.process() if needed.
+        # === Call super().__init__ EARLY ===
+        # This call checks if processed_paths exist. If not, it calls self.process().
+        # self.process() will need the temporary raw info variables set above.
         super().__init__(processed_root, transform, pre_transform, pre_filter)
+        # === super().__init__() finished ===
 
-        # After super().__init__, if processed files existed, they are loaded.
-        # If not, self.process() was called, and then files are loaded.
-        # We load data/slices here regardless, assuming super() handled it.
+        # Now load data. super() either loaded it or called process() which saved it.
         try:
+            # self.processed_paths is now defined by the superclass constructor
             self.data, self.slices = torch.load(self.processed_paths[0])
             print(f"Dataset '{self.dataset_name}' split '{self.split}' initialized. Samples: {len(self)}")
         except FileNotFoundError:
-             # This happens if process() was needed but failed to create the file,
-             # or if the file got deleted after processing.
              raise FileNotFoundError(f"Processed file not found at {self.processed_paths[0]}. "
                                      "Ensure processing completed successfully or provide raw data args.")
         except Exception as e:
             raise RuntimeError(f"Failed to load processed data from {self.processed_paths[0]}: {e}")
 
+        # Clean up temporary attributes if they are no longer needed
+        del self._temp_raw_dir
+        del self._temp_file_prefix
+        del self._temp_pkl_files
+
+
     @property
     def raw_file_names(self) -> List[str]:
-        """ Returns the list of raw filenames for this split. Used by InMemoryDataset if processing. """
-        # Returns the base filenames, not full paths
-        return self._raw_file_names_for_this_split
+        """ Returns the list of raw filenames relative to raw_dir. Used by InMemoryDataset if processing. """
+        # This property might be called by super().__init__ BEFORE the temp vars are deleted,
+        # so it needs to access the temporary list.
+        # If loading, this list might be empty, which is fine.
+        return getattr(self, '_temp_pkl_files', []) # Access temp list safely
 
     # raw_paths property is used by self.process()
     @property
     def raw_paths(self) -> List[str]:
         """ Returns a list of absolute paths to the raw files for this split. """
-        if not self.raw_dir: return [] # Needed if called before process() checks args
-        return [osp.join(self.raw_dir, name) for name in self.raw_file_names]
+        # This property is called BY self.process(), so temp vars MUST exist if process runs.
+        if not hasattr(self, '_temp_raw_dir') or self._temp_raw_dir is None: return []
+        return [osp.join(self._temp_raw_dir, name) for name in self.raw_file_names]
 
     @property
     def processed_file_names(self) -> str | List[str] | Tuple:
-        """ Returns the name(s) of the processed file(s). """
-        # Defines the filename saved within self.processed_dir
+        """ Returns the name(s) of the processed file(s) relative to processed_dir. """
         return [f'{self.split}_augmented_data.pt']
 
     def download(self):
@@ -285,9 +207,10 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
 
     def process(self):
         """ Processes raw PKL files, applies augmentation, and saves PyG data. """
-        # Check if necessary raw data information was provided
-        if self.raw_dir is None or self.file_prefix is None or not self._raw_file_names_for_this_split:
-            raise ValueError("Raw directory, file prefix, and file list are required for processing, but not provided.")
+        # Check if necessary raw data information was provided via temp vars
+        # These checks run only if super().__init__ determined processing is needed
+        if self._temp_raw_dir is None or self._temp_file_prefix is None or not self._temp_pkl_files:
+            raise ValueError("Raw directory, file prefix, and file list are required for processing, but not provided to __init__.")
 
         print(f"Processing raw PKL files and augmenting for split: {self.split}...")
         all_data_for_split = []
@@ -295,19 +218,20 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
         successful_conversions = 0
         augmentations_created = 0
 
-        # Iterate through the PKL files assigned to this split
+        # Use self.raw_paths which correctly uses the temp vars
         for pkl_file_idx, raw_path in enumerate(tqdm(self.raw_paths, desc=f"Processing PKL files for {self.split}")):
+            # --- Load Chunk ---
             if not osp.exists(raw_path):
                 warnings.warn(f"Raw file not found: {raw_path}. Skipping.")
                 continue
             try:
                 with open(raw_path, 'rb') as f: nx_graphs_chunk = pickle.load(f)
                 if not isinstance(nx_graphs_chunk, list):
-                    warnings.warn(f"File {raw_path} does not contain a list. Skipping."); continue
+                    warnings.warn(f"File {raw_path} did not contain a list. Skipping."); continue
             except Exception as e:
                 warnings.warn(f"Could not load {raw_path}: {e}. Skipping file."); continue
 
-            # Process each NetworkX graph in the chunk
+            # --- Process Graphs in Chunk ---
             for graph_idx_in_chunk, nx_graph in enumerate(
                     tqdm(nx_graphs_chunk, desc=f"  Graphs in {osp.basename(raw_path)}", leave=False)):
                 if not isinstance(nx_graph, nx.DiGraph):
@@ -320,26 +244,25 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
 
                 if base_pyg_data is not None:
                     successful_conversions += 1
-                    # Add the original (unaugmented) graph
-                    all_data_for_split.append(base_pyg_data.clone())
+                    all_data_for_split.append(base_pyg_data.clone()) # Add original
 
-                    # --- Apply Augmentations ---
+                    # --- Apply Augmentations (if training split) ---
                     num_actual_nodes = base_pyg_data.num_nodes.item()
+                    # Use self.num_augmentations set in __init__
                     if num_actual_nodes > 0 and self.num_augmentations > 0:
-                        try: # Wrap graph reconstruction and augmentation in try-except
-                            # Reconstruct temporary nx graph for topo sort
-                            temp_nx_graph = nx.DiGraph()
+                        try:
+                            temp_nx_graph = nx.DiGraph() # Reconstruct temp graph
                             for i in range(num_actual_nodes): temp_nx_graph.add_node(i)
                             for ch in range(NUM_EXPLICIT_EDGE_TYPES):
                                 adj_channel = base_pyg_data.adj[ch, :num_actual_nodes, :num_actual_nodes]
                                 sources, targets = adj_channel.nonzero(as_tuple=True)
                                 for src, tgt in zip(sources.tolist(), targets.tolist()):
-                                    # Adj is [Channel, Target, Source], so edge is src -> tgt
                                     temp_nx_graph.add_edge(src, tgt)
 
                             # Apply augmentations
                             for aug_idx in range(self.num_augmentations):
                                 try:
+                                    # Consistent seeding
                                     aug_seed = (pkl_file_idx * len(nx_graphs_chunk) + graph_idx_in_chunk) * (self.num_augmentations + 1) + (aug_idx + 1)
                                     local_random = random.Random(aug_seed)
                                     ordered_nodes = custom_randomized_topological_sort(temp_nx_graph, local_random)
@@ -351,24 +274,17 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                                         full_perm = np.concatenate([current_order, padding_order])
                                         full_perm_tensor = torch.from_numpy(full_perm).long()
 
-                                        # Permute features and adjacency matrix
                                         augmented_data.x = augmented_data.x[full_perm_tensor]
-                                        # Permute rows (target) then columns (source) for each channel
                                         augmented_data.adj = augmented_data.adj[:, full_perm_tensor][:, :, full_perm_tensor]
-
                                         all_data_for_split.append(augmented_data)
                                         augmentations_created += 1
-                                    else:
-                                        warnings.warn(f"Topo sort mismatch (Aug {aug_idx}, Graph {original_graphs_processed - 1}). Skipping aug.")
-                                except nx.NetworkXUnfeasible:
-                                    warnings.warn(f"Cycle detected (Aug {aug_idx}, Graph {original_graphs_processed - 1}). Skipping aug.")
-                                except Exception as e:
-                                    warnings.warn(f"Augmentation error (Aug {aug_idx}, Graph {original_graphs_processed - 1}): {e}")
+                                    else: pass # warnings.warn("Topo sort mismatch. Skipping aug.")
+                                except nx.NetworkXUnfeasible: pass # warnings.warn("Cycle detected. Skipping aug.")
+                                except Exception as e: warnings.warn(f"Augmentation error: {e}")
                         except Exception as recon_e:
-                             warnings.warn(f"Error reconstructing graph {original_graphs_processed - 1} for augmentation: {recon_e}")
+                             warnings.warn(f"Graph reconstruction error: {recon_e}")
 
-
-            del nx_graphs_chunk; gc.collect() # Clean up memory
+            del nx_graphs_chunk; gc.collect()
 
         # --- Final Logging and Saving ---
         print(f"\nFinished PKL processing and augmentation for split '{self.split}'.")
@@ -379,19 +295,18 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
 
         if not all_data_for_split:
             warnings.warn(f"No data processed for split '{self.split}'. Saving empty file.")
-            # Create empty data structure to avoid errors on load
             data, slices = self.collate([])
         else:
             data, slices = self.collate(all_data_for_split)
 
-        # Ensure processed directory exists
+        # Ensure processed directory exists before saving
+        # self.processed_dir is defined by the superclass based on the root path
         os.makedirs(self.processed_dir, exist_ok=True)
-        save_path = self.processed_paths[0]
-        torch.save((data, slices), save_path)
-        print(f"Saved processed data for split '{self.split}' to: {save_path}")
+        # self.processed_paths[0] is also defined by the superclass
+        torch.save((data, slices), self.processed_paths[0])
+        print(f"Saved processed data for split '{self.split}' to: {self.processed_paths[0]}")
 
     # get() and len() are inherited from InMemoryDataset and work correctly
-    # after self.data and self.slices are loaded/created.
 
 
 # --- Command Line Interface for Processing ---
@@ -450,19 +365,22 @@ if __name__ == "__main__":
     # This triggers the .process() method if the processed file doesn't exist
     if train_files_list:
         print(f"\n--- Initializing/Processing Training Set ({args.num_augmentations} augs/graph) ---")
+        # Pass all required args for processing
         AIGProcessedAugmentedDataset(root=args.output_root, raw_dir=args.raw_dir, split='train',
                                      file_prefix=args.file_prefix, pkl_file_names_for_split=train_files_list,
                                      dataset_name=args.dataset_name, num_augmentations=args.num_augmentations)
     if val_files_list:
         print(f"\n--- Initializing/Processing Validation Set (0 augs/graph) ---")
+        # Pass all required args for processing, but set num_augmentations=0
         AIGProcessedAugmentedDataset(root=args.output_root, raw_dir=args.raw_dir, split='val',
                                      file_prefix=args.file_prefix, pkl_file_names_for_split=val_files_list,
-                                     dataset_name=args.dataset_name, num_augmentations=0) # No augmentation for validation
+                                     dataset_name=args.dataset_name, num_augmentations=0)
     if test_files_list:
         print(f"\n--- Initializing/Processing Test Set (0 augs/graph) ---")
+        # Pass all required args for processing, but set num_augmentations=0
         AIGProcessedAugmentedDataset(root=args.output_root, raw_dir=args.raw_dir, split='test',
                                      file_prefix=args.file_prefix, pkl_file_names_for_split=test_files_list,
-                                     dataset_name=args.dataset_name, num_augmentations=0) # No augmentation for test
+                                     dataset_name=args.dataset_name, num_augmentations=0)
 
     print("\nAll specified dataset processing finished.")
     print(f"Processed data should be in subdirs under: {osp.join(args.output_root, args.dataset_name, 'processed')}")
