@@ -8,38 +8,16 @@ from collections import OrderedDict  # For robust checkpoint loading
 # Assuming GraphFlowModel is in .model submodule
 # GraphDF uses GraphFlowModel as its internal model.
 # Make sure this GraphFlowModel is the one with the updated generate_aig_discrete_raw_data
-try:
-    from .model import GraphFlowModel
-except ImportError:
-    print("Error: Could not import GraphFlowModel from .model. Ensure the file exists and is accessible.")
+from .model import GraphFlowModel
 
 
-    # Define a placeholder if needed for linting/type checking, but generation will fail
-    class GraphFlowModel(nn.Module):
-        def __init__(self, *args, **kwargs): super().__init__(); raise NotImplementedError(
-            "GraphFlowModel placeholder used.")
+# Adjust this import path based on your actual project structure
+import aig_config
 
-        def forward(self, *args, **kwargs): raise NotImplementedError("GraphFlowModel placeholder used.")
+AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
+AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
+print("Successfully imported AIG type keys from G2PT.configs.aig_config")
 
-        def generate_aig_discrete_raw_data(self, *args, **kwargs): raise NotImplementedError(
-            "GraphFlowModel placeholder used.")
-
-        def dis_log_prob(self, *args, **kwargs): raise NotImplementedError("GraphFlowModel placeholder used.")
-
-# from .train_utils import adjust_learning_rate, DataIterator # Keep if other tasks are used
-
-# Try to import aig_config for type strings, handle if not found.
-try:
-    # Adjust this import path based on your actual project structure
-    from ..G2PT.configs.aig import aig_config
-
-    AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
-    AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
-    print("Successfully imported AIG type keys from G2PT.configs.aig_config")
-except ImportError:
-    print("Warning: G2PT.configs.aig_config not found. Using default AIG type keys.")
-    AIG_NODE_TYPE_KEYS = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO']  # Default
-    AIG_EDGE_TYPE_KEYS = ['EDGE_REG', 'EDGE_INV']  # Default
 
 
 class Generator():

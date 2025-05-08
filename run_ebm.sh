@@ -32,7 +32,7 @@ NUM_SAMPLES=1000
 NUM_MIN_NODES=5 # Minimum nodes for generated graphs
 CKPT_SAVE_DIR="${MODEL_NAME}/rand_gen_aig_ckpts" # Must match train_graphs.py logic
 # Construct expected final checkpoint path
-FINAL_CKPT_PATH="${CKPT_SAVE_DIR}/epoch_${MAX_EPOCHS}.pt"
+FINAL_CKPT_PATH="${CKPT_SAVE_DIR}/epoch_30.pt"
 GEN_OUTPUT_PKL="${MODEL_NAME}_generated_aigs_${NUM_SAMPLES}.pkl"
 
 # --- End Configuration ---
@@ -68,29 +68,29 @@ check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
 # --- End Setup ---
 
-
-# === STEP 1: Training ===
-echo "--- Starting Step 1: Training ${MODEL_NAME} ---"
-srun python -u train_graphs.py \
-    --model_type ${MODEL_NAME} \
-    --device ${REQUESTED_DEVICE} \
-    --data_root ${DATA_ROOT} \
-    --lr ${LR} \
-    --ebm_alpha ${EBM_ALPHA} \
-    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
-    --ebm_ld_noise ${EBM_LD_NOISE} \
-    --ebm_ld_step ${EBM_LD_STEP} \
-    --ebm_c ${EBM_C} \
-    ${EBM_CLAMP_LGD_GRAD} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --batch_size ${BATCH_SIZE} \
-    --max_epochs ${MAX_EPOCHS} \
-    --save_interval ${SAVE_INTERVAL} \
-    --grad_clip_value ${GRAD_CLIP_VALUE} \
-    `# Add other necessary args for train_graphs.py if needed (e.g., --ebm_hidden)`
-
-check_exit_code $? "Training"
-echo "--- Finished Step 1: Training ---"
+#
+## === STEP 1: Training ===
+#echo "--- Starting Step 1: Training ${MODEL_NAME} ---"
+#srun python -u train_graphs.py \
+#    --model_type ${MODEL_NAME} \
+#    --device ${REQUESTED_DEVICE} \
+#    --data_root ${DATA_ROOT} \
+#    --lr ${LR} \
+#    --ebm_alpha ${EBM_ALPHA} \
+#    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
+#    --ebm_ld_noise ${EBM_LD_NOISE} \
+#    --ebm_ld_step ${EBM_LD_STEP} \
+#    --ebm_c ${EBM_C} \
+#    ${EBM_CLAMP_LGD_GRAD} \
+#    --weight_decay ${WEIGHT_DECAY} \
+#    --batch_size ${BATCH_SIZE} \
+#    --max_epochs ${MAX_EPOCHS} \
+#    --save_interval ${SAVE_INTERVAL} \
+#    --grad_clip_value ${GRAD_CLIP_VALUE} \
+#    `# Add other necessary args for train_graphs.py if needed (e.g., --ebm_hidden)`
+#
+#check_exit_code $? "Training"
+#echo "--- Finished Step 1: Training ---"
 
 
 # === STEP 2: Generation ===

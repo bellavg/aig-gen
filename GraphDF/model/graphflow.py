@@ -14,16 +14,12 @@ except ImportError:
         def forward(self, *args, **kwargs): raise NotImplementedError("DisGraphAF placeholder used.")
         def reverse(self, *args, **kwargs): raise NotImplementedError("DisGraphAF placeholder used.")
 
-# Attempt to import AIG config for node/edge type keys
-try:
-    from G2PT.configs import aig as aig_config
-    AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
-    AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS # REG, INV
-    print("Successfully imported AIG type keys from G2PT.configs.aig for GraphFlowModel.")
-except ImportError:
-    print("Warning (GraphFlowModel): G2PT.configs.aig not found. Using default AIG type keys.")
-    AIG_NODE_TYPE_KEYS = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO']  # Default
-    AIG_EDGE_TYPE_KEYS = ['EDGE_REG', 'EDGE_INV']  # Default
+
+import GraphDF.model.aig_config as aig_config
+AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
+AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS # REG, INV
+print("Successfully imported AIG type keys from G2PT.configs.aig for GraphFlowModel.")
+
 
 
 class GraphFlowModel(nn.Module):

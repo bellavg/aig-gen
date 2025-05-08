@@ -5,6 +5,68 @@ import os.path as osp
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.data.separate import separate
 
+
+# Add this function to GraphDF/aig_dataset.py
+import random
+from collections import deque
+import networkx as nx
+import numpy as np
+import torch
+import warnings
+
+def custom_randomized_topological_sort(G, random_generator):
+    """
+    Performs a topological sort, randomizing the order of nodes
+    that have the same in-degree at each step.
+    Uses the provided random_generator instance.
+    Raises NetworkXUnfeasible if a cycle is detected.
+    """
+    if not G.is_directed():
+        raise nx.NetworkXError("Topological sort not defined for undirected graphs.")
+
+    in_degree_map = {node: degree for node, degree in G.in_degree()}
+    # Nodes with in-degree 0 are the starting points
+    zero_in_degree_nodes = [node for node, degree in in_degree_map.items() if degree == 0]
+
+    # Shuffle the initial zero-degree nodes if augmentation is desired
+    if len(zero_in_degree_nodes) > 1:
+        random_generator.shuffle(zero_in_degree_nodes) # Use the passed generator
+
+    queue = deque(zero_in_degree_nodes)
+    result_order = []
+
+    while queue:
+        u = queue.popleft()
+        result_order.append(u)
+
+        # Find successors whose in-degree will become zero
+        newly_zero_in_degree = []
+        # Sort successors for deterministic iteration before potential shuffle
+        for v in sorted(list(G.successors(u))):
+            in_degree_map[v] -= 1
+            if in_degree_map[v] == 0:
+                newly_zero_in_degree.append(v)
+            elif in_degree_map[v] < 0:
+                # This indicates an issue in the graph structure or algorithm
+                raise RuntimeError(f"In-degree became negative for node {v} during topological sort.")
+
+        # Shuffle the newly zero-in-degree nodes for augmentation
+        if len(newly_zero_in_degree) > 1:
+            random_generator.shuffle(newly_zero_in_degree) # Use the passed generator
+
+        # Add newly discovered zero-in-degree nodes to the queue
+        for node in newly_zero_in_degree:
+            queue.append(node)
+
+    # Check if all nodes were included (if not, there's a cycle)
+    if len(result_order) != G.number_of_nodes():
+        # Raise the specific error NetworkX uses for cycles in topological sort
+        raise nx.NetworkXUnfeasible(f"Graph contains a cycle. Topological sort cannot proceed.")
+
+    return result_order
+
+
+
 class AIGDatasetLoader(InMemoryDataset):
     """
     Loads pre-processed AIG data saved in the InMemoryDataset format
@@ -114,3 +176,88 @@ class AIGDatasetLoader(InMemoryDataset):
                           return len(value) - 1 # Assuming slices are stored per attribute
         return 0
 
+
+# Add this class to GraphDF/aig_dataset.py
+from torch.utils.data import Dataset # Add this import if not already present
+
+class AugmentedAIGDataset(Dataset):
+    """
+    A wrapper dataset that applies randomized topological sort augmentation
+    to data loaded by AIGDatasetLoader.
+    """
+    def __init__(self, base_dataset: AIGDatasetLoader, num_augmentations: int = 1):
+        super().__init__()
+        if not isinstance(base_dataset, AIGDatasetLoader):
+            raise TypeError("base_dataset must be an instance of AIGDatasetLoader")
+        self.base_dataset = base_dataset
+        self.num_augmentations = max(1, num_augmentations)
+        self.original_len = len(self.base_dataset)
+        # Inherit max_nodes from the base dataset if needed
+        self.max_nodes = getattr(base_dataset, 'max_nodes', 64) # Default to 64 if not found
+        print(f"Created AugmentedAIGDataset wrapper with {self.num_augmentations} augmentations per graph.")
+        print(f"Original dataset length: {self.original_len}, Augmented length: {self.__len__()}")
+
+    def __len__(self):
+        # Return the augmented length
+        return self.original_len * self.num_augmentations
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= self.__len__():
+            raise IndexError(f"Index {idx} out of bounds for augmented dataset size {self.__len__()}")
+
+        # Determine the original graph index and the augmentation seed
+        graph_idx = idx // self.num_augmentations
+        aug_seed = idx # Use the overall index as the seed for simplicity, or idx % self.num_augmentations
+
+        # Create a local random generator for this specific augmentation
+        local_random = random.Random(aug_seed)
+
+        # Get the base data object using the original graph index
+        try:
+            data = self.base_dataset.get(graph_idx)
+        except Exception as e:
+             warnings.warn(f"Error getting base data for graph index {graph_idx} (from augmented index {idx}): {e}. Returning empty data.")
+             # Return an empty Data object or handle appropriately
+             return Data(x=torch.empty((0, self.base_dataset.data.x.size(-1))), # Match feature dim
+                         adj=torch.empty((self.base_dataset.data.adj.size(0), 0, 0)), # Match adj channels
+                         num_atom=torch.tensor(0, dtype=torch.long))
+
+
+        num_actual_nodes = data.num_atom.item()
+        apply_ordering = False
+        ordered_nodes = []
+
+        if num_actual_nodes > 0:
+            try:
+                # Reconstruct NetworkX graph
+                adj_actual_sparse = data.adj[:2, :num_actual_nodes, :num_actual_nodes].sum(dim=0) > 0
+                adj_actual_np = adj_actual_sparse.cpu().numpy()
+                G_actual = nx.from_numpy_array(adj_actual_np, create_using=nx.DiGraph)
+
+                # Apply YOUR custom randomized topological sort
+                ordered_nodes = custom_randomized_topological_sort(G_actual, local_random)
+                apply_ordering = True
+
+            except nx.NetworkXUnfeasible:
+                warnings.warn(f"Graph index {graph_idx} (aug idx {idx}) contains a cycle. Topological sort not possible. Returning original order.")
+                # Do not set apply_ordering = True
+            except Exception as e:
+                warnings.warn(f"Error during graph reconstruction or custom topological sort for graph index {graph_idx} (aug idx {idx}): {e}. Returning original order.")
+                # Do not set apply_ordering = True
+
+            # Apply permutation ONLY if sort succeeded
+            if apply_ordering:
+                if len(ordered_nodes) != num_actual_nodes:
+                     warnings.warn(f"Custom topological sort produced {len(ordered_nodes)} nodes, expected {num_actual_nodes}. Using original order.")
+                else:
+                    current_order = np.array(ordered_nodes)
+                    padding_order = np.arange(num_actual_nodes, self.max_nodes)
+                    full_perm = np.concatenate([current_order, padding_order])
+                    full_perm_tensor = torch.from_numpy(full_perm).long()
+
+                    # Apply permutation to x and adj tensors
+                    data.x = data.x[full_perm_tensor]
+                    data.adj = data.adj[:, full_perm_tensor][:, :, full_perm_tensor]
+
+        # Return the (potentially) reordered data object
+        return data

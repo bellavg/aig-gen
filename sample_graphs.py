@@ -61,15 +61,11 @@ conf = {
 # --- End Hardcoded Configuration ---
 
 # --- Define AIG Node Types based on config ---
-try:
-    from G2PT.configs import aig_config
-    AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
-    AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
-    print("Successfully imported AIG type keys from G2PT.configs.aig_config")
-except ImportError:
-    print("Warning: G2PT.configs.aig_config not found. Using default AIG type keys.")
-    AIG_NODE_TYPE_KEYS = ['NODE_CONST0', 'NODE_PI', 'NODE_AND', 'NODE_PO']
-    AIG_EDGE_TYPE_KEYS = ['EDGE_REG', 'EDGE_INV']
+from data import aig_config as aig_config
+AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
+AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
+print("Successfully imported AIG type keys from G2PT.configs.aig_config")
+
 
 if len(AIG_NODE_TYPE_KEYS) != conf['model']['node_dim']:
     raise ValueError(f"Mismatch: AIG_NODE_TYPE_KEYS len ({len(AIG_NODE_TYPE_KEYS)}) vs node_dim ({conf['model']['node_dim']})")
