@@ -60,11 +60,7 @@ base_conf = {
         "clamp_lgd_grad": True, "alpha": 1.0
     }
 }
-
-
 # --- End Base Configuration ---
-
-# REMOVED: allocate_raw_files function is no longer needed
 
 def main(args):
     conf = base_conf.copy()
@@ -115,52 +111,14 @@ def main(args):
         print("Using CPU.")
     conf['model']['use_gpu'] = (device.type == 'cuda')
 
-    # --- Direct torch.load Test (add this section) ---
-    print(f"\n--- Direct torch.load Test (before AIGPreprocessedDatasetLoader) ---")
-    # Path as confirmed by your investigation script and error messages:
-    direct_path_to_pt_file = "/gpfs/home6/igardner1/aig-gen/data/aigs_pyg/aig/processed/train_processed_data.pt"
-
-    print(f"Attempting to load: {direct_path_to_pt_file}")
-
-    if osp.exists(direct_path_to_pt_file):
-        print(f"File exists at '{direct_path_to_pt_file}'. Attempting torch.load...")
-        try:
-            # InMemoryDataset saves a tuple: (data, slices)
-            # weights_only=False is important if it contains Tensors and not just state_dict
-            loaded_data_tuple = torch.load(direct_path_to_pt_file, map_location='cpu', weights_only=False)
-            print(f"Successfully loaded with torch.load!")
-            if isinstance(loaded_data_tuple, tuple) and len(loaded_data_tuple) == 2:
-                print(f"Loaded data is a tuple of length 2 (expected for InMemoryDataset: data, slices).")
-                # You can add more checks here if you know the structure, e.g.:
-                # print(f"Type of first element (data): {type(loaded_data_tuple[0])}")
-                # print(f"Type of second element (slices): {type(loaded_data_tuple[1])}")
-            else:
-                print(f"Warning: Loaded data is not a tuple of length 2. Type: {type(loaded_data_tuple)}")
-            # To prevent holding large data in memory if not needed for this test, you can delete it
-            del loaded_data_tuple
-        except Exception as e_torch_load:
-            print(f"!!! torch.load FAILED for '{direct_path_to_pt_file}' !!!")
-            print(f"Error type: {type(e_torch_load).__name__}")
-            print(f"Error message: {e_torch_load}")
-            print(f"This suggests the .pt file might be corrupted or not in the expected format for torch.load.")
-            # Optionally, re-raise the error if you want the script to stop here on failure
-            # raise # Uncomment to stop if torch.load fails
-    else:
-        print(
-            f"File NOT FOUND at '{direct_path_to_pt_file}' according to osp.exists. This contradicts the investigation script!")
-    print(f"--- End Direct torch.load Test ---\n")
-    # --- End Direct torch.load Test ---
-
     # --- Dataset Loading (Training Only for this script example) ---
     print(f"\nLoading pre-processed dataset from root: {args.data_root}, name: {args.dataset_name}")
     try:
         print("Instantiating AIGPreprocessedDatasetLoader for Training...")
-        # MODIFIED: Call to dataset constructor with fewer arguments
         train_dataset = AIGPreprocessedDatasetLoader(
             root=args.data_root,
             dataset_name=args.dataset_name,
             split="train"
-            # num_augmentations is no longer relevant for this loader
         )
         print(f"Total training samples available: {len(train_dataset)}")
         if len(train_dataset) == 0:
