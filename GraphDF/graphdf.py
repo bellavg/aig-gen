@@ -12,8 +12,10 @@ from .model import GraphFlowModel
 
 
 # Adjust this import path based on your actual project structure
-from . import aig_config
-
+try:
+    from . import aig_config
+except:
+    import aig_config
 
 AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
 AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS

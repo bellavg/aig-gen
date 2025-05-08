@@ -27,7 +27,7 @@ except ImportError:
      except ImportError:
          # If relative also fails, try assuming it's in the same directory (less common)
          try:
-             import aig_config
+             import G2PT.configs.aig as aig_config
          except ImportError as e:
               print(f"CRITICAL ERROR: Could not import aig_config. Please ensure aig_config.py is accessible.")
               print(f"Import error details: {e}")

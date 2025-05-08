@@ -6,7 +6,7 @@ import warnings
 import os.path as osp
 import pickle
 import networkx as nx
-from collections import OrderedDict  # Added for robust checkpoint loading
+from collections import OrderedDict
 
 # --- Assume necessary model classes are importable ---
 try:
@@ -19,58 +19,75 @@ except ImportError as e:
     exit(1)
 # --- End Imports ---
 
+# --- Import AIG Config ---
+# Need this for node/edge type keys used in conversion helper
+try:
+    import data.aig_config
+except ImportError:
+    import G2PT.configs.aig as aig_config
 
-# --- Hardcoded Configuration Dictionary (Base for Model Config) ---
-# Contains model architecture details needed for instantiation.
-# Generation parameters will be taken from command-line args.
-conf = {
-    "data_name": "aig",
-    "model": {
-        "max_size": 64,
-        "node_dim": 4,
-        "bond_dim": 3, # For EBM, this is n_edge_type (e.g., REG, INV, VIRTUAL)
-        "use_gpu": True,
+if aig_config:
+    AIG_NODE_TYPE_KEYS = getattr(aig_config, 'NODE_TYPE_KEYS', ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"])
+    AIG_EDGE_TYPE_KEYS = getattr(aig_config, 'EDGE_TYPE_KEYS', ["EDGE_REG", "EDGE_INV"])
+else:
+    AIG_NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
+    AIG_EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+# --- End AIG Config Import ---
 
-        # GraphDF/GraphAF specific parameters
-        "edge_unroll": 12,
-        "num_flow_layer": 12,
-        "num_rgcn_layer": 3,
-        "nhid": 128,
-        "nout": 128,
-        "deq_coeff": 0.9,
-        "st_type": "exp",
-    },
-    "model_ebm": { # GraphEBM specific model parameters (defaults if not passed via args)
-        "hidden": 64,
-        "depth": 2,
-        "swish_act": True,
-        "add_self": False,
-        "dropout": 0.0,
-        "n_power_iterations": 1
-    },
-    # Training parameters below are NOT used for generation but kept for structure/defaults
-    "train_ebm": {
-        "c": 0.0,
-        "ld_step": 150,
-        "ld_noise": 0.005,
-        "ld_step_size": 30,
-        "clamp_lgd_grad": True, # Note: name changed here to match EBM class
-        "alpha": 1.0
-    },
+
+# --- Base Model Configuration Dictionary (Defaults for model instantiation) ---
+# These should ideally match the defaults used in training if not overridden by args
+# Crucially, edge_unroll MUST match the trained model.
+base_model_conf = {
+    "max_size": 64,
+    "node_dim": 4,
+    "bond_dim": 3,
+    "use_gpu": True, # Will be determined by args.device
+    "edge_unroll": 12, # *** Default, MUST be overridden by args to match training ***
+    "num_flow_layer": 12,
+    "num_rgcn_layer": 3,
+    "nhid": 128,
+    "nout": 128,
+    "deq_coeff": 0.9,
+    "st_type": "exp",
+    "use_df": False # Set specifically for GraphDF if needed
 }
-# --- End Hardcoded Configuration ---
+base_model_ebm_conf = {
+    "hidden": 64, "depth": 2, "swish_act": True, "add_self": False,
+    "dropout": 0.0, "n_power_iterations": 1
+}
+# --- End Base Configuration ---
 
-# --- Define AIG Node Types based on config ---
-from data import aig_config as aig_config
-AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
-AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
-print("Successfully imported AIG type keys from G2PT.configs.aig_config")
+# --- Helper function to convert raw generated data to NetworkX ---
+# (Copied from GraphDF/graphdf.py - ensure consistency or import)
+def _convert_raw_to_aig_digraph(node_features_one_hot, typed_edges_list,
+                                num_actual_nodes, aig_node_type_strings, aig_edge_type_strings):
+    """ Converts raw discrete model output to a NetworkX DiGraph for AIGs. """
+    graph = nx.DiGraph()
+    node_features = node_features_one_hot.cpu().detach()
+    for i in range(num_actual_nodes):
+        try:
+            if node_features[i].sum() == 0:
+                node_type_label = "UNKNOWN_NODE_TYPE"
+                warnings.warn(f"Node {i} has all-zero feature vector during conversion.")
+            else:
+                node_type_idx = torch.argmax(node_features[i]).item()
+                node_type_label = aig_node_type_strings[node_type_idx] if 0 <= node_type_idx < len(aig_node_type_strings) else "UNKNOWN_NODE_TYPE"
+            graph.add_node(i, type=node_type_label)
+        except Exception as e:
+            warnings.warn(f"Error processing node {i} during conversion: {e}")
+            return None
 
-
-if len(AIG_NODE_TYPE_KEYS) != conf['model']['node_dim']:
-    raise ValueError(f"Mismatch: AIG_NODE_TYPE_KEYS len ({len(AIG_NODE_TYPE_KEYS)}) vs node_dim ({conf['model']['node_dim']})")
-if len(AIG_EDGE_TYPE_KEYS) != 2:
-    print(f"Warning: Expected 2 AIG_EDGE_TYPE_KEYS (REG, INV), found {len(AIG_EDGE_TYPE_KEYS)}")
+    for u, v, edge_type_idx in typed_edges_list:
+        if u < num_actual_nodes and v < num_actual_nodes:
+            if 0 <= edge_type_idx < len(aig_edge_type_strings):
+                edge_type_label = aig_edge_type_strings[edge_type_idx]
+                graph.add_edge(u, v, type=edge_type_label)
+            else:
+                warnings.warn(f"Edge ({u}->{v}) has unexpected edge_type_idx {edge_type_idx}. Adding untyped.")
+                graph.add_edge(u, v)
+    return graph
+# --- End Helper ---
 
 
 def main(args):
@@ -84,8 +101,33 @@ def main(args):
     else:
         device = torch.device('cpu')
         print("Using CPU.")
-    conf['model']['use_gpu'] = (device.type == 'cuda')
+    use_gpu = (device.type == 'cuda')
     # --- End Device Setup ---
+
+    # --- Prepare Model Configuration ---
+    # Start with base config and update with critical args
+    model_conf = base_model_conf.copy()
+    model_conf['use_gpu'] = use_gpu
+    # *** Crucial: Use edge_unroll from args ***
+    model_conf['edge_unroll'] = args.edge_unroll
+    # Update other relevant params if provided via args (optional, but good practice)
+    model_conf['max_size'] = getattr(args, 'max_size', model_conf['max_size'])
+    model_conf['node_dim'] = getattr(args, 'node_dim', model_conf['node_dim'])
+    model_conf['bond_dim'] = getattr(args, 'bond_dim', model_conf['bond_dim'])
+    model_conf['num_flow_layer'] = getattr(args, 'num_flow_layer', model_conf['num_flow_layer'])
+    model_conf['num_rgcn_layer'] = getattr(args, 'num_rgcn_layer', model_conf['num_rgcn_layer'])
+    model_conf['nhid'] = getattr(args, 'gaf_nhid', model_conf['nhid'])
+    model_conf['nout'] = getattr(args, 'gaf_nout', model_conf['nout'])
+    if args.model == 'GraphDF': model_conf['use_df'] = True
+
+    # Prepare EBM specific model config if needed
+    model_ebm_conf = base_model_ebm_conf.copy()
+    model_ebm_conf['hidden'] = getattr(args, 'ebm_hidden', model_ebm_conf['hidden'])
+    model_ebm_conf['depth'] = getattr(args, 'ebm_depth', model_ebm_conf['depth'])
+    model_ebm_conf['swish_act'] = getattr(args, 'ebm_swish_act', model_ebm_conf['swish_act'])
+    model_ebm_conf['add_self'] = getattr(args, 'ebm_add_self', model_ebm_conf['add_self'])
+    model_ebm_conf['dropout'] = getattr(args, 'ebm_dropout', model_ebm_conf['dropout'])
+    model_ebm_conf['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations', model_ebm_conf['n_power_iterations'])
 
     # --- Instantiate Model Runner ---
     print(f"Instantiating model runner for: {args.model}")
@@ -96,25 +138,13 @@ def main(args):
         runner = GraphAF()
     elif args.model == 'GraphEBM':
         try:
-            # Use defaults from conf, but allow override if specific EBM model args were added to parser
+            # Pass combined config to EBM
             runner = GraphEBM(
-                n_atom=conf['model']['max_size'],
-                n_atom_type=conf['model']['node_dim'],
-                n_edge_type=conf['model']['bond_dim'],
-                hidden=getattr(args, 'ebm_hidden', conf['model_ebm']['hidden']), # Example: allow override
-                depth=getattr(args, 'ebm_depth', conf['model_ebm']['depth']),
-                swish_act=getattr(args, 'ebm_swish_act', conf['model_ebm']['swish_act']),
-                add_self=getattr(args, 'ebm_add_self', conf['model_ebm']['add_self']),
-                dropout=getattr(args, 'ebm_dropout', conf['model_ebm']['dropout']),
-                n_power_iterations=getattr(args, 'ebm_n_power_iterations', conf['model_ebm']['n_power_iterations']),
-                device=device
+                n_atom=model_conf['max_size'], n_atom_type=model_conf['node_dim'],
+                n_edge_type=model_conf['bond_dim'], **model_ebm_conf, device=device
             )
-        except ImportError: print("Error: GraphEBM class not found."); exit(1)
-        except KeyError as e: print(f"Error: Missing param {e} for GraphEBM init."); exit(1)
         except Exception as e: print(f"Error instantiating GraphEBM: {e}"); exit(1)
-    else:
-        print(f"Error: Unknown model type '{args.model}'."); exit(1)
-
+    else: print(f"Error: Unknown model type '{args.model}'."); exit(1)
     if runner is None: print(f"Failed to instantiate runner for {args.model}"); exit(1)
     # --- End Model Instantiation ---
 
@@ -124,59 +154,69 @@ def main(args):
         os.makedirs(output_dir, exist_ok=True); print(f"Created output directory: {output_dir}")
 
     # --- Prepare Generation Arguments ---
+    # Arguments common to all runners' run_rand_gen (or similar method)
     generation_args = {
         "checkpoint_path": args.checkpoint,
-        "output_pickle_path": args.output_file # Common arg
+        "output_pickle_path": args.output_file
     }
 
-    # Add model-specific arguments
-    if args.model == 'GraphDF':
-        generation_args["model_conf_dict"] = conf['model']
+    # Add model-specific arguments based on the runner type
+    if isinstance(runner, (GraphDF, GraphAF)):
+        generation_args["model_conf_dict"] = model_conf # Pass the updated conf
         generation_args["num_samples"] = args.num_samples
         generation_args["num_min_nodes"] = args.min_nodes
-        generation_args["temperature"] = args.temperature_df
+        # Pass the correct temperature argument based on model type
+        generation_args["temperature"] = args.temperature_df if args.model == 'GraphDF' else args.temperature_af
         generation_args["aig_node_type_strings"] = AIG_NODE_TYPE_KEYS
-    elif args.model == 'GraphAF':
-        generation_args["model_conf_dict"] = conf['model']
-        generation_args["num_samples"] = args.num_samples
-        generation_args["num_min_nodes"] = args.min_nodes
-        generation_args["temperature"] = args.temperature_af
-        generation_args["aig_node_type_strings"] = AIG_NODE_TYPE_KEYS
-    elif args.model == 'GraphEBM':
+        # Add aig_edge_type_strings if _convert_raw_to_aig_digraph is used internally
+        # generation_args["aig_edge_type_strings"] = AIG_EDGE_TYPE_KEYS
+    elif isinstance(runner, GraphEBM):
         # Args specific to GraphEBM's run_rand_gen
         generation_args["n_samples"] = args.num_samples # Correct key name
         generation_args["c"] = args.ebm_c
         generation_args["ld_step"] = args.ebm_ld_step
         generation_args["ld_noise"] = args.ebm_ld_noise
         generation_args["ld_step_size"] = args.ebm_ld_step_size
-        generation_args["clamp_lgd_grad"] = args.ebm_clamp_lgd_grad # Correct key name
-        generation_args["num_min_nodes"] = args.min_nodes # Pass min_nodes
-        generation_args["aig_node_type_strings"] = AIG_NODE_TYPE_KEYS # Pass node types
+        generation_args["clamp_lgd_grad"] = args.ebm_clamp_lgd_grad
+        generation_args["num_min_nodes"] = args.min_nodes
+        generation_args["aig_node_type_strings"] = AIG_NODE_TYPE_KEYS
+        # Add aig_edge_type_strings if needed by EBM's conversion logic
+        # generation_args["aig_edge_type_strings"] = AIG_EDGE_TYPE_KEYS
 
     # --- Run Generation ---
     try:
         print(f"Calling run_rand_gen for {args.model}...")
         # print(f"Arguments: {generation_args}") # Uncomment for debugging
 
-        # Ensure the runner has the method
         if not hasattr(runner, 'run_rand_gen'):
              raise NotImplementedError(f"{args.model} class does not have a 'run_rand_gen' method.")
 
+        # ** Crucially, the runner's get_model method (called within run_rand_gen or explicitly before)
+        # ** MUST use the model_conf (including the correct edge_unroll) passed here.
+        # ** We assume GraphDF/GraphAF/GraphEBM's run_rand_gen handles model loading/instantiation correctly.
         generated_graphs = runner.run_rand_gen(**generation_args)
 
         print(f"\nGeneration finished for {args.model}.")
         if generated_graphs is not None and hasattr(generated_graphs, '__len__'):
             print(f"Number of graphs returned by run_rand_gen: {len(generated_graphs)}")
-            # Note: The graphs should already be saved to the pickle file by run_rand_gen
+            # Verify the output file was actually created by run_rand_gen
+            if not osp.exists(args.output_file):
+                 print(f"Warning: Generation finished but output file '{args.output_file}' was not found.")
+                 # Optionally save the returned graphs if the method didn't save them
+                 # try:
+                 #     with open(args.output_file, 'wb') as f: pickle.dump(generated_graphs, f)
+                 #     print(f"Saved returned graphs to {args.output_file}")
+                 # except Exception as save_e: print(f"Error saving returned graphs: {save_e}")
+            else:
+                 print(f"Generated graphs should be saved in: {args.output_file}")
         else:
             print("Generation method did not return a list of graphs or returned None.")
 
     except NotImplementedError as nie: print(f"\nError: Method not implemented: {nie}")
     except FileNotFoundError as fnf: print(f"\nError: Checkpoint file not found: {fnf}"); print(f"Looked for: {args.checkpoint}")
     except TypeError as te:
-        print(f"\nTypeError during generation with {args.model}. Check argument names and types.")
+        print(f"\nTypeError during generation with {args.model}. Check argument names/types for run_rand_gen.")
         print(f"Arguments passed: {list(generation_args.keys())}")
-        print(f"Expected signature likely mismatching for {args.model}.run_rand_gen.")
         print(f"Error Details: {te}")
         import traceback; traceback.print_exc()
     except Exception as e:
@@ -186,48 +226,38 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate AIG graphs using trained models.")
-    parser.add_argument('--model', type=str, required=True,
-                        choices=['GraphDF', 'GraphAF', 'GraphEBM'],
-                        help='Model type to use for generation.')
-    parser.add_argument('--checkpoint', type=str, required=True,
-                        help='Path to the trained model checkpoint.')
-    parser.add_argument('--num_samples', type=int, default=1000, # Changed default to 1000
-                        help='Number of AIG samples to generate.')
-    parser.add_argument('--output_file', type=str, default="generated_aigs.pkl",
-                        help='Path to save the generated AIGs pickle file.')
-    parser.add_argument('--min_nodes', type=int, default=5,
-                        help='Minimum number of actual nodes for generated graphs.')
-    parser.add_argument('--device', type=str, default='cpu', choices=['cuda', 'cpu'],
-                        help='Device for generation.')
+    parser.add_argument('--model', type=str, required=True, choices=['GraphDF', 'GraphAF', 'GraphEBM'], help='Model type.')
+    parser.add_argument('--checkpoint', type=str, required=True, help='Path to the trained model checkpoint.')
+    parser.add_argument('--num_samples', type=int, default=1000, help='Number of AIG samples.')
+    parser.add_argument('--output_file', type=str, default="generated_aigs.pkl", help='Output pickle file path.')
+    parser.add_argument('--min_nodes', type=int, default=5, help='Minimum number of actual nodes.')
+    parser.add_argument('--device', type=str, default='cpu', choices=['cuda', 'cpu'], help='Device for generation.')
+
+    # --- Model Architecture Args (Crucial for loading checkpoint correctly) ---
+    parser.add_argument('--edge_unroll', type=int, default=base_model_conf['edge_unroll'],
+                        help='Max look-back distance used during TRAINING.') # Clarify help text
+    # Add others if needed, although checkpoint should ideally contain enough info
+    parser.add_argument('--max_size', type=int, default=base_model_conf['max_size'])
+    parser.add_argument('--node_dim', type=int, default=base_model_conf['node_dim'])
+    parser.add_argument('--bond_dim', type=int, default=base_model_conf['bond_dim'])
+    parser.add_argument('--num_flow_layer', type=int, default=base_model_conf['num_flow_layer'])
+    parser.add_argument('--num_rgcn_layer', type=int, default=base_model_conf['num_rgcn_layer'])
+    parser.add_argument('--gaf_nhid', type=int, default=base_model_conf['nhid'])
+    parser.add_argument('--gaf_nout', type=int, default=base_model_conf['nout'])
+    # Add EBM architecture args if they aren't saved/loaded via checkpoint
+    parser.add_argument('--ebm_hidden', type=int, default=base_model_ebm_conf['hidden'])
+    parser.add_argument('--ebm_depth', type=int, default=base_model_ebm_conf['depth'])
+    # ... add other EBM architecture params if needed ...
+
 
     # --- Model Specific Generation Args ---
-    # GraphDF
-    parser.add_argument('--temperature_df', type=float, nargs=2, default=[0.6, 0.6],
-                        help='Temperature [node, edge] (for GraphDF).')
-    # GraphAF
-    parser.add_argument('--temperature_af', type=float, default=0.75,
-                        help='Temperature (for GraphAF).')
-    # GraphEBM
-    parser.add_argument('--ebm_c', type=float, default=conf['train_ebm']['c'],
-                        help='Dequantization scaling factor (for GraphEBM generation).')
-    parser.add_argument('--ebm_ld_step', type=int, default=conf['train_ebm']['ld_step'],
-                        help='Langevin dynamics steps (for GraphEBM generation).')
-    parser.add_argument('--ebm_ld_noise', type=float, default=conf['train_ebm']['ld_noise'],
-                        help='Langevin dynamics noise level (for GraphEBM generation).')
-    parser.add_argument('--ebm_ld_step_size', type=float, default=conf['train_ebm']['ld_step_size'],
-                        help='Langevin dynamics step size (for GraphEBM generation).')
-    # Corrected argument name and help text to match GraphEBM.py
-    parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
-                        default=conf['train_ebm']['clamp_lgd_grad'],
-                        help='Enable/disable LGD gradient clamping (for GraphEBM generation).')
-    # Add parser arguments for EBM model structure if needed for instantiation override
-    parser.add_argument('--ebm_hidden', type=int, default=conf['model_ebm']['hidden'])
-    parser.add_argument('--ebm_depth', type=int, default=conf['model_ebm']['depth'])
-    parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction, default=conf['model_ebm']['swish_act'])
-    parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction, default=conf['model_ebm']['add_self'])
-    parser.add_argument('--ebm_dropout', type=float, default=conf['model_ebm']['dropout'])
-    parser.add_argument('--ebm_n_power_iterations', type=int, default=conf['model_ebm']['n_power_iterations'])
-
+    parser.add_argument('--temperature_df', type=float, nargs=2, default=[0.7, 0.7], help='Temp [node, edge] (GraphDF).') # Updated default
+    parser.add_argument('--temperature_af', type=float, default=0.75, help='Temperature (GraphAF).')
+    parser.add_argument('--ebm_c', type=float, default=0.0, help='Dequantization scaling (GraphEBM).') # Use EBM defaults
+    parser.add_argument('--ebm_ld_step', type=int, default=150, help='Langevin steps (GraphEBM).')
+    parser.add_argument('--ebm_ld_noise', type=float, default=0.005, help='Langevin noise (GraphEBM).')
+    parser.add_argument('--ebm_ld_step_size', type=float, default=30, help='Langevin step size (GraphEBM).')
+    parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction, default=True, help='Clamp LGD grad (GraphEBM).')
 
     args = parser.parse_args()
     main(args)

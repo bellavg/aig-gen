@@ -1,105 +1,177 @@
-#TODO change to do it from networkx graph
-
-# analyze_aig_degrees.py
+#!/usr/bin/env python3
 import os
-import torch
+import pickle  # Changed from torch
 import warnings
 import os.path as osp
 import numpy as np
 from collections import defaultdict
 import argparse
 from tqdm import tqdm
-
+import networkx as nx  # For loading nx.DiGraph from PKL
+from typing import List
 # --- Assumed Imports (Make sure these work in your environment) ---
 try:
-    # Import only the base loader, not the augmented one for analysis
-    from aig_dataset import AIGDatasetLoader
     # Import config to get node type keys/indices
+    # This assumes aig_config.py is in the same directory or accessible in PYTHONPATH
     import aig_config
 except ImportError as e:
-    print(f"Error importing necessary modules: {e}")
-    print("Please ensure aig_dataset.py and aig_config.py are accessible.")
-    exit(1)
+    # Try a relative import if this script is part of a package structure
+    try:
+        from . import aig_config  # If analyze_aigs.py is in the same package as aig_config.py
+    except ImportError:
+        print(f"Error importing aig_config: {e}")
+        print("Please ensure aig_config.py is accessible (e.g., in the same directory or PYTHONPATH).")
+        print("Using fallback node type keys if config is not found.")
+        aig_config = None  # Fallback
 # --- End Imports ---
 
-# --- Constants from Config ---
-NODE_TYPE_KEYS = getattr(aig_config, 'NODE_TYPE_KEYS', ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"])
-NODE_CONST0_STR = "NODE_CONST0"
-NODE_PI_STR = "NODE_PI"
-NODE_AND_STR = "NODE_AND"
-NODE_PO_STR = "NODE_PO"
-NUM_NODE_FEATURES = len(NODE_TYPE_KEYS)
+# --- Constants from Config or Fallbacks ---
+if aig_config:
+    NODE_TYPE_KEYS = getattr(aig_config, 'NODE_TYPE_KEYS', ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"])
+    NODE_CONST0_STR = getattr(aig_config, 'NODE_CONST0_KEY', "NODE_CONST0")  # Assuming key names if they exist
+    NODE_PI_STR = getattr(aig_config, 'NODE_PI_KEY', "NODE_PI")
+    NODE_AND_STR = getattr(aig_config, 'NODE_AND_KEY', "NODE_AND")
+    NODE_PO_STR = getattr(aig_config, 'NODE_PO_KEY', "NODE_PO")
+    # One-hot encodings from your PKL generation script
+    # These are used to map node 'type' attribute (a list) back to a string
+    NODE_TYPE_ENCODING = getattr(aig_config, 'NODE_TYPE_ENCODING', {
+        "NODE_CONST0": [1.0, 0.0, 0.0, 0.0],
+        "NODE_PI": [0.0, 1.0, 0.0, 0.0],
+        "NODE_AND": [0.0, 0.0, 1.0, 0.0],
+        "NODE_PO": [0.0, 0.0, 0.0, 1.0]
+    })
+    # Create a reverse mapping from tuple(one_hot_vector) to type_string
+    ONE_HOT_TO_NODE_TYPE_STR = {tuple(v): k for k, v in NODE_TYPE_ENCODING.items()}
+
+else:  # Fallbacks if aig_config is not loaded
+    NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
+    NODE_CONST0_STR = "NODE_CONST0"
+    NODE_PI_STR = "NODE_PI"
+    NODE_AND_STR = "NODE_AND"
+    NODE_PO_STR = "NODE_PO"
+    ONE_HOT_TO_NODE_TYPE_STR = {
+        (1.0, 0.0, 0.0, 0.0): "NODE_CONST0",
+        (0.0, 1.0, 0.0, 0.0): "NODE_PI",
+        (0.0, 0.0, 1.0, 0.0): "NODE_AND",
+        (0.0, 0.0, 0.0, 1.0): "NODE_PO"
+    }
+NUM_NODE_FEATURES = len(NODE_TYPE_KEYS)  # Should be 4 based on typical AIG setup
+
+
 # --- End Constants ---
 
 
-def analyze_degrees(dataset_loader):
+def get_node_type_from_attrs(node_attrs: dict) -> str | None:
     """
-    Analyzes in-degree and out-degree distributions for different node types
-    in a PyTorch Geometric InMemoryDataset.
+    Determines the node type string from its attributes dictionary.
+    Assumes the 'type' attribute is a one-hot encoded list/numpy array.
+    """
+    raw_type = node_attrs.get('type')
+    if raw_type is None:
+        warnings.warn(f"Node missing 'type' attribute: {node_attrs}")
+        return "UNKNOWN"
+    try:
+        # Convert to tuple of floats for dict lookup
+        type_tuple = tuple(float(x) for x in raw_type)
+        return ONE_HOT_TO_NODE_TYPE_STR.get(type_tuple, "UNKNOWN_ENCODING")
+    except Exception as e:
+        warnings.warn(f"Error converting node type {raw_type} to tuple: {e}")
+        return "UNKNOWN_CONVERSION_ERROR"
+
+
+def analyze_degrees_and_distances_from_nx(graphs: List[nx.DiGraph]):
+    """
+    Analyzes in-degree, out-degree, and edge connection distances for different node types
+    from a list of NetworkX DiGraphs.
 
     Args:
-        dataset_loader: An instance of AIGDatasetLoader (or similar)
-                        containing the graph data.
+        graphs (List[nx.DiGraph]): A list of NetworkX DiGraph objects.
 
     Returns:
-        dict: A dictionary containing degree statistics for each node type.
-              e.g., {'NODE_PI': {'in': [...], 'out': [...]}, ...}
+        tuple: (degree_data, distance_data)
+            degree_data (dict): Contains in/out-degree stats per node type.
+            distance_data (list): List of all calculated edge distances (target_idx - source_idx).
     """
     degree_data = defaultdict(lambda: defaultdict(list))
-    # { 'NODE_PI': {'in': [0, 0, ...], 'out': [1, 2, ...]}, ... }
+    all_edge_distances = []
 
-    print(f"Analyzing {len(dataset_loader)} graphs...")
-    for i in tqdm(range(len(dataset_loader)), desc="Analyzing Graphs"):
-        try:
-            data = dataset_loader.get(i)
-        except Exception as e:
-            warnings.warn(f"Could not load graph {i}: {e}")
+    print(f"Analyzing {len(graphs)} graphs from PKL file...")
+    for i, graph in enumerate(tqdm(graphs, desc="Analyzing Graphs")):
+        if not isinstance(graph, nx.DiGraph):
+            warnings.warn(f"Item {i} is not a NetworkX DiGraph. Skipping.")
             continue
 
-        num_nodes = data.num_atom.item()
+        num_nodes = graph.number_of_nodes()
         if num_nodes == 0:
             continue
 
-        # Ensure features and adjacency matrix are on CPU for numpy conversion
-        node_features = data.x[:num_nodes].cpu() # Shape: [num_nodes, node_dim]
-        adj = data.adj[:, :num_nodes, :num_nodes].cpu() # Shape: [bond_dim, num_nodes, num_nodes]
-
-        # Determine node types (find index of '1' in one-hot features)
+        # --- Node Type and Degree Analysis ---
+        # Sort nodes to get a consistent ordering for this graph
+        # This helps if original node IDs are not contiguous or not in generation order
         try:
-            node_type_indices = torch.argmax(node_features, dim=1).numpy()
-        except Exception as e:
-            warnings.warn(f"Could not determine node types for graph {i}: {e}")
-            continue
+            # Attempt to sort, assuming node IDs are sortable (e.g., integers)
+            sorted_node_ids = sorted(list(graph.nodes()))
+        except TypeError:
+            # Fallback if node IDs are not sortable (e.g., mixed types, though unlikely for AIGs from your generator)
+            warnings.warn(
+                f"Graph {i}: Node IDs are not sortable. Using arbitrary order from graph.nodes(). This might affect distance interpretation if order matters.")
+            sorted_node_ids = list(graph.nodes())
 
-        # Calculate degrees from the adjacency tensor (summing REG and INV channels)
-        # In-degree: Sum over source nodes (dim 2) for each target node (dim 1)
-        in_degrees = adj[:2, :, :].sum(dim=(0, 2)).numpy() # Sum channels 0,1 ; Sum sources (dim 2) -> [num_nodes]
-        # Out-degree: Sum over target nodes (dim 1) for each source node (dim 2)
-        out_degrees = adj[:2, :, :].sum(dim=(0, 1)).numpy() # Sum channels 0,1 ; Sum targets (dim 1) -> [num_nodes]
+        node_to_ordered_idx = {node_id: idx for idx, node_id in enumerate(sorted_node_ids)}
 
-        # Store degrees based on node type
-        for node_idx in range(num_nodes):
-            type_idx = node_type_indices[node_idx]
-            if 0 <= type_idx < len(NODE_TYPE_KEYS):
-                type_str = NODE_TYPE_KEYS[type_idx]
-                degree_data[type_str]['in'].append(in_degrees[node_idx])
-                degree_data[type_str]['out'].append(out_degrees[node_idx])
-            else:
-                warnings.warn(f"Graph {i}, Node {node_idx}: Invalid type index {type_idx}")
+        for original_node_id in sorted_node_ids:
+            node_attrs = graph.nodes[original_node_id]
+            node_type_str = get_node_type_from_attrs(node_attrs)
 
-    return degree_data
+            if node_type_str and not node_type_str.startswith("UNKNOWN"):
+                degree_data[node_type_str]['in'].append(graph.in_degree(original_node_id))
+                degree_data[node_type_str]['out'].append(graph.out_degree(original_node_id))
+            elif node_type_str:
+                warnings.warn(
+                    f"Graph {i}, Node {original_node_id}: Type '{node_type_str}' from attributes {node_attrs.get('type')}")
+
+        # --- Edge Distance Analysis (Edge Unroll Clue) ---
+        for u_old, v_old in graph.edges():
+            # Get ordered indices
+            u_new_idx = node_to_ordered_idx.get(u_old)
+            v_new_idx = node_to_ordered_idx.get(v_old)
+
+            if u_new_idx is None or v_new_idx is None:
+                warnings.warn(
+                    f"Graph {i}: Edge ({u_old}, {v_old}) contains node not in sorted_node_ids map. Skipping edge distance.")
+                continue
+
+            # We are interested in how "far back" a connection is made.
+            # If target_idx > source_idx, this is a forward connection in the ordered list.
+            # The distance is target_idx - source_idx.
+            # This value indicates how many steps "back" the source node was, relative to the target.
+            # The edge_unroll parameter in GraphDF typically defines how many previous nodes
+            # the current node (target) considers connecting to.
+            if v_new_idx > u_new_idx:  # Standard forward edge in the ordering
+                distance = v_new_idx - u_new_idx
+                all_edge_distances.append(distance)
+            # else: # Edge goes "backwards" in the sorted list or is a self-loop (if u_new_idx == v_new_idx)
+            # These are less typical for generative models that build sequentially,
+            # but can exist in arbitrary AIGs.
+            # For edge_unroll, we are primarily interested in connections to *previous* nodes.
+            # If you want to capture all spans, you could use abs(v_new_idx - u_new_idx).
+            # However, for `edge_unroll`, `target - source` (for target > source) is more direct.
+            # warnings.warn(f"Graph {i}: Edge ({u_old}, {v_old}) -> ({u_new_idx}, {v_new_idx}) is not strictly forward in sorted order. Distance calculation might need adjustment based on interpretation.")
+
+    return degree_data, all_edge_distances
+
 
 def print_degree_stats(degree_data):
     """Prints formatted statistics for the collected degree data."""
-    print("\n--- Degree Distribution Analysis ---")
-    for node_type in NODE_TYPE_KEYS:
-        print(f"\nNode Type: {node_type}")
-        if node_type not in degree_data:
+    print("\n--- Node Degree Distribution Analysis ---")
+    for node_type_key in NODE_TYPE_KEYS:  # Iterate in defined order
+        print(f"\nNode Type: {node_type_key}")
+        if node_type_key not in degree_data:
             print("  No nodes of this type found.")
             continue
 
         for degree_type in ['in', 'out']:
-            degrees = degree_data[node_type][degree_type]
+            degrees = degree_data[node_type_key][degree_type]
             if not degrees:
                 print(f"  {degree_type.capitalize()}-Degrees: No data")
                 continue
@@ -113,54 +185,98 @@ def print_degree_stats(degree_data):
             p25 = np.percentile(degrees_np, 25)
             p75 = np.percentile(degrees_np, 75)
             p95 = np.percentile(degrees_np, 95)
+            p99 = np.percentile(degrees_np, 99)
 
             print(f"  {degree_type.capitalize()}-Degrees ({count} nodes):")
             print(f"    Min: {min_deg:.0f}, Max: {max_deg:.0f}")
             print(f"    Mean: {mean_deg:.2f}, Median: {median_deg:.0f}")
-            print(f"    Percentiles: 25th={p25:.0f}, 75th={p75:.0f}, 95th={p95:.0f}")
+            print(f"    Percentiles: 25th={p25:.0f}, 75th={p75:.0f}, 95th={p95:.0f}, 99th={p99:.0f}")
 
-            # Specific check for AND in-degree
-            if node_type == NODE_AND_STR and degree_type == 'in':
+            if node_type_key == NODE_AND_STR and degree_type == 'in':
                 non_two_count = np.sum(degrees_np != 2)
                 if count > 0:
-                    print(f"    Nodes NOT having in-degree 2: {non_two_count} ({non_two_count/count:.1%})")
+                    print(f"    AND nodes NOT having in-degree 2: {non_two_count} ({non_two_count / count:.1%})")
+
+
+def print_distance_stats(distance_data):
+    """Prints formatted statistics for edge connection distances."""
+    print("\n--- Edge Connection Distance Analysis (for Edge Unroll) ---")
+    if not distance_data:
+        print("  No edge distance data collected.")
+        return
+
+    distances_np = np.array(distance_data)
+    count = len(distances_np)
+    min_dist = np.min(distances_np)
+    max_dist = np.max(distances_np)
+    mean_dist = np.mean(distances_np)
+    median_dist = np.median(distances_np)
+
+    print(f"  Analyzed {count} edges (where target_ordered_idx > source_ordered_idx).")
+    print(f"  Min Distance: {min_dist:.0f}")
+    print(f"  Max Distance: {max_dist:.0f}")
+    print(f"  Mean Distance: {mean_dist:.2f}")
+    print(f"  Median Distance: {median_dist:.0f}")
+
+    percentiles_to_show = [50, 75, 90, 95, 98, 99, 99.5, 99.9]
+    print("  Percentiles of Edge Distances:")
+    for p_val in percentiles_to_show:
+        p = np.percentile(distances_np, p_val)
+        print(f"    {p_val}th: {p:.0f}")
+    print("\n  Interpretation for `edge_unroll`:")
+    print("  The `edge_unroll` parameter in GraphDF determines how many previous nodes")
+    print("  a newly generated node considers connecting to. The percentiles above")
+    print("  (e.g., 95th, 99th) can give an empirical upper bound for this value.")
+    print("  For example, if the 99th percentile is 15, an `edge_unroll` of 15-20")
+    print("  might be sufficient to capture most connections in your dataset.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Analyze node degree distribution in pre-processed AIG dataset.")
-    parser.add_argument('--data_root', type=str, default="./",
-                        help="Root directory containing the dataset (e.g., './data/').")
-    parser.add_argument('--dataset_name', type=str, default='aig',
-                        help="Name of the dataset subdirectory (e.g., 'aig').")
-    parser.add_argument('--split', type=str, default='train', choices=['train', 'val', 'test'],
-                        help="Dataset split to analyze (train, val, or test).")
+    parser = argparse.ArgumentParser(
+        description="Analyze node degrees and edge connection distances from AIGs in a PKL file.")
+    parser.add_argument('--pkl_file', type=str, required=True,
+                        help="Path to the single PKL file containing a list of NetworkX DiGraphs.")
 
     args = parser.parse_args()
 
-    print(f"Loading dataset: {args.dataset_name}, Split: {args.split}")
-    try:
-        # Load without augmentation wrapper
-        dataset = AIGDatasetLoader(
-            root=args.data_root,
-            name=args.dataset_name,
-            dataset_type=args.split
-        )
-    except FileNotFoundError as e:
-        print(f"\nError loading dataset: {e}")
-        print("Please ensure the processed data file exists for the specified split.")
-        exit(1)
-    except Exception as e:
-        print(f"\nError initializing dataset loader: {e}")
+    if not osp.exists(args.pkl_file):
+        print(f"Error: PKL file not found at {args.pkl_file}")
         exit(1)
 
-    if len(dataset) == 0:
-        print("Dataset is empty. No analysis to perform.")
+    print(f"Loading NetworkX graphs from: {args.pkl_file}")
+    try:
+        with open(args.pkl_file, 'rb') as f:
+            nx_graphs = pickle.load(f)
+        if not isinstance(nx_graphs, list):
+            print(f"Error: Expected a list of graphs in {args.pkl_file}, got {type(nx_graphs)}.")
+            exit(1)
+        if not all(isinstance(g, nx.DiGraph) for g in nx_graphs if
+                   g is not None):  # Allow for None if some graphs failed generation
+            print(f"Error: Not all items in the PKL file are NetworkX DiGraphs.")
+            # Optionally print more details about non-DiGraph items
+            for idx, item_in_list in enumerate(nx_graphs):
+                if not isinstance(item_in_list, nx.DiGraph) and item_in_list is not None:
+                    print(f" Item at index {idx} is of type: {type(item_in_list)}")
+            # exit(1) # Decide if this is a fatal error or a warning
+            warnings.warn("Some items in the PKL file are not NetworkX DiGraphs. They will be skipped.")
+            nx_graphs = [g for g in nx_graphs if isinstance(g, nx.DiGraph)]
+
+
+    except Exception as e:
+        print(f"\nError loading or validating PKL file: {e}")
+        exit(1)
+
+    if not nx_graphs:
+        print("No valid graphs found in the PKL file. No analysis to perform.")
         exit()
 
+    print(f"Successfully loaded {len(nx_graphs)} graphs.")
+
     # Perform analysis
-    degree_stats = analyze_degrees(dataset)
+    degree_data, edge_distances = analyze_degrees_and_distances_from_nx(nx_graphs)
 
     # Print results
-    print_degree_stats(degree_stats)
+    print_degree_stats(degree_data)
+    print_distance_stats(edge_distances)
 
     print("\nAnalysis finished.")
