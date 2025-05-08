@@ -17,7 +17,7 @@ from . import aig_config
 
 AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
 AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
-print("Successfully imported AIG type keys from G2PT.configs.aig_config")
+
 
 
 

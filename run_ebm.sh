@@ -4,7 +4,6 @@
 #SBATCH --gpus=1
 #SBATCH --time=18:00:00 # Increased time for train + sample + eval
 #SBATCH --output=./slurm_logs/graphebm_aig_pipeline_%j.out
-#SBATCH --error=./slurm_logs/graphebm_aig_pipeline_%j.err # Separate error file
 
 # --- Configuration ---
 MODEL_NAME="GraphEBM"
@@ -103,13 +102,12 @@ fi
 # Assuming sample_graphs.py exists and takes these arguments
 # You MUST adapt the sample_graphs.py call to match its actual arguments
 srun python -u sample_graphs.py \
-    --model_type ${MODEL_NAME} \
+    --model ${MODEL_NAME} \
     --device ${REQUESTED_DEVICE} \
-    --checkpoint_path "${FINAL_CKPT_PATH}" \
+    --checkpoint "${FINAL_CKPT_PATH}" \
     --n_samples ${NUM_SAMPLES} \
     --output_pickle_path "${GEN_OUTPUT_PKL}" \
     --num_min_nodes ${NUM_MIN_NODES} \
-    `# Pass necessary EBM generation params matching training` \
     --ebm_c ${EBM_C} \
     --ebm_ld_step ${EBM_LD_STEP} \
     --ebm_ld_noise ${EBM_LD_NOISE} \
