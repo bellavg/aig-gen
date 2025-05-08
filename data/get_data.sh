@@ -75,7 +75,6 @@ srun python -u ${PROCESS_SCRIPT} \
     --output_root "${OUTPUT_ROOT_DIR}" \
     --dataset_name "${DATASET_NAME}" \
     --file_prefix "${FILE_PREFIX}" \
-    --num_augmentations ${NUM_AUGMENTATIONS} \
     --num_train_files ${NUM_TRAIN_FILES} \
     --num_val_files ${NUM_VAL_FILES} \
     --num_test_files ${NUM_TEST_FILES}
