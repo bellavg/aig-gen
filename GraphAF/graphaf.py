@@ -269,7 +269,7 @@ class GraphAF(Generator):
         else:
             print("Error: Model is None after attempting pretrain load.")
 
-    def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict, save_interval, save_dir):
+    def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict, save_interval, save_dir, *kwargs):
         r"""
             Running training for random generation task (e.g., AIGs).
 
