@@ -60,6 +60,8 @@ base_conf = {
         "clamp_lgd_grad": True, "alpha": 1.0
     }
 }
+
+
 # --- End Base Configuration ---
 
 def main(args):
@@ -81,7 +83,13 @@ def main(args):
     conf['model']['nhid'] = getattr(args, 'gaf_nhid', conf['model']['nhid'])
     conf['model']['nout'] = getattr(args, 'gaf_nout', conf['model']['nout'])
     conf['model']['deq_coeff'] = getattr(args, 'deq_coeff', conf['model']['deq_coeff'])
-    conf['model']['st_type'] = getattr(args, 'st_type', conf['model']['st_type'])
+
+    # CORRECTED st_type handling:
+    # Only update from args if args.st_type is not None (i.e., was actually provided)
+    if args.st_type is not None:
+        conf['model']['st_type'] = args.st_type
+    # Otherwise, conf['model']['st_type'] retains its value from base_conf (i.e., "exp")
+
     conf['model']['node_dim'] = getattr(aig_config, 'NUM_NODE_FEATURES', 4)
     conf['model']['bond_dim'] = getattr(aig_config, 'NUM_EDGE_FEATURES', 2) + 1
     if args.model_type == 'GraphDF': conf['model']['use_df'] = True
@@ -151,9 +159,11 @@ def main(args):
             runner = GraphEBM(n_atom=conf['model']['max_size'], n_atom_type=conf['model']['node_dim'],
                               n_edge_type=conf['model']['bond_dim'], **conf['model_ebm'], device=device)
         except Exception as e:
-            print(f"Error instantiating GraphEBM: {e}"); exit(1)
+            print(f"Error instantiating GraphEBM: {e}");
+            exit(1)
     else:
-        print(f"Error: Unknown model type '{args.model_type}'."); exit(1)
+        print(f"Error: Unknown model type '{args.model_type}'.");
+        exit(1)
     if runner is None: print(f"Failed to instantiate model runner for {args.model_type}"); exit(1)
 
     if args.save_dir:
@@ -186,10 +196,12 @@ def main(args):
                 grad_clip_value=conf['grad_clip_value']
             )
         else:
-            print(f"Model type {args.model_type} not recognized for training delegation."); exit(1)
+            print(f"Model type {args.model_type} not recognized for training delegation.");
+            exit(1)
         print("\n--- Training Process Delegated and Finished ---")
     except NotImplementedError as nie:
-        print(f"\nError: Method not implemented: {nie}"); exit(1)
+        print(f"\nError: Method not implemented: {nie}");
+        exit(1)
     except Exception as train_e:
         print(f"\nAn error occurred during training delegated to {args.model_type}.train_rand_gen:");
         print(f"Error Type: {type(train_e).__name__}");
@@ -236,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument('--deq_coeff', type=float,
                         help=f"Dequantization coefficient (default: {base_conf['model']['deq_coeff']}).")
     parser.add_argument('--st_type', type=str, choices=['exp', 'sigmoid', 'softplus'],
-                        help=f"ST network type (default: {base_conf['model']['st_type']}).")
+                        help=f"ST network type (default: {base_conf['model']['st_type']}).")  # Default is 'exp'
     parser.add_argument('--ebm_hidden', type=int, help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
     parser.add_argument('--ebm_depth', type=int, help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
     parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction,
