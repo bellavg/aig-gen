@@ -74,6 +74,6 @@ model:
 # --- Dataset Settings ---
 dataset:
   name: 'aig'                   # Your dataset name (must match main.py logic)
-  datadir: './digress_dataset'           # Path to your dataset's root directory (containing raw/ and processed/)
+  datadir: './src/digress_dataset'           # Path to your dataset's root directory (containing raw/ and processed/)
   # Add any specific dataset args needed by AIGDataModule or AIGDatasetInfos if you added them
   # e.g., filter: False
