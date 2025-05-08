@@ -6,6 +6,8 @@ import torch.nn.functional as F
 import numpy as np
 import networkx as nx
 from torch_geometric.data import InMemoryDataset, Data
+# Import BaseData explicitly if needed for type hints or checks
+from torch_geometric.data.data import BaseData
 import warnings
 import os.path as osp
 import argparse
@@ -144,20 +146,13 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
         processed_root = osp.join(root, dataset_name)
         super().__init__(processed_root, transform, pre_transform, pre_filter)
         try:
-            self.data, self.slices = torch.load(self.processed_paths[0])
+            # Load the final combined file
+            self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False) # Use weights_only=False here too
             print(f"Dataset '{self.dataset_name}' split '{self.split}' initialized. Samples: {len(self)}")
         except FileNotFoundError:
              raise FileNotFoundError(f"Final processed file not found: {self.processed_paths[0]}. Run processing first.")
         except Exception as e:
-            # If loading fails, it might be due to the weights_only issue during load itself
-            # Try loading with weights_only=False as a fallback during initialization
-            try:
-                print(f"Initial load failed for {self.processed_paths[0]}. Attempting load with weights_only=False...")
-                self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
-                print(f"Successfully loaded with weights_only=False.")
-                print(f"Dataset '{self.dataset_name}' split '{self.split}' initialized. Samples: {len(self)}")
-            except Exception as e_fallback:
-                 raise RuntimeError(f"Failed to load processed data from {self.processed_paths[0]} even with weights_only=False: {e_fallback}")
+            raise RuntimeError(f"Failed to load final processed data from {self.processed_paths[0]}: {e}")
 
         # Clean up temporary attributes if they exist
         if hasattr(self, '_temp_raw_dir'): del self._temp_raw_dir
@@ -181,23 +176,25 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
         pass
 
     def process(self):
-        """ Processes raw PKL files sequentially and saves PyG data. """
+        """ Processes raw PKL files sequentially, saves intermediate collated chunks, and combines them. """
         if self._temp_raw_dir is None or self._temp_file_prefix is None or not self._temp_pkl_files:
             raise ValueError("Raw directory, file prefix, and file list are required for processing.")
 
         print(f"Processing raw PKL files sequentially and augmenting for split: {self.split}...")
-        intermediate_files = []
+        intermediate_collated_files = [] # Store paths to *collated* chunk files
         total_original_graphs, total_successful_conversions, total_augmentations_created = 0, 0, 0
         os.makedirs(self.processed_dir, exist_ok=True)
 
+        # --- Process each PKL file chunk ---
         for pkl_file_idx, raw_path in enumerate(tqdm(self.raw_paths, desc=f"Processing PKL Chunks ({self.split})")):
             if not osp.exists(raw_path): continue
-            current_chunk_data_list = []
+            current_chunk_data_list = [] # Store Data objects for this chunk only
             try:
                 with open(raw_path, 'rb') as f: nx_graphs_chunk = pickle.load(f)
                 if not isinstance(nx_graphs_chunk, list): continue
             except Exception as e: warnings.warn(f"Load error {raw_path}: {e}"); continue
 
+            # Process graphs within the current chunk
             for graph_idx_in_chunk, nx_graph in enumerate(nx_graphs_chunk):
                 if not isinstance(nx_graph, nx.DiGraph): continue
                 total_original_graphs += 1
@@ -209,7 +206,7 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                     current_chunk_data_list.append(base_pyg_data.clone())
                     num_actual_nodes = base_pyg_data.num_nodes.item()
                     if num_actual_nodes > 0 and self.num_augmentations > 0:
-                        try:
+                        try: # Augmentation block
                             temp_nx_graph = nx.DiGraph()
                             for i in range(num_actual_nodes): temp_nx_graph.add_node(i)
                             for ch in range(NUM_EXPLICIT_EDGE_TYPES):
@@ -235,24 +232,38 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                                 except Exception as e: warnings.warn(f"Aug error: {e}")
                         except Exception as recon_e: warnings.warn(f"Recon error: {recon_e}")
 
+            # Collate and Save intermediate chunk if it contains data
             if current_chunk_data_list:
-                intermediate_path = osp.join(self.processed_dir, f'{self.split}_temp_part_{pkl_file_idx}.pt')
+                intermediate_path = osp.join(self.processed_dir, f'{self.split}_temp_collated_part_{pkl_file_idx}.pt')
                 try:
-                    # Save intermediate list directly
-                    torch.save(current_chunk_data_list, intermediate_path)
-                    intermediate_files.append(intermediate_path)
-                    # print(f"  Saved intermediate chunk: {osp.basename(intermediate_path)} ({len(current_chunk_data_list)} graphs)") # Can be verbose
-                except Exception as e: warnings.warn(f"Failed to save intermediate chunk {intermediate_path}: {e}")
-            del current_chunk_data_list, nx_graphs_chunk; gc.collect()
+                    # Collate the data *for this chunk only*
+                    chunk_collated_data, chunk_slices = self.collate(current_chunk_data_list)
+                    # Save the collated data and slices
+                    torch.save((chunk_collated_data, chunk_slices), intermediate_path)
+                    intermediate_collated_files.append(intermediate_path)
+                    # print(f"  Saved intermediate collated chunk: {osp.basename(intermediate_path)}") # Can be verbose
+                except Exception as e:
+                    warnings.warn(f"Failed to collate or save intermediate chunk {intermediate_path}: {e}")
 
-        print(f"\nCombining {len(intermediate_files)} intermediate chunks for split '{self.split}'...")
-        final_data_list = []
-        for intermediate_path in tqdm(intermediate_files, desc="Combining Chunks"):
+            del current_chunk_data_list, nx_graphs_chunk; gc.collect()
+        # --- End PKL file loop ---
+
+        # --- Combine Intermediate Collated Chunks ---
+        print(f"\nCombining {len(intermediate_collated_files)} intermediate collated chunks for split '{self.split}'...")
+        all_data_list = [] # List to store the large Data objects from each chunk
+        all_slices_list = [] # List to store the slices dictionaries from each chunk
+
+        for intermediate_path in tqdm(intermediate_collated_files, desc="Loading Collated Chunks"):
             try:
-                # *** FIX: Load with weights_only=False ***
-                chunk_data = torch.load(intermediate_path, weights_only=False)
-                final_data_list.extend(chunk_data)
-                os.remove(intermediate_path)
+                # Load the collated tuple (data, slices), allowing complex objects
+                chunk_data, chunk_slices = torch.load(intermediate_path, weights_only=False)
+                # Ensure it's the expected format
+                if isinstance(chunk_data, BaseData) and isinstance(chunk_slices, dict):
+                    all_data_list.append(chunk_data)
+                    all_slices_list.append(chunk_slices)
+                else:
+                    warnings.warn(f"Intermediate file {intermediate_path} has unexpected format. Skipping.")
+                os.remove(intermediate_path) # Clean up intermediate file
             except Exception as e:
                 warnings.warn(f"Failed to load or delete intermediate chunk {intermediate_path}: {e}")
 
@@ -260,37 +271,74 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
         print(f"Total original graphs considered: {total_original_graphs}")
         print(f"Successfully converted (before aug): {total_successful_conversions}")
         print(f"Total augmentations created: {total_augmentations_created}")
-        print(f"Total samples combined: {len(final_data_list)}")
+        print(f"Total samples in combined list: {sum(d.num_graphs for d in all_data_list)}") # Sum graphs across chunks
 
-        # --- FIX: Handle empty list before collate ---
-        if not final_data_list:
-            warnings.warn(f"No data to collate for split '{self.split}'. Saving empty dataset.")
-            # Create placeholder empty data and slices
-            # Need a dummy Data object to get the class for collate
-            # Or handle saving manually
-            # Let's create dummy data manually to avoid collate error
-            data = Data() # Create an empty Data object
-            slices = {key: torch.tensor([0, 0]) for key in data.keys} # Basic slices for empty data
+        # --- Manually Concatenate Collated Data and Slices ---
+        if not all_data_list:
+            warnings.warn(f"No data chunks to combine for split '{self.split}'. Saving empty dataset.")
+            data, slices = self.collate([]) # Use collate for empty case
         else:
-            # Apply pre_filter and pre_transform if specified
-            if self.pre_filter is not None:
-                 print("Applying pre_filter...")
-                 final_data_list = [d for d in final_data_list if self.pre_filter(d)]
-            if self.pre_transform is not None:
-                 print("Applying pre_transform...")
-                 final_data_list = [self.pre_transform(d) for d in final_data_list]
+            # Concatenate the large Data objects
+            # This assumes all Data objects have the same attributes
+            print(f"Concatenating {len(all_data_list)} collated Data objects...")
+            final_data = all_data_list[0].__class__() # Get the class of the first Data object
+            keys = all_data_list[0].keys # Get attribute keys
 
-            if not final_data_list: # Check again after filtering
-                 warnings.warn(f"No data remaining after pre-filtering for split '{self.split}'. Saving empty dataset.")
-                 data = Data()
-                 slices = {key: torch.tensor([0, 0]) for key in data.keys}
-            else:
-                 print(f"Collating final data list ({len(final_data_list)} samples)...")
-                 data, slices = self.collate(final_data_list) # Now safe to call collate
+            for key in keys:
+                # Concatenate tensors along the appropriate dimension (usually 0)
+                # Handle potential non-tensor attributes if necessary
+                try:
+                    tensors_to_cat = [getattr(d, key) for d in all_data_list if hasattr(d, key) and isinstance(getattr(d, key), torch.Tensor)]
+                    if tensors_to_cat:
+                        # Determine concat dimension (usually 0, except for 'adj' which might be different if not flattened)
+                        # For dense data (x, adj), dim 0 is the batch dim
+                        cat_dim = 0
+                        # Special handling for 'num_nodes' - should just be summed or handled by slices
+                        if key == 'num_nodes': continue # Slices handle this
 
+                        setattr(final_data, key, torch.cat(tensors_to_cat, dim=cat_dim))
+                except Exception as cat_e:
+                    warnings.warn(f"Could not concatenate attribute '{key}': {cat_e}")
+
+
+            # Combine the slices dictionaries
+            print("Combining slices...")
+            final_slices = {}
+            cumulative_size = {} # Track cumulative size for each attribute
+            for key in keys:
+                if key == 'num_nodes': continue # Skip num_nodes for slicing
+                # Get all slice tensors for this key
+                key_slices = [s[key] for s in all_slices_list if key in s and isinstance(s[key], torch.Tensor)]
+                if not key_slices: continue # Skip if no slices found for this key
+
+                combined_slice = [torch.tensor([0], dtype=torch.long)] # Start with 0
+                current_offset = 0
+                for i, chunk_slice_tensor in enumerate(key_slices):
+                    # Offset the slices from the current chunk (excluding the initial 0)
+                    # The size added by this chunk is chunk_slice_tensor[-1]
+                    size_in_chunk = chunk_slice_tensor[-1].item()
+                    if size_in_chunk > 0:
+                         combined_slice.append(chunk_slice_tensor[1:] + current_offset)
+                    current_offset += size_in_chunk
+
+                final_slices[key] = torch.cat(combined_slice)
+
+            # Assign the manually combined data and slices
+            data = final_data
+            slices = final_slices
+
+            # --- Apply pre_transform/pre_filter to the final combined data ---
+            # Note: This is less common for InMemoryDataset, usually done per item
+            # If needed, apply transform/filter to the large 'data' object
+            # (Requires transforms designed for batched data)
+            # if self.pre_filter is not None: data = self.pre_filter(data)
+            # if self.pre_transform is not None: data = self.pre_transform(data)
+
+
+        # --- Save the final result ---
         final_save_path = self.processed_paths[0]
         torch.save((data, slices), final_save_path)
-        print(f"Saved final processed data for split '{self.split}' to: {final_save_path}")
+        print(f"Saved final combined processed data for split '{self.split}' to: {final_save_path}")
 
 
 # --- Command Line Interface ---

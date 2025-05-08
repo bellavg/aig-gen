@@ -13,7 +13,7 @@ CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 
 # --- Data Configuration ---
 # *** IMPORTANT: Set these to match your processed augmented dataset location ***
-DATA_ROOT_PROCESSED="./data_pyg_augmented/"   # Root dir where the 'aig_augmented_ds' folder lives
+DATA_ROOT_PROCESSED="./data/aig_pyg/"   # Root dir where the 'aig_augmented_ds' folder lives
 DATASET_NAME="aig_ds" # The name used in the processing script
 
 # Directory containing ORIGINAL training data (e.g., .bin files) needed ONLY for novelty check in evaluation
