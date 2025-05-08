@@ -15,7 +15,7 @@ from .util import rescale_adj, requires_grad, clip_grad
 # Try to import aig_config for type strings, handle if not found.
 try:
     # Adjust this import path based on your actual project structure
-    from G2PT.configs.aig import aig_config  # Assuming G2PT is accessible
+    from ..G2PT.configs.aig import aig_config  # Assuming G2PT is accessible
 
     AIG_NODE_TYPE_KEYS = aig_config.NODE_TYPE_KEYS
     AIG_EDGE_TYPE_KEYS = aig_config.EDGE_TYPE_KEYS
