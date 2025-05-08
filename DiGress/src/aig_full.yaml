@@ -9,41 +9,42 @@ general:
 
   # Logging and Checkpointing
   log_every_steps: 50
-  check_val_every_n_epochs: 10  # How often to run validation NLL calculation
-  save_every_n_epochs: 20       # How often to save checkpoints (adjust based on training time)
+  check_val_every_n_epochs: 10  # How often to run validation NLL calculation & validity check
+  save_every_n_epochs: 20       # How often to save checkpoints (adjust based on training time/convergence)
   run_test_after_train: True    # Run your evaluation at the end of training
   progress_bar: True            # Show progress bars
 
-  # Sampling Settings (primarily for the final test evaluation)
-  # These control how many samples are generated *at the end of testing* for your evaluation
-  final_model_samples_to_generate: 1000 # Number of AIGs to generate for final evaluation
-  # final_model_samples_to_save: 0      # Not needed as you evaluate directly
-  # final_model_chains_to_save: 0       # Not needed
+  # Sampling Settings
+  # For final evaluation at the end of testing (in on_test_epoch_end)
+  final_model_samples_to_generate: 1000 # Number of AIGs to generate for final V.U.N evaluation
+  # final_model_samples_to_save: 0      # Visualization/saving not needed for AIG evaluation logic
+  # final_model_chains_to_save: 0       # Chain saving not needed for AIG evaluation logic
 
-  # --- Settings below might not be needed if sampling/viz is fully removed ---
-  # --- but keep them for now in case the model code still references them ---
-  samples_to_generate: 64       # Samples generated during validation (if enabled in model code)
+  # For sampling during validation (in on_validation_epoch_end) for validity checks
+  samples_to_generate: 64       # How many samples for the validation validity check. Reduce if validation is too slow.
   samples_to_save: 0            # Don't save intermediate visualizations
   chains_to_save: 0             # Don't save intermediate chains
-  number_chain_steps: 10        # Reduced, as chains aren't saved/used
+  number_chain_steps: 10        # Reduced, as intermediate chains aren't saved/used
 
   # Resume/Test Configuration (set via command line or leave as null)
-  resume: null                  # Path to checkpoint for resuming training (relative to output dir)
+  resume: null                  # Path to checkpoint for resuming training (relative to output dir of the original run)
   test_only: null               # Path to checkpoint for testing only
-  evaluate_all_checkpoints: False # Whether to test all checkpoints in the test_only dir
+  evaluate_all_checkpoints: False # Whether to test all checkpoints in the test_only checkpoint's directory
 
 # --- Training Settings ---
 # Based on train_default.yaml and overrides from comm20 experiment
 train:
-  n_epochs: 500                 # Adjust based on convergence
+  n_epochs: 500                 # Adjust based on convergence speed and validation NLL
   batch_size: 64                # Adjust based on GPU memory and dataset size
-  lr: 0.0002                    # Learning rate
+  lr: 0.0002                    # Learning rate (standard starting point)
   weight_decay: 1e-12           # Weight decay for optimizer
   clip_grad: null               # Gradient clipping (e.g., 1.0 or null to disable)
   save_model: True              # Save checkpoints
-  save_top_k: 3                 # Save top 3 checkpoints based on validation NLL
-  num_workers: 4                # Dataloader workers (adjust based on CPU/system)
-  ema_decay: 0                  # Exponential Moving Average (0 to disable)
+  save_top_k: 3                 # Save top 3 checkpoints based on validation NLL ('val/epoch_NLL')
+  # Number of workers for DataLoader. Tune based on system CPU/IO.
+  # Start with 0 if encountering issues, increase if GPU waits for data.
+  num_workers: 4
+  ema_decay: 0                  # Exponential Moving Average (0 to disable, 0.999 is common if used)
   optimizer: adamw              # Optimizer type
   seed: 42                      # Reproducibility seed
 
@@ -58,22 +59,39 @@ model:
   diffusion_steps: 500          # Number of diffusion steps (T)
   diffusion_noise_schedule: 'cosine' # Noise schedule type
 
-  # Transformer Architecture (Adjust based on AIG complexity and resources)
+  # Transformer Architecture
+  # NOTE: These dimensions are relatively small compared to original DiGress QM9/MOSES experiments.
+  # Consider increasing n_layers and hidden dimensions if model underfits or NLL plateaus high.
+  # Example QM9: n_layers=9, dx=256. Example MOSES: n_layers=12, dx=256.
   n_layers: 6                   # Number of transformer layers
-  hidden_mlp_dims: {'X': 128, 'E': 64, 'y': 64} # Dimensions of MLPs within the transformer
-  hidden_dims: {'dx': 128, 'de': 32, 'dy': 64, 'n_head': 4, 'dim_ffX': 128, 'dim_ffE': 64, 'dim_ffy': 128} # Core transformer dimensions
+  hidden_mlp_dims: {'X': 128, 'E': 64, 'y': 64} # Dimensions of MLPs within the transformer blocks
+  hidden_dims: {
+    'dx': 128, # Node hidden dim
+    'de': 32,  # Edge hidden dim (can be smaller than dx)
+    'dy': 64,  # Global hidden dim (likely unused for AIG if y_dim_output is 0)
+    'n_head': 4, # Number of attention heads (ensure dx is divisible by n_head)
+    'dim_ffX': 128, # Feedforward dim for nodes
+    'dim_ffE': 64,  # Feedforward dim for edges
+    'dim_ffy': 128  # Feedforward dim for global (likely unused)
+   }
 
-  # Loss Weighting (Weights for Edge and Global features relative to Node features)
-  # Since AIGs don't have global features (y), the second value is likely irrelevant.
-  # You might only need to tune the first value (edge loss weight).
-  lambda_train: [1, 0]          # Example: Weight edge loss equally to node loss [lambda_E, lambda_y]
+  # Loss Weighting [lambda_E, lambda_y]
+  # Weights edge loss (lambda_E) and global loss (lambda_y) relative to node loss (implicitly 1).
+  # lambda_y=0 is correct as AIGs have no global features.
+  # lambda_E=1 gives equal weight to nodes and edges. Consider increasing if edge structure is hard to learn (e.g., [3, 0] or [5, 0]).
+  lambda_train: [1, 0]
 
-  # Extra Features (Set to null as analysis/extra features are removed/disabled)
+  # Extra Features
+  # Setting to null is appropriate for AIGs, as original features (cycles, spectral, molecular) don't apply.
+  # The code will use DummyExtraFeatures.
   extra_features: null
 
 # --- Dataset Settings ---
 dataset:
   name: 'aig'                   # Your dataset name (must match main.py logic)
-  datadir: './src/digress_dataset'           # Path to your dataset's root directory (containing raw/ and processed/)
+  # It's generally better practice to keep data outside the src directory.
+  # Suggested standard path: 'data/aig_dataset' (relative to project root)
+  # Make sure to move your data files accordingly if you change this.
+  datadir: './digress_dataset'  # ADJUST IF YOU KEEP DATA IN SRC: './src/digress_dataset'
   # Add any specific dataset args needed by AIGDataModule or AIGDatasetInfos if you added them
-  # e.g., filter: False
+  # e.g., filter: False # Example if you added filtering to your dataset class
