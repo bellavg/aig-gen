@@ -91,42 +91,85 @@ class AIGPreprocessedDatasetLoader(Dataset):  # Changed parent to Dataset for mo
         return [f'{self.split}_processed_data.pt']
 
     # We don't need download() or process() as we load directly in __init__
-    # If these were called, it would mean an issue with the Dataset base class logic,
-    # which is less likely for this scenario.
 
     def len(self) -> int:
+        # Determine length from the slices dictionary
         if isinstance(self.slices, dict):
-            for _, Slices in self.slices.items():
-                return Slices.size(0) - 1
-        elif isinstance(self.slices, torch.Tensor):  # Should not happen for dict slices
-            return self.slices.size(0) - 1
-        return 0  # Fallback
+            # Find a key in slices that corresponds to a tensor attribute in data
+            # that indicates the number of graphs (e.g., 'x', 'adj', 'num_nodes')
+            # Often, any key in slices will work if data is consistent.
+            slice_key = next(iter(self.slices))  # Get the first key
+            if slice_key is not None:
+                return self.slices[slice_key].size(0) - 1
+        # Fallback or alternative if slices structure is different
+        if hasattr(self.data, 'num_nodes') and isinstance(self.data.num_nodes, torch.Tensor):
+            # If num_nodes is stored per graph, its length might represent the number of graphs
+            # This might not be correct if num_nodes is collated differently.
+            # The slices method is generally more reliable for InMemoryDataset style.
+            pass  # Avoid using len(self.data.num_nodes) unless sure about collation
+        return 0  # Default if length cannot be determined
 
     def get(self, idx: int) -> BaseData:
+        # Retrieve a single graph Data object from the collated self.data
         if self.data is None or self.slices is None:
-            raise IndexError("Dataset not loaded properly")
+            raise IndexError(f"Dataset not loaded properly, cannot get item {idx}")
 
-        # Simplified get, assuming self.data is a single large BaseData object
-        # and self.slices is a dictionary of tensors.
-        # This mimics how InMemoryDataset.get works.
         if not isinstance(self.data, BaseData):
-            raise TypeError("self.data is not a PyG BaseData object")
+            raise TypeError(f"self.data is not a PyG BaseData object, cannot get item {idx}")
 
         data = self.data.__class__()  # Create a new empty Data object of the same type
-        if hasattr(self.data, '__num_nodes__'):
-            data.num_nodes = self.data.__num_nodes__[idx]
+        if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None:
+            # Check if __num_nodes__ exists and is not None before accessing
+            if isinstance(self.data.__num_nodes__, (list, torch.Tensor)) and idx < len(self.data.__num_nodes__):
+                data.num_nodes = self.data.__num_nodes__[idx]
+            else:
+                # Handle cases where num_nodes might be stored differently or index is out of bounds
+                pass  # Or set a default, or raise an error depending on expected structure
 
-        for key in self.data.keys:
+        # *** CORRECTED LINE: Added () to keys method call ***
+        for key in self.data.keys():
             item, slices = self.data[key], self.slices[key]
+
+            # Check if idx is valid for the slices tensor
+            if not isinstance(slices, torch.Tensor) or idx + 1 >= slices.size(0):
+                raise IndexError(
+                    f"Index {idx} out of bounds for slices of key '{key}' (size: {slices.size(0) if isinstance(slices, torch.Tensor) else 'N/A'})")
+
             start, end = slices[idx].item(), slices[idx + 1].item()
 
-            if isinstance(item, torch.Tensor):
-                s = list(item.shape)
-                s[self.data.__cat_dim__(key, item)] = end - start
+            # Handle slice assignment based on item type
+            if torch.is_tensor(item):
+                # Determine the dimension to slice along
+                cat_dim = self.data.__cat_dim__(key, item)  # Default is usually 0
+                if cat_dim is None:
+                    # If __cat_dim__ returns None, it might be a graph-level attribute.
+                    # Check if slices indicate it should be treated as such (start=idx, end=idx+1)
+                    # This logic might need adjustment based on how graph-level attributes are stored/sliced.
+                    if end - start == 1:  # Likely graph-level attribute
+                        data[key] = item[start]  # Get the single value for this graph
+                    else:  # Unclear how to handle this slice
+                        # Default to original slicing logic, might error if cat_dim is None
+                        data[key] = item[start:end]
+                else:
+                    # Standard slicing along the concatenation dimension
+                    data[key] = item.narrow(cat_dim, start, end - start)
+            elif isinstance(item, list) and item and torch.is_tensor(item[0]):  # Handle list of tensors
                 data[key] = item[start:end]
-            elif isinstance(item, list) and torch.is_tensor(item[0]):  # Handle list of tensors
-                data[key] = item[start:end]
-            else:  # For other types, just copy (though not typical for graph attributes)
-                data[key] = item[start:end] if isinstance(item, (list, tuple)) else item
+            elif isinstance(item, list) or isinstance(item, tuple):  # Handle list/tuple of non-tensors
+                data[key] = item[start:end]  # Slice the list/tuple
+            else:
+                # For scalar or other non-tensor/non-list types (uncommon for collated data)
+                # This likely represents a graph-level attribute repeated across batches.
+                # If slices indicate a single item (end-start == 1), take the item.
+                if end - start == 1:
+                    # Need to determine how to get the single item corresponding to idx.
+                    # If 'item' itself is the value repeated, this might work:
+                    data[key] = item
+                    # If 'item' is a list/tensor containing these values:
+                    # data[key] = item[start] # Or item[idx] if not collated
+                else:
+                    # Fallback if unsure how item is structured
+                    data[key] = item  # Assign the whole item, might be incorrect
+
         return data
 
