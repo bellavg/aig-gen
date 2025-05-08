@@ -206,6 +206,7 @@ def main(args):
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
                 f"{args.model_type} runner missing 'train_rand_gen' method.")
             # Pass the relevant parts of the configuration to the training method
+            # *** REMOVED grad_clip_value from this call ***
             runner.train_rand_gen(
                 loader=train_loader,
                 lr=conf['lr'],
@@ -213,8 +214,8 @@ def main(args):
                 max_epochs=conf['max_epochs'],
                 model_conf_dict=conf['model'],  # Pass model config
                 save_interval=conf['save_interval'],
-                save_dir=save_dir,
-                grad_clip_value=conf['grad_clip_value']  # Pass grad_clip if runner uses it
+                save_dir=save_dir
+                # grad_clip_value is NOT passed here
             )
         elif args.model_type == 'GraphEBM':
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
@@ -233,7 +234,7 @@ def main(args):
                 alpha=conf['train_ebm']['alpha'],
                 save_interval=conf['save_interval'],
                 save_dir=save_dir,
-                grad_clip_value=conf['grad_clip_value']
+                grad_clip_value=conf['grad_clip_value']  # Correctly passed here
             )
         else:
             print(f"Model type {args.model_type} not recognized for training delegation.");
