@@ -205,10 +205,12 @@ class GraphFlowModel(nn.Module):
         # If none of the above rules failed, the edge is considered locally valid
         return True
 
-    def generate_aig_discrete_raw_data(self, max_nodes, temperature_node, temperature_edge, device, disconnection_patience=5):
+    def generate_aig_discrete_raw_data(self, max_nodes, temperature_node, temperature_edge, device,
+                                       disconnection_patience=5):
         """
         Generates raw node features (one-hot) and a list of typed AIG edges using discrete sampling
-        with enhanced validity checking (including node counts) and resampling for edges. Includes disconnection patience.
+        with enhanced validity checking and resampling for edges.
+        Edge generation follows the schedule defined by link_prediction_index.
         Constraints: Exactly 1 CONST0, max 8 PI, max 8 PO.
 
         Args:
@@ -225,168 +227,216 @@ class GraphFlowModel(nn.Module):
                                                 where actual_aig_edge_type_idx is 0 for 'EDGE_REG', 1 for 'EDGE_INV'.
                 - actual_num_nodes (int): Actual number of nodes generated.
         """
-        # Ensure temperatures are positive
         if temperature_node <= 1e-9: temperature_node = 1e-9
         if temperature_edge <= 1e-9: temperature_edge = 1e-9
 
         with torch.no_grad():
-            # Get the underlying model if wrapped in DataParallel
             flow_core_model = self.flow_core.module if isinstance(self.flow_core, nn.DataParallel) else self.flow_core
+            link_prediction_schedule = flow_core_model.index_select_edge  # Shape: (num_mask_edge, 2)
 
-            # --- Initialize Graph State Tracking ---
             cur_node_features_one_hot = torch.zeros([1, max_nodes, self.node_dim], device=device)
-            cur_adj_features_one_hot = torch.zeros([1, self.bond_dim, max_nodes, max_nodes], device=device) # Includes NO_EDGE channel
-            typed_edges_generated = [] # Stores (u, v, type_idx) for REG/INV edges
-            current_node_types = {} # node_idx -> type_string
-            current_in_degrees = defaultdict(int) # node_idx -> in_degree count
-            # Node Type Counters for Constraints
+            cur_adj_features_one_hot = torch.zeros([1, self.bond_dim, max_nodes, max_nodes], device=device)
+            typed_edges_generated = []
+            current_node_types = {}
+            current_in_degrees = defaultdict(int)
             const0_count = 0
             pi_count = 0
             po_count = 0
-            # --- End Initialization ---
 
             actual_num_nodes = 0
-            edge_step_idx = 0 # Tracks which edge slot's base probability to use
-            max_resamples_per_edge_slot = 5 # Max attempts to find a valid edge for a slot
-            disconnection_streak = 0 # Counter for consecutive disconnected nodes
+            edge_step_idx = 0  # Global cursor for the edge schedule and edge_base_log_probs
+            disconnection_streak = 0
 
             edge_base_probs_shape_0 = self.edge_base_log_probs.shape[0]
-            print(f"--- Starting Generation: edge_base_log_probs shape[0] = {edge_base_probs_shape_0} ---")
+            max_scheduled_edges = link_prediction_schedule.shape[0]
 
-            # --- Main Generation Loop ---
-            for i in range(max_nodes): # Iterate through potential node indices
-                # --- Node Generation Step ---
-                # 1. Sample latent node from base distribution
+            if edge_base_probs_shape_0 != max_scheduled_edges:
+                warnings.warn(
+                    f"Mismatch between edge_base_log_probs size ({edge_base_probs_shape_0}) and link_prediction_schedule size ({max_scheduled_edges}). Using smaller one as limit.")
+                # This should ideally not happen if initialize_masks and __init__ are correct
+                # as num_mask_edge should be consistent.
+                limit_edge_steps = min(edge_base_probs_shape_0, max_scheduled_edges)
+            else:
+                limit_edge_steps = edge_base_probs_shape_0
+
+            print(f"--- Starting Generation (Original DIG-like Edge Schedule) ---")
+            print(f"Max nodes to generate: {max_nodes}")
+            print(f"Total scheduled edge steps: {limit_edge_steps}")
+
+            for i in range(max_nodes):  # Iterate through potential node indices (target_node_idx for upcoming edges)
+                # --- Node Generation Step for node i ---
                 node_logits_prior = self.node_base_log_probs[i] / temperature_node
                 prior_node_dist = torch.distributions.Categorical(logits=node_logits_prior)
                 latent_node_idx_prior = prior_node_dist.sample()
-                latent_node_one_hot_prior = F.one_hot(latent_node_idx_prior, num_classes=self.node_dim).float().unsqueeze(0).to(device)
+                latent_node_one_hot_prior = F.one_hot(latent_node_idx_prior,
+                                                      num_classes=self.node_dim).float().unsqueeze(0).to(device)
 
-                # 2. Apply reverse flow to get output logits
                 output_node_logits = flow_core_model.reverse(
                     x_cond_onehot=cur_node_features_one_hot,
                     adj_cond_onehot=cur_adj_features_one_hot,
                     z_onehot=latent_node_one_hot_prior,
                     mode=0
-                ).view(-1) # Shape [node_dim]
+                ).view(-1)
 
-                # 3. Apply Node Count Constraints by Modifying Logits
                 constrained_node_logits = output_node_logits.clone()
                 if const0_count >= 1: constrained_node_logits[NODE_CONST0_IDX] = -float('inf')
                 if pi_count >= MAX_PI_COUNT: constrained_node_logits[NODE_PI_IDX] = -float('inf')
                 if po_count >= MAX_PO_COUNT: constrained_node_logits[NODE_PO_IDX] = -float('inf')
 
-                # Safety check if all types become disallowed
                 if torch.isinf(constrained_node_logits).all():
                     warnings.warn(f"Node {i}: All node types disallowed by constraints. Stopping generation.")
-                    actual_num_nodes = i # Roll back count as node 'i' is invalid
-                    break # Stop generation loop
+                    # actual_num_nodes is already i from the previous successful node.
+                    break
 
-                # 4. Sample final node type from constrained logits
                 final_node_type_dist = torch.distributions.Categorical(logits=constrained_node_logits)
                 final_node_type_idx = final_node_type_dist.sample().item()
 
-                # 5. Update Graph State (Node)
                 cur_node_features_one_hot[0, i, final_node_type_idx] = 1.0
-                node_type_str = AIG_NODE_TYPE_KEYS[final_node_type_idx] if 0 <= final_node_type_idx < len(AIG_NODE_TYPE_KEYS) else "UNKNOWN_NODE"
+                # For AIGs, adjacency diagonal for self-loops is not typically 1 unless it's a special no-edge marker
+                # cur_adj_features_one_hot[0, :, i, i] = 1.0 # Original DIG had this, check if needed for AIG
+                node_type_str = AIG_NODE_TYPE_KEYS[final_node_type_idx]
                 current_node_types[i] = node_type_str
-                actual_num_nodes = i + 1
-                # Update counts
-                if node_type_str == NODE_CONST0_STR: const0_count += 1
-                elif node_type_str == NODE_PI_STR: pi_count += 1
-                elif node_type_str == NODE_PO_STR: po_count += 1
+                actual_num_nodes = i + 1  # Node i has been successfully added
+
+                if node_type_str == NODE_CONST0_STR:
+                    const0_count += 1
+                elif node_type_str == NODE_PI_STR:
+                    pi_count += 1
+                elif node_type_str == NODE_PO_STR:
+                    po_count += 1
                 # --- End Node Generation Step ---
 
-                # --- Edge Generation Step (for node i connecting to previous nodes) ---
-                is_node_i_connected = False # Track connectivity for this new node
-                if i > 0:
-                    start_prev_node_idx = max(0, i - self.edge_unroll)
-                    for prev_node_idx in range(start_prev_node_idx, i):
+                # --- Edge Generation Step: Process scheduled edges targeting the newly added node 'i' ---
+                is_node_i_connected = False
+                if i > 0:  # Edges only form if there's more than one node
+                    # Iterate through the global edge schedule as long as the target of the scheduled edge is current node 'i'
+                    while edge_step_idx < limit_edge_steps and \
+                            link_prediction_schedule[edge_step_idx, 1].item() == i:
 
-                        # Check if we have exhausted the precalculated edge steps/masks
-                        if edge_step_idx >= edge_base_probs_shape_0:
-                            warnings.warn(f"edge_step_idx ({edge_step_idx}) exceeded edge base probs size ({edge_base_probs_shape_0}). Stopping edge generation for node {i}.")
-                            break # Stop adding edges for this node 'i'
+                        current_target_node_in_schedule = link_prediction_schedule[edge_step_idx, 1].item()
+                        prev_node_idx = link_prediction_schedule[edge_step_idx, 0].item()
 
-                        # --- Resampling Loop for Edge Slot (prev_node_idx -> i) ---
+                        # This assertion should hold true due to how link_prediction_index is constructed
+                        # (edges always point from an existing node to the new node i)
+                        if prev_node_idx >= current_target_node_in_schedule:  # current_target_node_in_schedule is i
+                            warnings.warn(
+                                f"Scheduled edge from {prev_node_idx} to {current_target_node_in_schedule} (node {i}) "
+                                f"is not strictly autoregressive or prev_node_idx is invalid. Skipping. edge_step_idx: {edge_step_idx}")
+                            edge_step_idx += 1  # Consume this problematic scheduled edge and move to the next
+                            continue
+
+                        # --- Resampling Loop for this specific scheduled edge slot (prev_node_idx -> i) ---
                         valid_edge_category_found = False
                         resamples = 0
                         invalid_cats_tried = set()
+                        # Use the prior for the current globally scheduled edge
                         base_logits_slot = self.edge_base_log_probs[edge_step_idx].clone().to(device)
 
-                        while not valid_edge_category_found and resamples < max_resamples_per_edge_slot and len(invalid_cats_tried) < self.bond_dim:
-                            # 1. Sample potential edge category (masking invalid attempts)
+                        target_node_idx_for_reverse = i  # The node we are connecting to
+
+                        while not valid_edge_category_found and resamples < 5 and len(
+                                invalid_cats_tried) < self.bond_dim:  # max_resamples_per_edge_slot = 5
                             logits_for_sampling = base_logits_slot.clone()
                             for invalid_cat in invalid_cats_tried: logits_for_sampling[invalid_cat] = -float('inf')
-                            if torch.isinf(logits_for_sampling).all(): final_edge_cat_idx = self.bond_dim - 1; break # Force NO_EDGE
+                            if torch.isinf(logits_for_sampling).all():
+                                final_edge_cat_idx = self.bond_dim - 1  # Force NO_EDGE
+                                break
 
                             prior_dist = torch.distributions.Categorical(logits=logits_for_sampling / temperature_edge)
                             latent_idx = prior_dist.sample()
-                            latent_one_hot = F.one_hot(latent_idx, num_classes=self.bond_dim).float().unsqueeze(0).to(device)
+                            latent_one_hot = F.one_hot(latent_idx, num_classes=self.bond_dim).float().unsqueeze(0).to(
+                                device)
 
-                            # 2. Reverse flow for edge
-                            edge_indices = torch.tensor([[prev_node_idx, i]], device=device).long()
-                            output_logits = flow_core_model.reverse(cur_node_features_one_hot, cur_adj_features_one_hot, latent_one_hot, mode=1, edge_index=edge_indices).view(-1)
+                            edge_indices_for_reverse = torch.tensor([[prev_node_idx, target_node_idx_for_reverse]],
+                                                                    device=device).long()
+                            output_logits = flow_core_model.reverse(cur_node_features_one_hot, cur_adj_features_one_hot,
+                                                                    latent_one_hot, mode=1,
+                                                                    edge_index=edge_indices_for_reverse).view(-1)
 
-                            # 3. Sample final category (masking invalid attempts again)
                             final_logits = output_logits.clone()
                             for invalid_cat in invalid_cats_tried: final_logits[invalid_cat] = -float('inf')
-                            if torch.isinf(final_logits).all(): final_edge_cat_idx = self.bond_dim - 1; break # Force NO_EDGE
+                            if torch.isinf(final_logits).all():
+                                final_edge_cat_idx = self.bond_dim - 1  # Force NO_EDGE
+                                break
 
                             final_dist = torch.distributions.Categorical(logits=final_logits)
                             final_edge_cat_idx = final_dist.sample().item()
 
-                            # 4. Map to AIG edge type and check validity
-                            aig_edge_type = -1 # NO_EDGE default
-                            if final_edge_cat_idx == 0: aig_edge_type = 0 # REG
-                            elif final_edge_cat_idx == 1: aig_edge_type = 1 # INV
+                            aig_edge_type = -1
+                            if final_edge_cat_idx == 0:
+                                aig_edge_type = 0  # REG
+                            elif final_edge_cat_idx == 1:
+                                aig_edge_type = 1  # INV
+                            # final_edge_cat_idx == 2 (self.bond_dim - 1) is NO_EDGE
 
-                            is_valid = self._check_aig_edge_validity(prev_node_idx, i, aig_edge_type, current_node_types, current_in_degrees)
+                            is_valid = self._check_aig_edge_validity(prev_node_idx, target_node_idx_for_reverse,
+                                                                     aig_edge_type, current_node_types,
+                                                                     current_in_degrees)
 
-                            # 5. Update or Resample
                             if is_valid:
                                 valid_edge_category_found = True
-                                # Update state permanently
-                                cur_adj_features_one_hot[0, final_edge_cat_idx, i, prev_node_idx] = 1.0
-                                cur_adj_features_one_hot[0, final_edge_cat_idx, prev_node_idx, i] = 1.0
-                                if aig_edge_type != -1:
-                                    typed_edges_generated.append((prev_node_idx, i, aig_edge_type))
-                                    current_in_degrees[i] += 1
+                                cur_adj_features_one_hot[
+                                    0, final_edge_cat_idx, target_node_idx_for_reverse, prev_node_idx] = 1.0  # v -> u
+                                cur_adj_features_one_hot[
+                                    0, final_edge_cat_idx, prev_node_idx, target_node_idx_for_reverse] = 1.0  # u -> v (for undirected representation in adj if needed, but AIGs are directed)
+                                # For AIG (directed), we typically only set target_node_idx, prev_node_idx for GNNs that expect u->v as adj[v,u]
+                                # Let's assume adj[v,u] = 1 for an edge u->v.
+                                # The PyG Data object in your processing script sets adj_matrix[edge_channel_index, v_new, u_new] = 1.0
+                                # So, for an edge prev_node_idx -> target_node_idx_for_reverse (i.e. u -> v), we set adj[channel, v, u]
+                                cur_adj_features_one_hot[
+                                    0, final_edge_cat_idx, target_node_idx_for_reverse, prev_node_idx] = 1.0
+                                # If your GNN consumes adj[u,v] for u->v, then it should be:
+                                # cur_adj_features_one_hot[0, final_edge_cat_idx, prev_node_idx, target_node_idx_for_reverse] = 1.0
+                                # Let's stick to your dataset's convention: (v,u) for u->v
+                                # Clear the other direction if it was set for symmetry previously
+                                # cur_adj_features_one_hot[0, final_edge_cat_idx, prev_node_idx, target_node_idx_for_reverse] = 0.0
+
+                                if aig_edge_type != -1:  # If it's not NO_EDGE
+                                    typed_edges_generated.append(
+                                        (prev_node_idx, target_node_idx_for_reverse, aig_edge_type))
+                                    current_in_degrees[target_node_idx_for_reverse] += 1
                                     is_node_i_connected = True
                             else:
                                 invalid_cats_tried.add(final_edge_cat_idx)
                                 resamples += 1
                         # --- End Resampling Loop ---
 
-                        # Default to NO_EDGE if no valid edge found
-                        if not valid_edge_category_found:
+                        if not valid_edge_category_found:  # Default to NO_EDGE if no valid edge found after resampling
                             no_edge_idx = self.bond_dim - 1
-                            cur_adj_features_one_hot[0, no_edge_idx, i, prev_node_idx] = 1.0
-                            cur_adj_features_one_hot[0, no_edge_idx, prev_node_idx, i] = 1.0
+                            cur_adj_features_one_hot[0, no_edge_idx, target_node_idx_for_reverse, prev_node_idx] = 1.0
+                            # cur_adj_features_one_hot[0, no_edge_idx, prev_node_idx, target_node_idx_for_reverse] = 1.0 # if symmetric
 
-                        edge_step_idx += 1 # Move to next edge slot
-                    # --- End Inner Edge Loop ---
+                        edge_step_idx += 1  # Crucial: move to the next globally scheduled edge
+                    # --- End While loop for scheduled edges targeting node i ---
 
-                # --- Check Connectivity and Patience after processing all edges for node i ---
-                if i > 0:
-                    if is_node_i_connected:
-                        disconnection_streak = 0 # Reset
-                    else:
-                        disconnection_streak += 1
-                        if disconnection_streak >= disconnection_patience:
-                            print(f"Terminating generation early at node {i+1} (index {i}) due to disconnection patience ({disconnection_patience}).")
-                            # Roll back: remove the last disconnected node
-                            actual_num_nodes = i
-                            cur_node_features_one_hot[0, i, :] = 0.0
-                            cur_adj_features_one_hot[:, :, i, :] = 0.0
-                            cur_adj_features_one_hot[:, :, :, i] = 0.0
-                            if i in current_node_types: del current_node_types[i]
-                            if i in current_in_degrees: del current_in_degrees[i]
-                            # Adjust edge_step_idx back? Maybe not necessary if loop breaks.
-                            break # Exit the main node generation loop
-            # --- End Main Node Loop ---
+                # --- Disconnection Patience Logic for node i ---
+                if i == 0:  # First node is by definition "connected" to the graph structure
+                    disconnection_streak = 0
+                elif is_node_i_connected:
+                    disconnection_streak = 0
+                else:  # Node i > 0 and was not connected by any scheduled edge
+                    disconnection_streak += 1
+                    if disconnection_streak >= disconnection_patience:
+                        print(
+                            f"Terminating generation early at node {actual_num_nodes} (index {i}) due to disconnection patience ({disconnection_patience}). Node {i} was not connected.")
+                        # Roll back the last disconnected node i
+                        actual_num_nodes = i
+                        cur_node_features_one_hot[0, i, :] = 0.0
+                        # Clear any adj entries involving node i (though none should have been made if not connected)
+                        cur_adj_features_one_hot[:, :, i, :] = 0.0
+                        cur_adj_features_one_hot[:, :, :, i] = 0.0
+                        if i in current_node_types: del current_node_types[i]
+                        if i in current_in_degrees: del current_in_degrees[i]
+                        # Adjust counts if node i was rolled back
+                        if node_type_str == NODE_CONST0_STR:
+                            const0_count -= 1
+                        elif node_type_str == NODE_PI_STR:
+                            pi_count -= 1
+                        elif node_type_str == NODE_PO_STR:
+                            po_count -= 1
+                        break  # Exit the main node generation loop (for i)
+            # --- End Main Node Loop (for i) ---
 
-            # Return the final generated state (up to actual_num_nodes)
             raw_node_features_output_one_hot = cur_node_features_one_hot.squeeze(0)
             return raw_node_features_output_one_hot, typed_edges_generated, actual_num_nodes
 

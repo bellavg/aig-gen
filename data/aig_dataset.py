@@ -135,109 +135,87 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                  num_augmentations: int = 5,
                  transform=None, pre_transform=None, pre_filter=None):
         """ Initializes the dataset, handling processing or loading. """
-        # Store raw info temporarily for potential use in self.process()
         self._temp_raw_dir = raw_dir
         self._temp_file_prefix = file_prefix
         self._temp_pkl_files = pkl_file_names_for_split if pkl_file_names_for_split is not None else []
-
-        # Set essential attributes
         self.dataset_name = dataset_name
         self.split = split
         self.num_augmentations = num_augmentations
-
         processed_root = osp.join(root, dataset_name)
         super().__init__(processed_root, transform, pre_transform, pre_filter)
-
-        # Load final processed data
         try:
             self.data, self.slices = torch.load(self.processed_paths[0])
             print(f"Dataset '{self.dataset_name}' split '{self.split}' initialized. Samples: {len(self)}")
         except FileNotFoundError:
              raise FileNotFoundError(f"Final processed file not found: {self.processed_paths[0]}. Run processing first.")
         except Exception as e:
-            raise RuntimeError(f"Failed to load final processed data from {self.processed_paths[0]}: {e}")
+            # If loading fails, it might be due to the weights_only issue during load itself
+            # Try loading with weights_only=False as a fallback during initialization
+            try:
+                print(f"Initial load failed for {self.processed_paths[0]}. Attempting load with weights_only=False...")
+                self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
+                print(f"Successfully loaded with weights_only=False.")
+                print(f"Dataset '{self.dataset_name}' split '{self.split}' initialized. Samples: {len(self)}")
+            except Exception as e_fallback:
+                 raise RuntimeError(f"Failed to load processed data from {self.processed_paths[0]} even with weights_only=False: {e_fallback}")
 
-        # Clean up temporary attributes
-        del self._temp_raw_dir
-        del self._temp_file_prefix
-        del self._temp_pkl_files
+        # Clean up temporary attributes if they exist
+        if hasattr(self, '_temp_raw_dir'): del self._temp_raw_dir
+        if hasattr(self, '_temp_file_prefix'): del self._temp_file_prefix
+        if hasattr(self, '_temp_pkl_files'): del self._temp_pkl_files
 
     @property
     def raw_file_names(self) -> List[str]:
-        """ Returns the list of raw filenames relative to raw_dir. """
         return getattr(self, '_temp_pkl_files', [])
 
     @property
     def raw_paths(self) -> List[str]:
-        """ Returns a list of absolute paths to the raw files for this split. """
         if not hasattr(self, '_temp_raw_dir') or self._temp_raw_dir is None: return []
-        # Use self.raw_file_names which accesses the temp list
         return [osp.join(self._temp_raw_dir, name) for name in self.raw_file_names]
 
     @property
     def processed_file_names(self) -> str | List[str] | Tuple:
-        """ Returns the name(s) of the final processed file(s). """
         return [f'{self.split}_augmented_data.pt']
 
     def download(self):
         pass
 
     def process(self):
-        """
-        Processes raw PKL files sequentially, applies augmentation, saves intermediate
-        chunks, and combines them into the final PyG data file.
-        """
-        # Check if necessary raw data information was provided via temp vars
+        """ Processes raw PKL files sequentially and saves PyG data. """
         if self._temp_raw_dir is None or self._temp_file_prefix is None or not self._temp_pkl_files:
             raise ValueError("Raw directory, file prefix, and file list are required for processing.")
 
         print(f"Processing raw PKL files sequentially and augmenting for split: {self.split}...")
-        intermediate_files = [] # Store paths to temporary chunk files
-        total_original_graphs = 0
-        total_successful_conversions = 0
-        total_augmentations_created = 0
-
-        # Ensure processed directory exists for intermediate files
+        intermediate_files = []
+        total_original_graphs, total_successful_conversions, total_augmentations_created = 0, 0, 0
         os.makedirs(self.processed_dir, exist_ok=True)
 
-        # --- Process each PKL file chunk ---
         for pkl_file_idx, raw_path in enumerate(tqdm(self.raw_paths, desc=f"Processing PKL Chunks ({self.split})")):
-            if not osp.exists(raw_path):
-                warnings.warn(f"Raw file not found: {raw_path}. Skipping chunk.")
-                continue
-
+            if not osp.exists(raw_path): continue
             current_chunk_data_list = []
             try:
                 with open(raw_path, 'rb') as f: nx_graphs_chunk = pickle.load(f)
-                if not isinstance(nx_graphs_chunk, list):
-                    warnings.warn(f"File {raw_path} did not contain a list. Skipping chunk."); continue
-            except Exception as e:
-                warnings.warn(f"Could not load {raw_path}: {e}. Skipping chunk."); continue
+                if not isinstance(nx_graphs_chunk, list): continue
+            except Exception as e: warnings.warn(f"Load error {raw_path}: {e}"); continue
 
-            # Process graphs within the current chunk
             for graph_idx_in_chunk, nx_graph in enumerate(nx_graphs_chunk):
-                if not isinstance(nx_graph, nx.DiGraph): continue # Skip non-graphs
-
+                if not isinstance(nx_graph, nx.DiGraph): continue
                 total_original_graphs += 1
                 base_pyg_data = _convert_nx_to_pyg_data(
                     nx_graph, MAX_NODES_PAD, NUM_NODE_FEATURES,
                     NUM_ADJ_CHANNELS, NUM_EXPLICIT_EDGE_TYPES)
-
                 if base_pyg_data is not None:
                     total_successful_conversions += 1
-                    current_chunk_data_list.append(base_pyg_data.clone()) # Add original
-
-                    # Apply Augmentations (if training split)
+                    current_chunk_data_list.append(base_pyg_data.clone())
                     num_actual_nodes = base_pyg_data.num_nodes.item()
                     if num_actual_nodes > 0 and self.num_augmentations > 0:
                         try:
-                            temp_nx_graph = nx.DiGraph() # Reconstruct temp graph
+                            temp_nx_graph = nx.DiGraph()
                             for i in range(num_actual_nodes): temp_nx_graph.add_node(i)
                             for ch in range(NUM_EXPLICIT_EDGE_TYPES):
                                 adj_channel = base_pyg_data.adj[ch, :num_actual_nodes, :num_actual_nodes]
                                 sources, targets = adj_channel.nonzero(as_tuple=True)
                                 for src, tgt in zip(sources.tolist(), targets.tolist()): temp_nx_graph.add_edge(src, tgt)
-
                             for aug_idx in range(self.num_augmentations):
                                 try:
                                     aug_seed = (pkl_file_idx * len(nx_graphs_chunk) + graph_idx_in_chunk) * (self.num_augmentations + 1) + (aug_idx + 1)
@@ -253,34 +231,28 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                                         augmented_data.adj = augmented_data.adj[:, full_perm_tensor][:, :, full_perm_tensor]
                                         current_chunk_data_list.append(augmented_data)
                                         total_augmentations_created += 1
-                                except nx.NetworkXUnfeasible: pass # Skip aug if cycle
+                                except nx.NetworkXUnfeasible: pass
                                 except Exception as e: warnings.warn(f"Aug error: {e}")
                         except Exception as recon_e: warnings.warn(f"Recon error: {recon_e}")
 
-            # Save intermediate chunk if it contains data
             if current_chunk_data_list:
                 intermediate_path = osp.join(self.processed_dir, f'{self.split}_temp_part_{pkl_file_idx}.pt')
                 try:
+                    # Save intermediate list directly
                     torch.save(current_chunk_data_list, intermediate_path)
                     intermediate_files.append(intermediate_path)
-                    print(f"  Saved intermediate chunk: {osp.basename(intermediate_path)} ({len(current_chunk_data_list)} graphs)")
-                except Exception as e:
-                    warnings.warn(f"Failed to save intermediate chunk {intermediate_path}: {e}")
+                    # print(f"  Saved intermediate chunk: {osp.basename(intermediate_path)} ({len(current_chunk_data_list)} graphs)") # Can be verbose
+                except Exception as e: warnings.warn(f"Failed to save intermediate chunk {intermediate_path}: {e}")
+            del current_chunk_data_list, nx_graphs_chunk; gc.collect()
 
-            # Clear memory for the current chunk
-            del current_chunk_data_list
-            del nx_graphs_chunk
-            gc.collect()
-        # --- End PKL file loop ---
-
-        # --- Combine Intermediate Chunks ---
         print(f"\nCombining {len(intermediate_files)} intermediate chunks for split '{self.split}'...")
         final_data_list = []
         for intermediate_path in tqdm(intermediate_files, desc="Combining Chunks"):
             try:
-                chunk_data = torch.load(intermediate_path)
+                # *** FIX: Load with weights_only=False ***
+                chunk_data = torch.load(intermediate_path, weights_only=False)
                 final_data_list.extend(chunk_data)
-                os.remove(intermediate_path) # Clean up intermediate file
+                os.remove(intermediate_path)
             except Exception as e:
                 warnings.warn(f"Failed to load or delete intermediate chunk {intermediate_path}: {e}")
 
@@ -290,10 +262,15 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
         print(f"Total augmentations created: {total_augmentations_created}")
         print(f"Total samples combined: {len(final_data_list)}")
 
-        # Collate and save the final combined data
+        # --- FIX: Handle empty list before collate ---
         if not final_data_list:
-            warnings.warn(f"No data processed for split '{self.split}'. Saving empty final file.")
-            data, slices = self.collate([])
+            warnings.warn(f"No data to collate for split '{self.split}'. Saving empty dataset.")
+            # Create placeholder empty data and slices
+            # Need a dummy Data object to get the class for collate
+            # Or handle saving manually
+            # Let's create dummy data manually to avoid collate error
+            data = Data() # Create an empty Data object
+            slices = {key: torch.tensor([0, 0]) for key in data.keys} # Basic slices for empty data
         else:
             # Apply pre_filter and pre_transform if specified
             if self.pre_filter is not None:
@@ -303,14 +280,17 @@ class AIGProcessedAugmentedDataset(InMemoryDataset):
                  print("Applying pre_transform...")
                  final_data_list = [self.pre_transform(d) for d in final_data_list]
 
-            print(f"Collating final data list ({len(final_data_list)} samples)...")
-            data, slices = self.collate(final_data_list)
+            if not final_data_list: # Check again after filtering
+                 warnings.warn(f"No data remaining after pre-filtering for split '{self.split}'. Saving empty dataset.")
+                 data = Data()
+                 slices = {key: torch.tensor([0, 0]) for key in data.keys}
+            else:
+                 print(f"Collating final data list ({len(final_data_list)} samples)...")
+                 data, slices = self.collate(final_data_list) # Now safe to call collate
 
-        final_save_path = self.processed_paths[0] # Path defined by InMemoryDataset
+        final_save_path = self.processed_paths[0]
         torch.save((data, slices), final_save_path)
         print(f"Saved final processed data for split '{self.split}' to: {final_save_path}")
-
-    # get() and len() inherited from InMemoryDataset work correctly
 
 
 # --- Command Line Interface ---
