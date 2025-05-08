@@ -14,7 +14,7 @@ CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 DATA_ROOT="./aigs_pyg/"       # Root directory containing the 'aig' folder
 DATASET_NAME="aig"          # Dataset subfolder name (contains 'processed')
 # Raw Data Location (for dataset context during loading)
-RAW_DATA_DIR="./aigs"       # *** ADDED: Directory containing original PKL files ***
+RAW_DATA_DIR="./data/aigs"       # *** ADDED: Directory containing original PKL files ***
 RAW_FILE_PREFIX="real_aigs_part_" # *** ADDED: Prefix for original PKL files ***
 NUM_TRAIN_FILES=4           # *** ADDED: Number of PKL files for train split ***
 NUM_VAL_FILES=1             # *** ADDED: Number of PKL files for val split ***
