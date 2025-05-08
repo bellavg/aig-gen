@@ -43,7 +43,7 @@ train:
   save_top_k: 3                 # Save top 3 checkpoints based on validation NLL ('val/epoch_NLL')
   # Number of workers for DataLoader. Tune based on system CPU/IO.
   # Start with 0 if encountering issues, increase if GPU waits for data.
-  num_workers: 4
+  num_workers: 0
   ema_decay: 0                  # Exponential Moving Average (0 to disable, 0.999 is common if used)
   optimizer: adamw              # Optimizer type
   seed: 42                      # Reproducibility seed

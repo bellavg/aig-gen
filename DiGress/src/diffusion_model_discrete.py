@@ -5,11 +5,11 @@ import pytorch_lightning as pl
 import time
 import wandb
 import os
-# import pickle # Removed unused import
 import networkx as nx
 import numpy as np
 import pathlib
 import logging
+import traceback  # Added import for traceback printing
 from collections import defaultdict, Counter
 from tqdm import tqdm
 
@@ -23,8 +23,8 @@ import utils
 
 # --- Try to import AIG config for mappings ---
 # Use relative import assuming aig_config.py is in the same directory
-
 import aig_config as aig_cfg
+
 # --- Fallback logic remains the same ---
 NODE_INDEX_TO_ENCODING = {
     i: np.array(aig_cfg.NODE_TYPE_ENCODING[key], dtype=np.float32)
@@ -244,8 +244,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return {'loss': nll}
         except Exception as e:
              print(f"Error in validation_step {i}: {e}")
-             # import traceback
-             # traceback.print_exc()
+             traceback.print_exc() # <--- ADDED TRACEBACK PRINTING HERE
              return {'loss': torch.tensor(float('inf'), device=self.device)} # Return Inf loss on error
 
     def test_step(self, data, i):
@@ -265,8 +264,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return {'loss': nll}
         except Exception as e:
              print(f"Error in test_step {i}: {e}")
-             # import traceback
-             # traceback.print_exc()
+             traceback.print_exc() # Also added here for consistency during testing
              return {'loss': torch.tensor(float('inf'), device=self.device)} # Return Inf loss on error
 
     # --- Epoch Start/End Callbacks (Mostly Unchanged) ---
@@ -1050,3 +1048,4 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.test_E_kl.reset()
         self.test_X_logp.reset()
         self.test_E_logp.reset()
+
