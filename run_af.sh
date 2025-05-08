@@ -14,16 +14,16 @@ CONDA_ENV_NAME="g2pt-aig" # Your Conda environment name
 # --- Data Configuration ---
 # Use SLURM_SUBMIT_DIR to construct paths, assuming job is submitted from the project root.
 # SLURM_SUBMIT_DIR is an absolute path.
-DATA_ROOT_PROCESSED="${SLURM_SUBMIT_DIR}/data/aigs_pyg"
+DATA_ROOT_PROCESSED="./data/aigs_pyg"
 DATASET_NAME="aig"
 
-RAW_DATA_DIR="${SLURM_SUBMIT_DIR}/data/aigs"
+RAW_DATA_DIR="./data/aigs"
 RAW_FILE_PREFIX="real_aigs_part_"
 NUM_TRAIN_FILES=4
 NUM_VAL_FILES=1
 NUM_TEST_FILES=1
 
-TRAIN_DATA_DIR_FOR_NOVELTY="${SLURM_SUBMIT_DIR}/data/aigs"
+TRAIN_DATA_DIR_FOR_NOVELTY="./data/aigs"
 
 # --- Training Hyperparameters ---
 LR=0.0005
@@ -53,10 +53,10 @@ TEMPERATURE_AF=0.75
 MIN_NODES=5
 
 GEN_OUTPUT_DIR_REL="./generated_graphs"
-GEN_OUTPUT_DIR=$(realpath -m "${SLURM_SUBMIT_DIR}/${GEN_OUTPUT_DIR_REL}")
+
 
 GEN_PICKLE_FILENAME="${MODEL_NAME}_generated_${NUM_SAMPLES}_temp${TEMPERATURE_AF}_epoch${MAX_EPOCHS}_${SLURM_JOB_ID}.pkl"
-GEN_PICKLE_PATH="${GEN_OUTPUT_DIR}/${GEN_PICKLE_FILENAME}"
+GEN_PICKLE_PATH="${GEN_OUTPUT_DIR_REL}/${GEN_PICKLE_FILENAME}"
 
 # --- Script Names ---
 TRAIN_SCRIPT="train_graphs.py"
