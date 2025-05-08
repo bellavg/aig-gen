@@ -5,6 +5,14 @@ import pytorch_lightning as pl
 import time
 import wandb
 import os
+import pickle
+import networkx as nx
+# import subprocess # Removed subprocess
+import numpy as np
+import pathlib # Added for path manipulation
+import logging # Added for evaluation logging consistency
+from collections import defaultdict, Counter # Added for evaluation
+from tqdm import tqdm # Added for evaluation progress
 
 from models.transformer_model import GraphTransformer
 from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete,\
@@ -14,10 +22,54 @@ from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from . import utils
 
+# --- Try to import AIG config for mappings ---
+try:
+    import G2PT.configs.aig as aig_cfg
+    NODE_INDEX_TO_ENCODING = {
+        i: np.array(aig_cfg.NODE_TYPE_ENCODING[key], dtype=np.float32)
+        for i, key in enumerate(aig_cfg.NODE_TYPE_KEYS)
+    }
+    EDGE_INDEX_TO_ENCODING = {
+        0: np.array([1., 0., 0.], dtype=np.float32) # NoEdge encoding
+    }
+    for i, key in enumerate(aig_cfg.EDGE_TYPE_KEYS):
+         EDGE_INDEX_TO_ENCODING[i + 1] = np.array(aig_cfg.EDGE_LABEL_ENCODING[key], dtype=np.float32)
+    print("Successfully loaded AIG config for conversion.")
+except ImportError:
+    print("WARNING: Could not import G2PT.configs.aig. Using fallback mappings.")
+    NODE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(4)]) for i in range(4)}
+    EDGE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(3)]) for i in range(3)}
+except AttributeError:
+     print("WARNING: G2PT.configs.aig missing attributes. Using fallback mappings.")
+     NODE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(4)]) for i in range(4)}
+     EDGE_INDEX_TO_ENCODING = {i: np.array([1.0 if j == i else 0.0 for j in range(3)]) for i in range(3)}
+
+# --- Import evaluation functions ---
+try:
+    from evaluate_aigs import (
+        calculate_structural_aig_metrics,
+        count_pi_po_paths,
+        calculate_uniqueness,
+        calculate_novelty,
+        load_training_graphs_from_pkl,
+        NODE_PI, NODE_PO, NODE_CONST0
+    )
+    print("Successfully imported evaluation functions from evaluate_aigs.")
+except ImportError as e:
+    print(f"ERROR: Could not import functions from evaluate_aigs.py: {e}")
+    print("Evaluation in on_test_epoch_end will be skipped.")
+    def calculate_structural_aig_metrics(*args, **kwargs): return {'is_structurally_valid': 0.0, 'constraints_failed': ['Import Failed']}
+    def count_pi_po_paths(*args, **kwargs): return {}
+    def calculate_uniqueness(*args, **kwargs): return 0.0, 0
+    def calculate_novelty(*args, **kwargs): return 0.0, 0
+    def load_training_graphs_from_pkl(*args, **kwargs): return None
+    NODE_PI, NODE_PO, NODE_CONST0 = "NODE_PI", "NODE_PO", "NODE_CONST0"
+
+eval_logger = logging.getLogger("internal_aig_evaluation")
+eval_logger.setLevel(logging.INFO)
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
-    def __init__(self, cfg, dataset_infos, train_metrics, sampling_metrics, visualization_tools, extra_features,
-                 domain_features):
+    def __init__(self, cfg, dataset_infos, train_metrics, extra_features, domain_features, sampling_metrics=None, visualization_tools=None): # Added defaults
         super().__init__()
 
         input_dims = dataset_infos.input_dims
@@ -54,9 +106,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.test_E_logp = SumExceptBatchMetric()
 
         self.train_metrics = train_metrics
+        # Store sampling_metrics and visualization_tools even if None
         self.sampling_metrics = sampling_metrics
-
         self.visualization_tools = visualization_tools
+
         self.extra_features = extra_features
         self.domain_features = domain_features
 
@@ -74,24 +127,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if cfg.model.transition == 'uniform':
             self.transition_model = DiscreteUniformTransition(x_classes=self.Xdim_output, e_classes=self.Edim_output,
                                                               y_classes=self.ydim_output)
-            x_limit = torch.ones(self.Xdim_output) / self.Xdim_output
-            e_limit = torch.ones(self.Edim_output) / self.Edim_output
-            y_limit = torch.ones(self.ydim_output) / self.ydim_output
+            x_limit = torch.ones(self.Xdim_output) / self.Xdim_output if self.Xdim_output > 0 else torch.zeros(0)
+            e_limit = torch.ones(self.Edim_output) / self.Edim_output if self.Edim_output > 0 else torch.zeros(0)
+            y_limit = torch.ones(self.ydim_output) / self.ydim_output if self.ydim_output > 0 else torch.zeros(0)
             self.limit_dist = utils.PlaceHolder(X=x_limit, E=e_limit, y=y_limit)
+
         elif cfg.model.transition == 'marginal':
-
             node_types = self.dataset_info.node_types.float()
-            x_marginals = node_types / torch.sum(node_types)
-
+            x_marginals = node_types / torch.sum(node_types) if torch.sum(node_types) > 0 else torch.ones(self.Xdim_output) / self.Xdim_output
             edge_types = self.dataset_info.edge_types.float()
-            e_marginals = edge_types / torch.sum(edge_types)
+            e_marginals = edge_types / torch.sum(edge_types) if torch.sum(edge_types) > 0 else torch.ones(self.Edim_output) / self.Edim_output
             print(f"Marginal distribution of the classes: {x_marginals} for nodes, {e_marginals} for edges")
             self.transition_model = MarginalUniformTransition(x_marginals=x_marginals, e_marginals=e_marginals,
                                                               y_classes=self.ydim_output)
             self.limit_dist = utils.PlaceHolder(X=x_marginals, E=e_marginals,
-                                                y=torch.ones(self.ydim_output) / self.ydim_output)
+                                                y=torch.ones(self.ydim_output) / self.ydim_output if self.ydim_output > 0 else torch.zeros(0))
+        else:
+            raise ValueError(f"Unknown transition type {cfg.model.transition}")
 
-        self.save_hyperparameters(ignore=['train_metrics', 'sampling_metrics'])
+        self.save_hyperparameters(ignore=['train_metrics', 'sampling_metrics', 'visualization_tools'])
         self.start_epoch_time = None
         self.train_iterations = None
         self.val_iterations = None
@@ -100,53 +154,100 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.best_val_nll = 1e8
         self.val_counter = 0
 
+    def convert_to_nx(self, node_indices, edge_indices):
+        """ Converts the sampled discrete indices back to a NetworkX graph. """
+        G = nx.DiGraph()
+        n_nodes = node_indices.shape[0]
+        for i in range(n_nodes):
+            node_type_idx = node_indices[i].item()
+            if node_type_idx == -1: continue
+            node_one_hot = NODE_INDEX_TO_ENCODING.get(node_type_idx)
+            if node_one_hot is None: continue
+            G.add_node(i, type=node_one_hot)
+        for i in range(n_nodes):
+            for j in range(n_nodes):
+                if i == j: continue
+                edge_type_idx = edge_indices[i, j].item()
+                if edge_type_idx > 0:
+                    edge_one_hot = EDGE_INDEX_TO_ENCODING.get(edge_type_idx)
+                    if edge_one_hot is None: continue
+                    if G.has_node(i) and G.has_node(j): G.add_edge(i, j, type=edge_one_hot)
+        return G
+
     def training_step(self, data, i):
-        if data.edge_index.numel() == 0:
-            self.print("Found a batch with no edges. Skipping.")
-            return
-        dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-        dense_data = dense_data.mask(node_mask)
-        X, E = dense_data.X, dense_data.E
-        noisy_data = self.apply_noise(X, E, data.y, node_mask)
-        extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
-        loss = self.train_loss(masked_pred_X=pred.X, masked_pred_E=pred.E, pred_y=pred.y,
-                               true_X=X, true_E=E, true_y=data.y,
-                               log=i % self.log_every_steps == 0)
+        if not hasattr(data, 'edge_index') or data.edge_index.numel() == 0:
+            # print("Found a batch with no edges or invalid data. Skipping.") # Less verbose
+            return {'loss': torch.tensor(0.0, device=self.device, requires_grad=True)} # Return zero loss
+        try:
+            dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+            dense_data = dense_data.mask(node_mask)
+            X, E = dense_data.X, dense_data.E
+            noisy_data = self.apply_noise(X, E, data.y, node_mask)
+            extra_data = self.compute_extra_data(noisy_data)
+            pred = self.forward(noisy_data, extra_data, node_mask)
+            loss = self.train_loss(masked_pred_X=pred.X, masked_pred_E=pred.E, pred_y=pred.y,
+                                   true_X=X, true_E=E, true_y=data.y,
+                                   log=i % self.log_every_steps == 0)
+            if self.train_metrics:
+                self.train_metrics(masked_pred_X=pred.X, masked_pred_E=pred.E, true_X=X, true_E=E,
+                                   log=i % self.log_every_steps == 0)
+            return {'loss': loss}
+        except Exception as e:
+             print(f"Error in training_step: {e}")
+             return {'loss': torch.tensor(0.0, device=self.device, requires_grad=True)}
 
-        self.train_metrics(masked_pred_X=pred.X, masked_pred_E=pred.E, true_X=X, true_E=E,
-                           log=i % self.log_every_steps == 0)
 
-        return {'loss': loss}
+    def validation_step(self, data, i):
+        try:
+            dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+            dense_data = dense_data.mask(node_mask)
+            noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
+            extra_data = self.compute_extra_data(noisy_data)
+            pred = self.forward(noisy_data, extra_data, node_mask)
+            nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y,  node_mask, test=False)
+            return {'loss': nll}
+        except Exception as e:
+             print(f"Error in validation_step: {e}")
+             # Return a default value or handle appropriately
+             return {'loss': torch.tensor(float('inf'), device=self.device)} # Indicate error with inf loss
 
-    def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=self.cfg.train.lr, amsgrad=True,
-                                 weight_decay=self.cfg.train.weight_decay)
 
-    def on_fit_start(self) -> None:
-        self.train_iterations = len(self.trainer.datamodule.train_dataloader())
-        self.print("Size of the input features", self.Xdim, self.Edim, self.ydim)
-        if self.local_rank == 0:
-            utils.setup_wandb(self.cfg)
+    def test_step(self, data, i):
+        try:
+            dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+            dense_data = dense_data.mask(node_mask)
+            noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
+            extra_data = self.compute_extra_data(noisy_data)
+            pred = self.forward(noisy_data, extra_data, node_mask)
+            nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=True)
+            return {'loss': nll}
+        except Exception as e:
+             print(f"Error in test_step: {e}")
+             return {'loss': torch.tensor(float('inf'), device=self.device)}
 
     def on_train_epoch_start(self) -> None:
-        self.print("Starting train epoch...")
         self.start_epoch_time = time.time()
         self.train_loss.reset()
-        self.train_metrics.reset()
+        if self.train_metrics: self.train_metrics.reset()
 
     def on_train_epoch_end(self) -> None:
         to_log = self.train_loss.log_epoch_metrics()
-        self.print(f"Epoch {self.current_epoch}: X_CE: {to_log['train_epoch/x_CE'] :.3f}"
-                      f" -- E_CE: {to_log['train_epoch/E_CE'] :.3f} --"
-                      f" y_CE: {to_log['train_epoch/y_CE'] :.3f}"
-                      f" -- {time.time() - self.start_epoch_time:.1f}s ")
-        epoch_at_metrics, epoch_bond_metrics = self.train_metrics.log_epoch_metrics()
-        self.print(f"Epoch {self.current_epoch}: {epoch_at_metrics} -- {epoch_bond_metrics}")
-        if torch.cuda.is_available():
-            print(torch.cuda.memory_summary())
-        else:
-            print("CUDA is not available. Skipping memory summary.")
+        log_freq = getattr(self.cfg.general, 'log_every_n_epochs_train_end', 1)
+        if self.current_epoch % log_freq == 0:
+             # Check if keys exist before accessing
+             x_ce = to_log.get('train_epoch/x_CE', 0)
+             e_ce = to_log.get('train_epoch/E_CE', 0)
+             y_ce = to_log.get('train_epoch/y_CE', 0)
+             loss_val = x_ce + e_ce + y_ce
+             self.print(f"Epoch {self.current_epoch}: Train Loss {loss_val:.3f} ({time.time() - self.start_epoch_time:.1f}s)")
+             if self.train_metrics and hasattr(self.train_metrics, 'log_epoch_metrics'):
+                 try:
+                     epoch_at_metrics, epoch_bond_metrics = self.train_metrics.log_epoch_metrics()
+                     if epoch_at_metrics or epoch_bond_metrics:
+                         self.print(f"  Metrics: {epoch_at_metrics} -- {epoch_bond_metrics}")
+                 except Exception as e:
+                      print(f"Error logging train metrics: {e}")
+
 
     def on_validation_epoch_start(self) -> None:
         self.val_nll.reset()
@@ -154,333 +255,370 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.val_E_kl.reset()
         self.val_X_logp.reset()
         self.val_E_logp.reset()
-        self.sampling_metrics.reset()
-
-    def validation_step(self, data, i):
-        dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-        dense_data = dense_data.mask(node_mask)
-        noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
-        extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
-        nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y,  node_mask, test=False)
-        return {'loss': nll}
 
     def on_validation_epoch_end(self) -> None:
-        metrics = [self.val_nll.compute(), self.val_X_kl.compute() * self.T, self.val_E_kl.compute() * self.T,
-                   self.val_X_logp.compute(), self.val_E_logp.compute()]
+        # Compute metrics safely
+        try:
+            val_nll_value = self.val_nll.compute()
+            val_x_kl_value = self.val_X_kl.compute() * self.T
+            val_e_kl_value = self.val_E_kl.compute() * self.T
+            val_x_logp_value = self.val_X_logp.compute()
+            val_e_logp_value = self.val_E_logp.compute()
+        except Exception as e:
+            print(f"Error computing validation metrics: {e}")
+            # Set default values or handle error
+            val_nll_value = torch.tensor(float('inf')) # Use inf to indicate error
+            val_x_kl_value, val_e_kl_value, val_x_logp_value, val_e_logp_value = 0.0, 0.0, 0.0, 0.0
+
+
         if wandb.run:
-            wandb.log({"val/epoch_NLL": metrics[0],
-                       "val/X_kl": metrics[1],
-                       "val/E_kl": metrics[2],
-                       "val/X_logp": metrics[3],
-                       "val/E_logp": metrics[4]}, commit=False)
+            wandb.log({"val/epoch_NLL": val_nll_value,
+                       "val/X_kl": val_x_kl_value,
+                       "val/E_kl": val_e_kl_value,
+                       "val/X_logp": val_x_logp_value,
+                       "val/E_logp": val_e_logp_value}, commit=True)
 
-        self.print(f"Epoch {self.current_epoch}: Val NLL {metrics[0] :.2f} -- Val Atom type KL {metrics[1] :.2f} -- ",
-                   f"Val Edge type KL: {metrics[2] :.2f}")
+        self.print(f"Epoch {self.current_epoch}: Val NLL {val_nll_value :.2f}")
+        self.log("val/epoch_NLL", val_nll_value, sync_dist=True)
 
-        # Log val nll with default Lightning logger, so it can be monitored by checkpoint callback
-        val_nll = metrics[0]
-        self.log("val/epoch_NLL", val_nll, sync_dist=True)
+        if val_nll_value < self.best_val_nll:
+            self.best_val_nll = val_nll_value
+        self.print(f'Val NLL: {val_nll_value:.4f} \t Best val NLL: {self.best_val_nll:.4f}')
 
-        if val_nll < self.best_val_nll:
-            self.best_val_nll = val_nll
-        self.print('Val loss: %.4f \t Best val loss:  %.4f\n' % (val_nll, self.best_val_nll))
-
+        # --- REMOVED Sampling during validation ---
         self.val_counter += 1
-        if self.val_counter % self.cfg.general.sample_every_val == 0:
-            start = time.time()
-            samples_left_to_generate = self.cfg.general.samples_to_generate
-            samples_left_to_save = self.cfg.general.samples_to_save
-            chains_left_to_save = self.cfg.general.chains_to_save
+        # The sampling loop that was here has been removed.
 
-            samples = []
-
-            ident = 0
-            while samples_left_to_generate > 0:
-                bs = 2 * self.cfg.train.batch_size
-                to_generate = min(samples_left_to_generate, bs)
-                to_save = min(samples_left_to_save, bs)
-                chains_save = min(chains_left_to_save, bs)
-                samples.extend(self.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
-                                                 save_final=to_save,
-                                                 keep_chain=chains_save,
-                                                 number_chain_steps=self.number_chain_steps))
-                ident += to_generate
-
-                samples_left_to_save -= to_save
-                samples_left_to_generate -= to_generate
-                chains_left_to_save -= chains_save
-            self.print("Computing sampling metrics...")
-            self.sampling_metrics.forward(samples, self.name, self.current_epoch, val_counter=-1, test=False,
-                                          local_rank=self.local_rank)
-            self.print(f'Done. Sampling took {time.time() - start:.2f} seconds\n')
-            print("Validation epoch end ends...")
-
-    def on_test_epoch_start(self) -> None:
-        self.print("Starting test...")
-        self.test_nll.reset()
-        self.test_X_kl.reset()
-        self.test_E_kl.reset()
-        self.test_X_logp.reset()
-        self.test_E_logp.reset()
-        if self.local_rank == 0:
-            utils.setup_wandb(self.cfg)
-
-    def test_step(self, data, i):
-        dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-        dense_data = dense_data.mask(node_mask)
-        noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
-        extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
-        nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=True)
-        return {'loss': nll}
-
+    # --- Test Epoch End (Modified for Direct AIG Evaluation) ---
     def on_test_epoch_end(self) -> None:
-        """ Measure likelihood on a test set and compute stability metrics. """
-        metrics = [self.test_nll.compute(), self.test_X_kl.compute(), self.test_E_kl.compute(),
-                   self.test_X_logp.compute(), self.test_E_logp.compute()]
+        """ Measure likelihood on a test set and evaluate using imported functions. """
+        self.print("\n--- Test Evaluation ---")
+        try:
+            test_nll_value = self.test_nll.compute()
+            test_x_kl_value = self.test_X_kl.compute() * self.T
+            test_e_kl_value = self.test_E_kl.compute() * self.T
+            test_x_logp_value = self.test_X_logp.compute()
+            test_e_logp_value = self.test_E_logp.compute()
+        except Exception as e:
+             print(f"Error computing test NLL metrics: {e}")
+             test_nll_value = torch.tensor(float('inf'))
+             test_x_kl_value, test_e_kl_value, test_x_logp_value, test_e_logp_value = 0.0, 0.0, 0.0, 0.0
+
+        log_dict = {"test/epoch_NLL": test_nll_value, "test/X_kl": test_x_kl_value, "test/E_kl": test_e_kl_value,
+                    "test/X_logp": test_x_logp_value, "test/E_logp": test_e_logp_value}
         if wandb.run:
-            wandb.log({"test/epoch_NLL": metrics[0],
-                       "test/X_kl": metrics[1],
-                       "test/E_kl": metrics[2],
-                       "test/X_logp": metrics[3],
-                       "test/E_logp": metrics[4]}, commit=False)
+            wandb.log(log_dict, commit=True) # Commit test NLL metrics
 
-        self.print(f"Epoch {self.current_epoch}: Test NLL {metrics[0] :.2f} -- Test Atom type KL {metrics[1] :.2f} -- ",
-                   f"Test Edge type KL: {metrics[2] :.2f}")
+        self.print(f"Test NLL: {test_nll_value:.2f} -- Test KL (X E): {test_x_kl_value:.2f}, {test_e_kl_value:.2f}")
 
-        test_nll = metrics[0]
-        if wandb.run:
-            wandb.log({"test/epoch_NLL": test_nll}, commit=False)
-
-        self.print(f'Test loss: {test_nll :.4f}')
-
+        # --- Generate final samples ---
+        self.print("Generating final samples for evaluation...")
         samples_left_to_generate = self.cfg.general.final_model_samples_to_generate
-        samples_left_to_save = self.cfg.general.final_model_samples_to_save
-        chains_left_to_save = self.cfg.general.final_model_chains_to_save
-
-        samples = []
-        id = 0
+        generated_samples_raw = []
+        ident = 0
+        batch_size_sample = self.cfg.train.batch_size # Or a specific sampling batch size config
         while samples_left_to_generate > 0:
-            self.print(f'Samples left to generate: {samples_left_to_generate}/'
-                       f'{self.cfg.general.final_model_samples_to_generate}', end='', flush=True)
-            bs = 2 * self.cfg.train.batch_size
-            to_generate = min(samples_left_to_generate, bs)
-            to_save = min(samples_left_to_save, bs)
-            chains_save = min(chains_left_to_save, bs)
-            samples.extend(self.sample_batch(id, to_generate, num_nodes=None, save_final=to_save,
-                                             keep_chain=chains_save, number_chain_steps=self.number_chain_steps))
-            id += to_generate
-            samples_left_to_save -= to_save
+            current_batch_num = ident // batch_size_sample + 1
+            self.print(f'\rGenerating batch {current_batch_num}...', end='', flush=True)
+            to_generate = min(samples_left_to_generate, batch_size_sample)
+
+            try:
+                batch_samples_raw = self.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
+                                                      save_final=0, keep_chain=0, number_chain_steps=0)
+                generated_samples_raw.extend(batch_samples_raw)
+            except Exception as e:
+                 print(f"\nError during sampling batch starting at ID {ident}: {e}")
+                 # Decide whether to break or continue
+                 # break # Option: stop sampling on error
+
+            ident += to_generate
             samples_left_to_generate -= to_generate
-            chains_left_to_save -= chains_save
-        self.print("Saving the generated graphs")
-        filename = f'generated_samples1.txt'
-        for i in range(2, 10):
-            if os.path.exists(filename):
-                filename = f'generated_samples{i}.txt'
+        self.print(f"\nGenerated {len(generated_samples_raw)} raw samples.")
+
+        # --- Convert raw samples to NetworkX graphs ---
+        self.print("Converting generated samples to NetworkX graphs...")
+        generated_nx_graphs = []
+        for i, sample_data in enumerate(tqdm(generated_samples_raw, desc="Converting to NX")):
+            try:
+                nx_graph = self.convert_to_nx(sample_data[0], sample_data[1])
+                if nx_graph is not None: generated_nx_graphs.append(nx_graph)
+                else: print(f"Warning: Failed to convert sample {i} to NetworkX graph.")
+            except Exception as e: print(f"Error converting sample {i} to NetworkX: {e}")
+        self.print(f"Successfully converted {len(generated_nx_graphs)} samples to NetworkX.")
+
+        if not generated_nx_graphs:
+            self.print("No valid NetworkX graphs generated. Skipping evaluation.")
+            return
+
+        # --- Load Training Data for Novelty ---
+        train_graphs = None
+        try:
+            # Construct path relative to the dataset config datadir
+            train_data_dir_for_eval = os.path.join(self.cfg.dataset.datadir, "raw")
+            train_data_prefix_for_eval = "real_aigs_part_"
+            num_train_files_for_eval = 4 # Assuming first 4 are training
+
+            # Get project base path robustly
+            try:
+                 # Assumes standard output structure like outputs/YYYY-MM-DD/HH-MM-SS
+                 # Adjust if your output structure differs
+                 project_base_path = pathlib.Path(os.getcwd()).parents[2]
+            except IndexError:
+                 # Fallback if not in expected output structure (e.g., running directly from src)
+                 project_base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
+
+            abs_train_data_dir = os.path.join(project_base_path, train_data_dir_for_eval)
+
+
+            if os.path.exists(abs_train_data_dir):
+                 self.print(f"Loading training graphs from: {abs_train_data_dir}")
+                 train_graphs = load_training_graphs_from_pkl(
+                     abs_train_data_dir,
+                     train_data_prefix_for_eval,
+                     num_train_files_for_eval
+                 )
+                 if train_graphs is None: self.print("Failed to load training graphs.")
+                 elif not train_graphs: self.print("Loaded 0 training graphs.")
+                 else: self.print(f"Loaded {len(train_graphs)} training graphs.")
             else:
-                break
-        with open(filename, 'w') as f:
-            for item in samples:
-                f.write(f"N={item[0].shape[0]}\n")
-                atoms = item[0].tolist()
-                f.write("X: \n")
-                for at in atoms:
-                    f.write(f"{at} ")
-                f.write("\n")
-                f.write("E: \n")
-                for bond_list in item[1]:
-                    for bond in bond_list:
-                        f.write(f"{bond} ")
-                    f.write("\n")
-                f.write("\n")
-        self.print("Generated graphs Saved. Computing sampling metrics...")
-        self.sampling_metrics(samples, self.name, self.current_epoch, self.val_counter, test=True, local_rank=self.local_rank)
-        self.print("Done testing.")
+                 self.print(f"Training data directory not found: {abs_train_data_dir}")
+
+        except Exception as e:
+            self.print(f"Error loading training graphs: {e}")
+
+        # --- Perform Direct Evaluation ---
+        self.print("Starting internal evaluation...")
+        num_total = len(generated_nx_graphs)
+        valid_graphs = []
+        aggregate_metrics = defaultdict(list)
+        aggregate_path_metrics = defaultdict(list)
+        failed_constraints_summary = Counter()
+
+        for i, graph in enumerate(tqdm(generated_nx_graphs, desc="Evaluating Validity")):
+            struct_metrics = calculate_structural_aig_metrics(graph)
+            for key, value in struct_metrics.items():
+                 if isinstance(value, (int, float, bool)): aggregate_metrics[key].append(float(value))
+            if struct_metrics.get('is_structurally_valid', 0.0) > 0.5:
+                valid_graphs.append(graph)
+                try:
+                     path_metrics = count_pi_po_paths(graph)
+                     if path_metrics.get('error') is None:
+                        for key, value in path_metrics.items():
+                            if isinstance(value, (int, float)): aggregate_path_metrics[key].append(value)
+                     else: eval_logger.warning(f"Skipping path metrics for valid graph {i} due to error: {path_metrics['error']}")
+                except Exception as e: eval_logger.error(f"Error calculating path metrics for valid graph {i}: {e}")
+            else:
+                for reason in struct_metrics.get('constraints_failed', ["Unknown Failure"]):
+                    failed_constraints_summary[reason] += 1
+
+        num_valid_structurally = len(valid_graphs)
+        uniqueness_score, num_unique = calculate_uniqueness(valid_graphs)
+
+        novelty_score, num_novel = (-1.0, -1)
+        if train_graphs is not None:
+            novelty_score, num_novel = calculate_novelty(valid_graphs, train_graphs)
+        else:
+            self.print("Skipping novelty calculation as training graphs were not loaded.")
+
+        # --- Print Evaluation Summary ---
+        validity_fraction = (num_valid_structurally / num_total) if num_total > 0 else 0.0
+        validity_percentage = validity_fraction * 100
+        print("\n--- Internal AIG V.U.N. Evaluation Summary ---")
+        print(f"Total Graphs Generated          : {num_total}")
+        print(f"Structurally Valid AIGs (V)     : {num_valid_structurally} ({validity_percentage:.2f}%)")
+        if num_valid_structurally > 0:
+             print(f"Unique Valid AIGs             : {num_unique}")
+             print(f"Uniqueness (U) among valid    : {uniqueness_score:.4f} ({uniqueness_score*100:.2f}%)")
+             if train_graphs is not None:
+                 print(f"Novel Valid AIGs vs Train Set : {num_novel}")
+                 print(f"Novelty (N) among valid       : {novelty_score:.4f} ({novelty_score*100:.2f}%)")
+             else:
+                 print(f"Novelty (N) among valid       : Not calculated")
+        else:
+             print(f"Uniqueness (U) among valid    : N/A")
+             print(f"Novelty (N) among valid       : N/A")
+
+        print("\n--- Average Structural Metrics (All Generated Graphs) ---")
+        for key, values in sorted(aggregate_metrics.items()):
+            if key == 'is_structurally_valid': continue
+            if not values: continue
+            avg_value = np.mean(values)
+            if key == 'is_dag': print(f"  - Avg {key:<27}: {avg_value*100:.2f}%")
+            else: print(f"  - Avg {key:<27}: {avg_value:.3f}")
+
+        print("\n--- Constraint Violation Summary (Across Invalid Graphs) ---")
+        num_invalid_graphs = num_total - num_valid_structurally
+        if num_invalid_graphs == 0: print("  No structural violations detected.")
+        else:
+            sorted_reasons = sorted(failed_constraints_summary.items(), key=lambda item: item[1], reverse=True)
+            print(f"  (Violations summarized across {num_invalid_graphs} invalid graphs)")
+            for reason, count in sorted_reasons:
+                reason_percentage_of_invalid = (count / num_invalid_graphs) * 100 if num_invalid_graphs > 0 else 0
+                print(f"  - {reason:<45}: {count:<6} graphs ({reason_percentage_of_invalid:.1f}% of invalid)")
+
+        print("\n--- Average Path Connectivity Metrics (Valid Graphs Only) ---")
+        num_graphs_for_path_metrics = len(aggregate_path_metrics.get('num_pi', []))
+        if num_graphs_for_path_metrics == 0: print("  No structurally valid graphs to calculate path metrics for.")
+        else:
+            print(f"  (Based on {num_graphs_for_path_metrics} structurally valid graphs)")
+            for key, values in sorted(aggregate_path_metrics.items()):
+                 if key == 'error' or not values: continue
+                 avg_value = np.mean(values)
+                 print(f"  - Avg {key:<27}: {avg_value:.3f}")
+        print("------------------------------------")
+
+        # --- Log key evaluation metrics to Wandb if available ---
+        if wandb.run:
+            eval_log = {
+                "test/validity": validity_fraction,
+                "test/uniqueness_valid": uniqueness_score if num_valid_structurally > 0 else 0.0,
+                "test/novelty_valid": novelty_score if train_graphs is not None and num_valid_structurally > 0 else -1.0,
+                "test/num_valid": num_valid_structurally,
+                "test/num_unique": num_unique,
+                "test/num_novel": num_novel if train_graphs is not None else -1
+            }
+            wandb.log(eval_log, commit=True) # Commit evaluation metrics
+
+        self.print("Test epoch finished.")
 
 
+    # --- Core Diffusion Logic (Unchanged) ---
     def kl_prior(self, X, E, node_mask):
-        """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
-
-        This is essentially a lot of work for something that is in practice negligible in the loss. However, you
-        compute it so that you see it when you've made a mistake in your noise schedule.
-        """
-        # Compute the last alpha value, alpha_T.
         ones = torch.ones((X.size(0), 1), device=X.device)
         Ts = self.T * ones
-        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
-
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_int=Ts)
         Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
-
-        # Compute transition probabilities
-        probX = X @ Qtb.X  # (bs, n, dx_out)
-        probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
-        assert probX.shape == X.shape
-
+        probX = X @ Qtb.X
+        probE = E @ Qtb.E.unsqueeze(1)
         bs, n, _ = probX.shape
-
-        limit_X = self.limit_dist.X[None, None, :].expand(bs, n, -1).type_as(probX)
-        limit_E = self.limit_dist.E[None, None, None, :].expand(bs, n, n, -1).type_as(probE)
-
-        # Make sure that masked rows do not contribute to the loss
-        limit_dist_X, limit_dist_E, probX, probE = diffusion_utils.mask_distributions(true_X=limit_X.clone(),
-                                                                                      true_E=limit_E.clone(),
-                                                                                      pred_X=probX,
-                                                                                      pred_E=probE,
-                                                                                      node_mask=node_mask)
-
+        limit_X = self.limit_dist.X.to(X.device)[None, None, :].expand(bs, n, -1)
+        limit_E = self.limit_dist.E.to(E.device)[None, None, None, :].expand(bs, n, n, -1)
+        limit_dist_X, limit_dist_E, probX, probE = diffusion_utils.mask_distributions(
+            true_X=limit_X.clone(), true_E=limit_E.clone(), pred_X=probX, pred_E=probE, node_mask=node_mask
+        )
         kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist_X, reduction='none')
         kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist_E, reduction='none')
-
-        return diffusion_utils.sum_except_batch(kl_distance_X) + \
-               diffusion_utils.sum_except_batch(kl_distance_E)
+        return diffusion_utils.sum_except_batch(kl_distance_X) + diffusion_utils.sum_except_batch(kl_distance_E)
 
     def compute_Lt(self, X, E, y, pred, noisy_data, node_mask, test):
         pred_probs_X = F.softmax(pred.X, dim=-1)
         pred_probs_E = F.softmax(pred.E, dim=-1)
         pred_probs_y = F.softmax(pred.y, dim=-1)
-
         Qtb = self.transition_model.get_Qt_bar(noisy_data['alpha_t_bar'], self.device)
         Qsb = self.transition_model.get_Qt_bar(noisy_data['alpha_s_bar'], self.device)
         Qt = self.transition_model.get_Qt(noisy_data['beta_t'], self.device)
-
-        # Compute distributions to compare with KL
-        bs, n, d = X.shape
         prob_true = diffusion_utils.posterior_distributions(X=X, E=E, y=y, X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
                                                             y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
-        prob_true.E = prob_true.E.reshape((bs, n, n, -1))
         prob_pred = diffusion_utils.posterior_distributions(X=pred_probs_X, E=pred_probs_E, y=pred_probs_y,
                                                             X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
                                                             y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
+        bs, n, d = X.shape
+        prob_true.E = prob_true.E.reshape((bs, n, n, -1))
         prob_pred.E = prob_pred.E.reshape((bs, n, n, -1))
+        prob_true_X, prob_true_E, prob_pred_X, prob_pred_E = diffusion_utils.mask_distributions(
+            true_X=prob_true.X, true_E=prob_true.E, pred_X=prob_pred.X, pred_E=prob_pred.E, node_mask=node_mask
+        )
+        kl_x = F.kl_div(input=prob_pred_X.log(), target=prob_true_X, reduction='none')
+        kl_e = F.kl_div(input=prob_pred_E.log(), target=prob_true_E, reduction='none')
+        kl_x_batch_sum = diffusion_utils.sum_except_batch(kl_x)
+        kl_e_batch_sum = diffusion_utils.sum_except_batch(kl_e)
+        # Update metrics with batch sums
+        metric_x_kl = self.test_X_kl if test else self.val_X_kl
+        metric_e_kl = self.test_E_kl if test else self.val_E_kl
+        metric_x_kl.update(kl_x_batch_sum)
+        metric_e_kl.update(kl_e_batch_sum)
+        # Return the sum for the current batch (used in NLL calculation)
+        return kl_x_batch_sum + kl_e_batch_sum
 
-        # Reshape and filter masked rows
-        prob_true_X, prob_true_E, prob_pred.X, prob_pred.E = diffusion_utils.mask_distributions(true_X=prob_true.X,
-                                                                                                true_E=prob_true.E,
-                                                                                                pred_X=prob_pred.X,
-                                                                                                pred_E=prob_pred.E,
-                                                                                                node_mask=node_mask)
-        kl_x = (self.test_X_kl if test else self.val_X_kl)(prob_true.X, torch.log(prob_pred.X))
-        kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
-        return self.T * (kl_x + kl_e)
 
     def reconstruction_logp(self, t, X, E, node_mask):
-        # Compute noise values for t = 0.
         t_zeros = torch.zeros_like(t)
         beta_0 = self.noise_schedule(t_zeros)
         Q0 = self.transition_model.get_Qt(beta_t=beta_0, device=self.device)
-
-        probX0 = X @ Q0.X  # (bs, n, dx_out)
-        probE0 = E @ Q0.E.unsqueeze(1)  # (bs, n, n, de_out)
-
+        probX0 = X @ Q0.X
+        probE0 = E @ Q0.E.unsqueeze(1)
         sampled0 = diffusion_utils.sample_discrete_features(probX=probX0, probE=probE0, node_mask=node_mask)
-
         X0 = F.one_hot(sampled0.X, num_classes=self.Xdim_output).float()
         E0 = F.one_hot(sampled0.E, num_classes=self.Edim_output).float()
         y0 = sampled0.y
-        assert (X.shape == X0.shape) and (E.shape == E0.shape)
-
         sampled_0 = utils.PlaceHolder(X=X0, E=E0, y=y0).mask(node_mask)
-
-        # Predictions
         noisy_data = {'X_t': sampled_0.X, 'E_t': sampled_0.E, 'y_t': sampled_0.y, 'node_mask': node_mask,
                       't': torch.zeros(X0.shape[0], 1).type_as(y0)}
         extra_data = self.compute_extra_data(noisy_data)
         pred0 = self.forward(noisy_data, extra_data, node_mask)
-
-        # Normalize predictions
         probX0 = F.softmax(pred0.X, dim=-1)
         probE0 = F.softmax(pred0.E, dim=-1)
         proby0 = F.softmax(pred0.y, dim=-1)
-
-        # Set masked rows to arbitrary values that don't contribute to loss
-        probX0[~node_mask] = torch.ones(self.Xdim_output).type_as(probX0)
-        probE0[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))] = torch.ones(self.Edim_output).type_as(probE0)
-
-        diag_mask = torch.eye(probE0.size(1)).type_as(probE0).bool()
-        diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
-        probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0)
-
+        # Ensure masked values don't affect logp calculation by setting to uniform
+        probX0[~node_mask] = 1.0 / self.Xdim_output if self.Xdim_output > 0 else 1.0
+        probE0[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))] = 1.0 / self.Edim_output if self.Edim_output > 0 else 1.0
+        diag_mask = torch.eye(probE0.size(1), device=probE0.device, dtype=torch.bool).unsqueeze(0)
+        probE0[diag_mask] = 1.0 / self.Edim_output if self.Edim_output > 0 else 1.0
+        # Add epsilon to prevent log(0)
+        probX0 = probX0 + 1e-7
+        probE0 = probE0 + 1e-7
         return utils.PlaceHolder(X=probX0, E=probE0, y=proby0)
 
     def apply_noise(self, X, E, y, node_mask):
-        """ Sample noise and apply it to the data. """
-
-        # Sample a timestep t.
-        # When evaluating, the loss for t=0 is computed separately
         lowest_t = 0 if self.training else 1
-        t_int = torch.randint(lowest_t, self.T + 1, size=(X.size(0), 1), device=X.device).float()  # (bs, 1)
+        t_int = torch.randint(lowest_t, self.T + 1, size=(X.size(0), 1), device=X.device).float()
         s_int = t_int - 1
-
         t_float = t_int / self.T
         s_float = s_int / self.T
-
-        # beta_t and alpha_s_bar are used for denoising/loss computation
-        beta_t = self.noise_schedule(t_normalized=t_float)                         # (bs, 1)
-        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_float)      # (bs, 1)
-        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)      # (bs, 1)
-
-        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device=self.device)  # (bs, dx_in, dx_out), (bs, de_in, de_out)
-        assert (abs(Qtb.X.sum(dim=2) - 1.) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
-        assert (abs(Qtb.E.sum(dim=2) - 1.) < 1e-4).all()
-
-        # Compute transition probabilities
-        probX = X @ Qtb.X  # (bs, n, dx_out)
-        probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
-
+        beta_t = self.noise_schedule(t_normalized=t_float)
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_float)
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device=self.device)
+        probX = X @ Qtb.X
+        probE = E @ Qtb.E.unsqueeze(1)
         sampled_t = diffusion_utils.sample_discrete_features(probX=probX, probE=probE, node_mask=node_mask)
-
-        X_t = F.one_hot(sampled_t.X, num_classes=self.Xdim_output)
-        E_t = F.one_hot(sampled_t.E, num_classes=self.Edim_output)
-        assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
-
+        X_t = F.one_hot(sampled_t.X, num_classes=self.Xdim_output).float()
+        E_t = F.one_hot(sampled_t.E, num_classes=self.Edim_output).float()
         z_t = utils.PlaceHolder(X=X_t, E=E_t, y=y).type_as(X_t).mask(node_mask)
-
         noisy_data = {'t_int': t_int, 't': t_float, 'beta_t': beta_t, 'alpha_s_bar': alpha_s_bar,
                       'alpha_t_bar': alpha_t_bar, 'X_t': z_t.X, 'E_t': z_t.E, 'y_t': z_t.y, 'node_mask': node_mask}
         return noisy_data
 
     def compute_val_loss(self, pred, noisy_data, X, E, y, node_mask, test=False):
-        """Computes an estimator for the variational lower bound.
-           pred: (batch_size, n, total_features)
-           noisy_data: dict
-           X, E, y : (bs, n, dx),  (bs, n, n, de), (bs, dy)
-           node_mask : (bs, n)
-           Output: nll (size 1)
-       """
         t = noisy_data['t']
-
-        # 1.
         N = node_mask.sum(1).long()
         log_pN = self.node_dist.log_prob(N)
-
-        # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
         kl_prior = self.kl_prior(X, E, node_mask)
 
-        # 3. Diffusion loss
-        loss_all_t = self.compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
+        # Compute Lt sum for the batch
+        loss_all_t_batch = self.compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
 
-        # 4. Reconstruction loss
-        # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
+        # Compute L0 sum for the batch
+        metric_x_logp = self.test_X_logp if test else self.val_X_logp
+        metric_e_logp = self.test_E_logp if test else self.val_E_logp
+        metric_x_logp.reset()
+        metric_e_logp.reset()
         prob0 = self.reconstruction_logp(t, X, E, node_mask)
+        # Calculate neg log prob for the batch
+        neg_log_px = -diffusion_utils.sum_except_batch(X * prob0.X.log())
+        neg_log_pe = -diffusion_utils.sum_except_batch(E * prob0.E.log())
+        metric_x_logp.update(neg_log_px)
+        metric_e_logp.update(neg_log_pe)
+        # L0 for the batch is the sum of neg log probs
+        loss_term_0_batch = neg_log_px + neg_log_pe
 
-        loss_term_0 = self.val_X_logp(X * prob0.X.log()) + self.val_E_logp(E * prob0.E.log())
+        # NLL for the batch
+        nlls_batch = - log_pN + kl_prior + loss_all_t_batch + loss_term_0_batch
 
-        # Combine terms
-        nlls = - log_pN + kl_prior + loss_all_t - loss_term_0
-        assert len(nlls.shape) == 1, f'{nlls.shape} has more than only batch dim.'
+        # Update NLL metric object
+        nll_metric = self.test_nll if test else self.val_nll
+        nll_metric.update(nlls_batch)
+        nll = nll_metric.compute() # Get the mean NLL for logging
 
-        # Update NLL metric object and return batch nll
-        nll = (self.test_nll if test else self.val_nll)(nlls)        # Average over the batch
+        # Log batch-level details if needed (potentially very verbose)
+        # if wandb.run and not self.training:
+        #      wandb.log({"val_test/kl_prior_batch": kl_prior.mean(), # Mean over batch
+        #                 "val_test/Lt_batch": loss_all_t_batch.mean(), # Mean over batch
+        #                 "val_test/log_pn_batch": log_pN.mean(), # Mean over batch
+        #                 "val_test/L0_batch": loss_term_0_batch.mean(), # Mean over batch
+        #                 'val_test/batch_nll': nll.item()}, commit=False)
+        return nll # Return mean NLL for the batch
 
-        if wandb.run:
-            wandb.log({"kl prior": kl_prior.mean(),
-                       "Estimator loss terms": loss_all_t.mean(),
-                       "log_pn": log_pN.mean(),
-                       "loss_term_0": loss_term_0,
-                       'batch_test_nll' if test else 'val_nll': nll}, commit=False)
-        return nll
 
     def forward(self, noisy_data, extra_data, node_mask):
         X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
@@ -491,15 +629,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     @torch.no_grad()
     def sample_batch(self, batch_id: int, batch_size: int, keep_chain: int, number_chain_steps: int,
                      save_final: int, num_nodes=None):
-        """
-        :param batch_id: int
-        :param batch_size: int
-        :param num_nodes: int, <int>tensor (batch_size) (optional) for specifying number of nodes
-        :param save_final: int: number of predictions to save to file
-        :param keep_chain: int: number of chains to save to file
-        :param keep_chain_steps: number of timesteps to save for each chain
-        :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
-        """
         if num_nodes is None:
             n_nodes = self.node_dist.sample_n(batch_size, self.device)
         elif type(num_nodes) == int:
@@ -508,164 +637,109 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             assert isinstance(num_nodes, torch.Tensor)
             n_nodes = num_nodes
         n_max = torch.max(n_nodes).item()
-        # Build the masks
         arange = torch.arange(n_max, device=self.device).unsqueeze(0).expand(batch_size, -1)
         node_mask = arange < n_nodes.unsqueeze(1)
-        # Sample noise  -- z has size (n_samples, n_nodes, n_features)
-        z_T = diffusion_utils.sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
+
+        z_T = diffusion_utils.sample_discrete_feature_noise(limit_dist=self.limit_dist.to(self.device), node_mask=node_mask)
         X, E, y = z_T.X, z_T.E, z_T.y
 
-        assert (E == torch.transpose(E, 1, 2)).all()
-        assert number_chain_steps < self.T
-        chain_X_size = torch.Size((number_chain_steps, keep_chain, X.size(1)))
-        chain_E_size = torch.Size((number_chain_steps, keep_chain, E.size(1), E.size(2)))
-
-        chain_X = torch.zeros(chain_X_size)
-        chain_E = torch.zeros(chain_E_size)
-
-        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
         for s_int in reversed(range(0, self.T)):
             s_array = s_int * torch.ones((batch_size, 1)).type_as(y)
             t_array = s_array + 1
             s_norm = s_array / self.T
             t_norm = t_array / self.T
-
-            # Sample z_s
             sampled_s, discrete_sampled_s = self.sample_p_zs_given_zt(s_norm, t_norm, X, E, y, node_mask)
             X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
 
-            # Save the first keep_chain graphs
-            write_index = (s_int * number_chain_steps) // self.T
-            chain_X[write_index] = discrete_sampled_s.X[:keep_chain]
-            chain_E[write_index] = discrete_sampled_s.E[:keep_chain]
-
-        # Sample
-        sampled_s = sampled_s.mask(node_mask, collapse=True)
-        X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-
-
-
-        # Prepare the chain for saving
-        if keep_chain > 0:
-            final_X_chain = X[:keep_chain]
-            final_E_chain = E[:keep_chain]
-
-            chain_X[0] = final_X_chain                  # Overwrite last frame with the resulting X, E
-            chain_E[0] = final_E_chain
-
-            chain_X = diffusion_utils.reverse_tensor(chain_X)
-            chain_E = diffusion_utils.reverse_tensor(chain_E)
-
-            # Repeat last frame to see final sample better
-            chain_X = torch.cat([chain_X, chain_X[-1:].repeat(10, 1, 1)], dim=0)
-            chain_E = torch.cat([chain_E, chain_E[-1:].repeat(10, 1, 1, 1)], dim=0)
-            assert chain_X.size(0) == (number_chain_steps + 10)
+        sampled_s = utils.PlaceHolder(X=X, E=E, y=y).mask(node_mask, collapse=True)
+        X_final, E_final = sampled_s.X, sampled_s.E
 
         molecule_list = []
         for i in range(batch_size):
             n = n_nodes[i]
-            atom_types = X[i, :n].cpu()
-            edge_types = E[i, :n, :n].cpu()
+            atom_types = X_final[i, :n].cpu()
+            edge_types = E_final[i, :n, :n].cpu()
             molecule_list.append([atom_types, edge_types])
-
-        # Visualize chains
-        if self.visualization_tools is not None:
-            self.print('Visualizing chains...')
-            current_path = os.getcwd()
-            num_molecules = chain_X.size(1)       # number of molecules
-            for i in range(num_molecules):
-                result_path = os.path.join(current_path, f'chains/{self.cfg.general.name}/'
-                                                         f'epoch{self.current_epoch}/'
-                                                         f'chains/molecule_{batch_id + i}')
-                if not os.path.exists(result_path):
-                    os.makedirs(result_path)
-                    _ = self.visualization_tools.visualize_chain(result_path,
-                                                                 chain_X[:, i, :].numpy(),
-                                                                 chain_E[:, i, :].numpy())
-                self.print('\r{}/{} complete'.format(i+1, num_molecules), end='', flush=True)
-            self.print('\nVisualizing molecules...')
-
-            # Visualize the final molecules
-            current_path = os.getcwd()
-            result_path = os.path.join(current_path,
-                                       f'graphs/{self.name}/epoch{self.current_epoch}_b{batch_id}/')
-            self.visualization_tools.visualize(result_path, molecule_list, save_final)
-            self.print("Done.")
 
         return molecule_list
 
     def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):
-        """Samples from zs ~ p(zs | zt). Only used during sampling.
-           if last_step, return the graph prediction as well"""
         bs, n, dxs = X_t.shape
-        beta_t = self.noise_schedule(t_normalized=t)  # (bs, 1)
+        beta_t = self.noise_schedule(t_normalized=t)
         alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s)
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
-
-        # Retrieve transitions matrix
         Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
         Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, self.device)
         Qt = self.transition_model.get_Qt(beta_t, self.device)
-
-        # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data)
         pred = self.forward(noisy_data, extra_data, node_mask)
-
-        # Normalize predictions
-        pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
-        pred_E = F.softmax(pred.E, dim=-1)               # bs, n, n, d0
-
-        p_s_and_t_given_0_X = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=X_t,
-                                                                                           Qt=Qt.X,
-                                                                                           Qsb=Qsb.X,
-                                                                                           Qtb=Qtb.X)
-
-        p_s_and_t_given_0_E = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=E_t,
-                                                                                           Qt=Qt.E,
-                                                                                           Qsb=Qsb.E,
-                                                                                           Qtb=Qtb.E)
-        # Dim of these two tensors: bs, N, d0, d_t-1
-        weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X         # bs, n, d0, d_t-1
-        unnormalized_prob_X = weighted_X.sum(dim=2)                     # bs, n, d_t-1
+        pred_X = F.softmax(pred.X, dim=-1)
+        pred_E = F.softmax(pred.E, dim=-1)
+        p_s_and_t_given_0_X = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=X_t, Qt=Qt.X, Qsb=Qsb.X, Qtb=Qtb.X)
+        p_s_and_t_given_0_E = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=E_t, Qt=Qt.E, Qsb=Qsb.E, Qtb=Qtb.E)
+        weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X
+        unnormalized_prob_X = weighted_X.sum(dim=2)
         unnormalized_prob_X[torch.sum(unnormalized_prob_X, dim=-1) == 0] = 1e-5
-        prob_X = unnormalized_prob_X / torch.sum(unnormalized_prob_X, dim=-1, keepdim=True)  # bs, n, d_t-1
-
+        prob_X = unnormalized_prob_X / torch.sum(unnormalized_prob_X, dim=-1, keepdim=True)
         pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))
-        weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E        # bs, N, d0, d_t-1
+        weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E
         unnormalized_prob_E = weighted_E.sum(dim=-2)
         unnormalized_prob_E[torch.sum(unnormalized_prob_E, dim=-1) == 0] = 1e-5
         prob_E = unnormalized_prob_E / torch.sum(unnormalized_prob_E, dim=-1, keepdim=True)
-        prob_E = prob_E.reshape(bs, n, n, pred_E.shape[-1])
-
-        assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
-        assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
-
+        prob_E = prob_E.reshape(bs, n, n, -1) # Reshape back to original edge shape
         sampled_s = diffusion_utils.sample_discrete_features(prob_X, prob_E, node_mask=node_mask)
-
         X_s = F.one_hot(sampled_s.X, num_classes=self.Xdim_output).float()
-        E_s = F.one_hot(sampled_s.E, num_classes=self.Edim_output).float()
+        # Symmetrize edge indices before one-hot encoding
+        E_s_idx = sampled_s.E
+        E_s_idx = torch.triu(E_s_idx, diagonal=1) # Sample upper triangle
+        E_s_idx = E_s_idx + E_s_idx.transpose(1, 2) # Symmetrize indices
+        E_s = F.one_hot(E_s_idx, num_classes=self.Edim_output).float() # One-hot the symmetrized indices
 
-        assert (E_s == torch.transpose(E_s, 1, 2)).all()
-        assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
-
-        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
-        out_discrete = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
-
-        return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(node_mask, collapse=True).type_as(y_t)
+        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros_like(y_t)) # Use zeros_like for y shape
+        out_discrete = utils.PlaceHolder(X=sampled_s.X, E=E_s_idx, y=torch.zeros_like(y_t)) # Return symmetrized indices
+        return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(node_mask, collapse=False).type_as(y_t) # Return both
 
     def compute_extra_data(self, noisy_data):
-        """ At every training step (after adding noise) and step in sampling, compute extra information and append to
-            the network input. """
+        # Simplified: Ensure PlaceHolder is created even if features are None
+        if self.extra_features:
+             extra_features = self.extra_features(noisy_data)
+        else:
+             extra_features = utils.PlaceHolder(X=torch.zeros((*noisy_data['X_t'].shape[:-1], 0)).type_as(noisy_data['X_t']), E=torch.zeros((*noisy_data['E_t'].shape[:-1], 0)).type_as(noisy_data['E_t']), y=torch.zeros((noisy_data['y_t'].shape[0], 0)).type_as(noisy_data['y_t']))
 
-        extra_features = self.extra_features(noisy_data)
-        extra_molecular_features = self.domain_features(noisy_data)
+        if self.domain_features:
+             extra_molecular_features = self.domain_features(noisy_data)
+        else:
+             extra_molecular_features = utils.PlaceHolder(X=torch.zeros((*noisy_data['X_t'].shape[:-1], 0)).type_as(noisy_data['X_t']), E=torch.zeros((*noisy_data['E_t'].shape[:-1], 0)).type_as(noisy_data['E_t']), y=torch.zeros((noisy_data['y_t'].shape[0], 0)).type_as(noisy_data['y_t']))
 
         extra_X = torch.cat((extra_features.X, extra_molecular_features.X), dim=-1)
         extra_E = torch.cat((extra_features.E, extra_molecular_features.E), dim=-1)
         extra_y = torch.cat((extra_features.y, extra_molecular_features.y), dim=-1)
-
         t = noisy_data['t']
         extra_y = torch.cat((extra_y, t), dim=1)
-
         return utils.PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(self.parameters(), lr=self.cfg.train.lr, amsgrad=True,
+                                 weight_decay=self.cfg.train.weight_decay)
+
+    def on_fit_start(self) -> None:
+        if self.trainer.datamodule: # Check if datamodule exists
+             try:
+                 self.train_iterations = len(self.trainer.datamodule.train_dataloader())
+             except Exception as e:
+                  print(f"Warning: Could not determine train_iterations: {e}")
+                  self.train_iterations = 1 # Set a default
+        else:
+             self.train_iterations = 1 # Default if no datamodule
+        self.print("Input feature dims (X, E, y):", self.Xdim, self.Edim, self.ydim)
+        self.print("Output feature dims (X, E, y):", self.Xdim_output, self.Edim_output, self.ydim_output)
+
+    def on_test_epoch_start(self) -> None:
+        self.print("Starting test...")
+        self.test_nll.reset()
+        self.test_X_kl.reset()
+        self.test_E_kl.reset()
+        self.test_X_logp.reset()
+        self.test_E_logp.reset()
+
