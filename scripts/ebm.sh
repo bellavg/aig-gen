@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=08:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/eval_ebm_%j.out
+#SBATCH --output=../slurm_logs/sample_ebm_%j.out
 
 
 # --- Configuration ---
@@ -40,8 +40,13 @@ echo "Conda environment activated."
 
 #
 #
-srun python -u ggraph/evaluate_aigs.py \
-    "./ggraph/data/generated_graphs/GraphEBM_aigs.pkl"
+echo "lower thresh 0.25"
+srun python -u ggraph/sample_graphs.py \
+    --model 'GraphEBM' \
+    --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \
+    --num_samples 1000 \
+    --evaluate \
+    --save
 #
 #
 ##
