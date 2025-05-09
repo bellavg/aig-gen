@@ -10,7 +10,7 @@ from GraphDF import GraphDF
 from aig_config import *
 from use_dataset import AIGPreprocessedDatasetLoader
 from GraphAF import GraphAF
-
+from GraphEBM import GraphEBM
 
 
 # --- End Base Configuration ---
@@ -39,23 +39,6 @@ def main(args):
     conf['model']['nout'] = getattr(args, 'gaf_nout', conf['model']['nout'])
 
 
-
-    # # Model-specific params (GraphEBM)
-    # conf['model_ebm']['hidden'] = getattr(args, 'ebm_hidden', conf['model_ebm']['hidden'])
-    # conf['model_ebm']['depth'] = getattr(args, 'ebm_depth', conf['model_ebm']['depth'])
-    # conf['model_ebm']['swish_act'] = getattr(args, 'ebm_swish_act', conf['model_ebm']['swish_act'])
-    # conf['model_ebm']['add_self'] = getattr(args, 'ebm_add_self', conf['model_ebm']['add_self'])
-    # conf['model_ebm']['dropout'] = getattr(args, 'ebm_dropout', conf['model_ebm']['dropout'])
-    # conf['model_ebm']['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations',
-    #                                                   conf['model_ebm']['n_power_iterations'])
-    # # EBM Training params
-    # conf['train_ebm']['c'] = getattr(args, 'ebm_c', conf['train_ebm']['c'])
-    # conf['train_ebm']['ld_step'] = getattr(args, 'ebm_ld_step', conf['train_ebm']['ld_step'])
-    # conf['train_ebm']['ld_noise'] = getattr(args, 'ebm_ld_noise', conf['train_ebm']['ld_noise'])
-    # conf['train_ebm']['ld_step_size'] = getattr(args, 'ebm_ld_step_size', conf['train_ebm']['ld_step_size'])
-    # conf['train_ebm']['alpha'] = getattr(args, 'ebm_alpha', conf['train_ebm']['alpha'])
-    # conf['train_ebm']['clamp_lgd_grad'] = getattr(args, 'ebm_clamp_lgd_grad', conf['train_ebm']['clamp_lgd_grad'])
-
     # --- Device Setup ---
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("Warning: CUDA requested but not available. Using CPU.")
@@ -79,35 +62,35 @@ def main(args):
     if len(train_dataset) == 0:
         raise ValueError("Training dataset is empty after loading. Check paths and file content.")
 
-    train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
-    print(f"Created Training DataLoader with batch size {conf['batch_size']}.")
 
     # --- Model Instantiation ---
-    print(f"Instantiating model runner: {args.model_type}")
+    print(f"Instantiating model runner: {args.model}")
     runner = None
-    if args.model_type == 'GraphDF':
+    if args.model == 'GraphDF':
         runner = GraphDF()  # Assuming GraphDF() takes no args or uses conf internally
-    elif args.model_type == 'GraphAF':
+    elif args.model == 'GraphAF':
         runner = GraphAF()  # Assuming GraphAF() takes no args or uses conf internally
-    # elif args.model_type == 'GraphEBM':
-    #     try:
-    #         # Pass EBM specific config and device
-    #         runner = GraphEBM(n_atom=conf['model']['max_size'],
-    #                           n_atom_type=conf['model']['node_dim'],
-    #                           n_edge_type=conf['model']['bond_dim'],
-    #                           **conf['model_ebm'],
-    #                           device=device)
+    elif args.model == 'GraphEBM':
+        runner = GraphEBM(n_atom=MAX_NODE_COUNT, n_atom_type=NUM_NODE_FEATURES,
+                          n_edge_type=NUM_EXPLICIT_EDGE_TYPES, hidden=base_conf['model']['hidden'], device=device)
+        conf['lr'] = base_conf['ebm_lr']
+        conf['batch_size'] = base_conf['ebm_bs']
+
     else:
-        print(f"Error: Unknown model type '{args.model_type}'.");
+        print(f"Error: Unknown model type '{args.model}'.");
         exit(1)
 
     if runner is None:
-        print(f"Failed to instantiate model runner for {args.model_type}");
+        print(f"Failed to instantiate model runner for {args.model}");
         exit(1)
+
+    train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
+    print(f"Created Training DataLoader with batch size {conf['batch_size']}.")
+
 
 
     default_save_dir_base = "./ggraph/checkpoints"  # Relative to where script is run
-    model_specific_path = f"{args.model_type}"
+    model_specific_path = f"{args.model}"
     save_dir = osp.join(default_save_dir_base, model_specific_path)
 
     # Ensure save_dir is absolute if it was relative, using the CWD
@@ -117,11 +100,11 @@ def main(args):
     print(f"Model checkpoints will be saved in: {save_dir}")
 
     # --- Training ---
-    print(f"\n--- Starting Training ({args.model_type}")
+    print(f"\n--- Starting Training ({args.model}")
     try:
-        if args.model_type == 'GraphDF' or args.model_type == 'GraphAF':
+        if args.model == 'GraphDF' or args.model == 'GraphAF':
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
-                f"{args.model_type} runner missing 'train_rand_gen' method.")
+                f"{args.model} runner missing 'train_rand_gen' method.")
             # Pass the relevant parts of the configuration to the training method
             runner.train_rand_gen(
                 loader=train_loader,
@@ -131,36 +114,17 @@ def main(args):
                 model_conf_dict=conf['model'],  # Pass model config
                 save_interval=conf['save_interval'],
                 save_dir=save_dir
-                # grad_clip_value is NOT passed here
             )
-        # elif args.model_type == 'GraphEBM':
-        #     if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
-        #         f"{args.model_type} runner missing 'train_rand_gen' method.")
-        #     # Pass EBM specific training parameters
-        #     runner.train_rand_gen(
-        #         loader=train_loader,
-        #         lr=conf['lr'],
-        #         wd=conf['weight_decay'],
-        #         max_epochs=conf['max_epochs'],
-        #         c=conf['train_ebm']['c'],
-        #         ld_step=conf['train_ebm']['ld_step'],
-        #         ld_noise=conf['train_ebm']['ld_noise'],
-        #         ld_step_size=conf['train_ebm']['ld_step_size'],
-        #         clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
-        #         alpha=conf['train_ebm']['alpha'],
-        #         save_interval=conf['save_interval'],
-        #         save_dir=save_dir,
-        #         grad_clip_value=conf['grad_clip_value']  # Correctly passed here
-        #     )
+
         else:
-            print(f"Model type {args.model_type} not recognized for training delegation.");
+            print(f"Model type {args.model} not recognized for training delegation.");
             exit(1)
         print("\n--- Training Process Delegated and Finished ---")
     except NotImplementedError as nie:
         print(f"\nError: Method not implemented: {nie}");
         exit(1)
     except Exception as train_e:
-        print(f"\nAn error occurred during training delegated to {args.model_type}.train_rand_gen:");
+        print(f"\nAn error occurred during training delegated to {args.model}.train_rand_gen:");
         print(f"Error Type: {type(train_e).__name__}");
         print(f"Error Details: {train_e}");
         print("--- Traceback ---");
@@ -196,8 +160,6 @@ if __name__ == "__main__":
                         help=f"Maximum training epochs (default: {base_conf['max_epochs']}).")
     parser.add_argument('--save_interval', type=int, default=base_conf['save_interval'],
                         help=f"Save checkpoints every N epochs (default: {base_conf['save_interval']}).")
-    # parser.add_argument('--grad_clip_value', type=float, default=base_conf['grad_clip_value'],
-    #                     help=f"Max norm for gradient clipping (default: {base_conf['grad_clip_value']}). 0 or None to disable.")
 
     # --- Model Architecture Hyperparameters ---
     # Note: edge_unroll is essential and required
@@ -211,36 +173,7 @@ if __name__ == "__main__":
                         help=f"Output dim for GAF/GDF (default: {base_conf['model']['nout']}).")
     parser.add_argument('--deq_coeff', type=float,  default=base_conf['model']['deq_coeff'],
                         help=f"Dequantization coefficient (default from base_conf: {base_conf['model']['deq_coeff']}).")
-    # parser.add_argument('--st_type', type=str, choices=['exp', 'sigmoid', 'softplus'],
-    #                     # No default here, handled in main()
-    #                     help=f"ST network type (default from base_conf: {base_conf['model']['st_type']}).")
-    # # EBM specific architecture args
-    # parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'],
-    #                     help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
-    # parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'],
-    #                     help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
-    # parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction,
-    #                     default=base_conf['model_ebm']['swish_act'], help="Use Swish activation in EBM.")
-    # parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction,
-    #                     default=base_conf['model_ebm']['add_self'], help="Add self-connections in EBM.")
-    # parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'],
-    #                     help=f"EBM dropout (default: {base_conf['model_ebm']['dropout']}).")
-    # parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'],
-    #                     help=f"EBM power iterations (default: {base_conf['model_ebm']['n_power_iterations']}).")
 
-    # # --- EBM Training Hyperparameters ---
-    # parser.add_argument('--ebm_c', type=float, default=base_conf['train_ebm']['c'],
-    #                     help=f"EBM dequant scale (default: {base_conf['train_ebm']['c']}).")
-    # parser.add_argument('--ebm_ld_step', type=int, default=base_conf['train_ebm']['ld_step'],
-    #                     help=f"EBM Langevin steps (default: {base_conf['train_ebm']['ld_step']}).")
-    # parser.add_argument('--ebm_ld_noise', type=float, default=base_conf['train_ebm']['ld_noise'],
-    #                     help=f"EBM Langevin noise std (default: {base_conf['train_ebm']['ld_noise']}).")
-    # parser.add_argument('--ebm_ld_step_size', type=float, default=base_conf['train_ebm']['ld_step_size'],
-    #                     help=f"EBM Langevin step size (default: {base_conf['train_ebm']['ld_step_size']}).")
-    # parser.add_argument('--ebm_alpha', type=float, default=base_conf['train_ebm']['alpha'],
-    #                     help=f"EBM regularization weight (default: {base_conf['train_ebm']['alpha']}).")
-    # parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
-    #                     default=base_conf['train_ebm']['clamp_lgd_grad'], help="Clamp Langevin gradients.")
 
     args = parser.parse_args()
     main(args)

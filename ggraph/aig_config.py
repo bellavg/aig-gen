@@ -237,13 +237,16 @@ base_conf = {
         "edge_unroll": 25, "num_flow_layer": 12, "num_rgcn_layer": 3,
         "nhid": 128, "nout": 128,
         "deq_coeff": 0.9, "st_type": "exp", "use_df": False,
+        "c": 0.05,  # Corresponds to former 'dequantization_scale_c'
+        "ld_step": 60,  # Corresponds to former 'langevin_steps_k'
+        "ld_noise": 0.005,  # Corresponds to former 'langevin_noise_sigma'
+        "ld_step_size": 30.0,  # Corresponds to former 'langevin_step_size_lambda_half'
+        "clamp": True,  # Corresponds to former 'langevin_clamp_grad' (user requested 'clamp')
+        "alpha": 1.0,  # Corresponds to former 'loss_alpha_reg_weight'
+        "hidden": 64
 
     },
     "lr": 0.001, "weight_decay": 1e-5, "batch_size": 32, "max_epochs": 30,
-    "save_interval": 3, "grad_clip_value": 1.0,
-    #"train_ebm": {
-    #     "c": 0.0, "ld_step": 150, "ld_noise": 0.005, "ld_step_size": 30,
-    #     "clamp_lgd_grad": True, "alpha": 1.0
-    # }
+    "save_interval": 3, "grad_clip_value": 1.0, "ebm_lr": 0.0001, "ebm_bs": 128
 }
 
