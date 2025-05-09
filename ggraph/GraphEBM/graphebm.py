@@ -33,10 +33,51 @@ class GraphEBM(Generator):
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
-        self.energy_function = EnergyFunc(n_atom_type, hidden, n_edge_type).to(self.device)
+        self.n_atom_type = n_atom_type + 1 # for virtual
+        self.energy_function = EnergyFunc(self.n_atom_type, hidden, n_edge_type).to(self.device)
         self.n_atom = n_atom
-        self.n_atom_type = n_atom_type
         self.n_edge_type = n_edge_type
+        self.num_actual_node_features = n_atom_type
+
+    def _transform_node_features_add_virtual_channel(self, x_features_actual_BNF, device):
+        """
+        Transforms node features from (B, N, NUM_ACTUAL_FEATURES)
+        to (B, MODEL_N_ATOM_TYPE, N) by adding a virtual node channel.
+        MODEL_N_ATOM_TYPE = NUM_ACTUAL_FEATURES + 1.
+        Assumes padded rows in x_features_actual_BNF are all zeros.
+        The output shape is (B, F_total, N) as expected by the original EnergyFunc's 'h' input.
+        """
+        batch_size, num_nodes, num_actual_feats = x_features_actual_BNF.shape
+
+        if num_actual_feats != self.num_actual_node_features:
+            raise ValueError(
+                f"Input x_features_actual_BNF has {num_actual_feats} features, "
+                f"but model expects {self.num_actual_node_features} actual features."
+            )
+
+        # Target shape for EnergyFunc input h: (B, self.model_n_atom_type, N)
+        x_transformed_BFN = torch.zeros(batch_size, self.n_atom_type, num_nodes, device=device)
+
+        # Copy actual features. Input is (B,N,F_actual), permute to (B,F_actual,N) for assignment.
+        x_transformed_BFN[:, :self.num_actual_node_features, :] = x_features_actual_BNF.permute(0, 2, 1)
+
+        # Identify padded nodes. A node is padding if all its actual features are zero.
+        # x_features_actual_BNF is (B, N, F_actual)
+        is_padding_node_BN = (
+                    x_features_actual_BNF.abs().sum(dim=2) < 1e-6)  # Check if sum of actual features is close to zero
+
+        # For padded nodes, set the virtual channel (at virtual_node_channel_idx) to 1.
+        # x_transformed_BFN is (B, F_total, N)
+        # is_padding_node_BN is (B, N)
+        for b in range(batch_size):
+            padding_node_indices_in_sample = torch.where(is_padding_node_BN[b])[0]
+            if len(padding_node_indices_in_sample) > 0:
+                x_transformed_BFN[b, self.n_atom_type, padding_node_indices_in_sample] = 1.0
+                # Ensure other channels are zero for these virtual nodes
+                x_transformed_BFN[b, :self.num_actual_node_features, padding_node_indices_in_sample] = 0.0
+
+        return x_transformed_BFN
+
 
     def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict,
                        save_interval, save_dir):
@@ -80,6 +121,7 @@ class GraphEBM(Generator):
             for _, batch in enumerate(tqdm(loader)):
                 ### Dequantization
                 pos_x = batch.x.to(self.device).to(dtype=torch.float32)
+                pos_x = self._transform_node_features_add_virtual_channel(pos_x, self.device)
                 pos_x += c * torch.rand_like(pos_x, device=self.device)
                 pos_adj = batch.adj.to(self.device).to(dtype=torch.float32)
                 pos_adj += c * torch.rand_like(pos_adj, device=self.device)
