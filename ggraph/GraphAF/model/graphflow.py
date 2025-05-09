@@ -159,7 +159,7 @@ class GraphFlowModel(nn.Module):
                                         [[j + start, i]]).long()).view(-1)  # (4, )
                             edge_discrete_id = torch.argmax(latent_edge).item()
                         else:
-                            assert resample_edge > 50 or len(invalid_bond_type_set) == 3
+                            assert resample_edge > 50 or len(invalid_bond_type_set) == NUM_EXPLICIT_EDGE_TYPES
                             edge_discrete_id = VIRTUAL_EDGE_INDEX  # we have no choice but to choose not to add edge between (i, j+start)
                         # cur_adj_features[0, edge_discrete_id, i, j + start] = 1.0
                         # cur_adj_features[0, edge_discrete_id, j + start, i] = 1.0
