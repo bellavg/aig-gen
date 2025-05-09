@@ -80,6 +80,12 @@ NUM2EDGETYPE = {
     1: "EDGE_INV",   # Index 1 feature
 }
 
+Fan_ins =  {    # Map "NODE_CONST0" to the first encoding vector (index 0), etc.
+    "NODE_CONST0": 0, # Index 0 feature
+    "NODE_PI":     0, # Index 1 feature
+    "NODE_AND":    2, # Index 2 feature
+    "NODE_PO":     1  # Index 3 feature
+}
 
 def check_validity(graph: nx.DiGraph) -> bool:
     """
