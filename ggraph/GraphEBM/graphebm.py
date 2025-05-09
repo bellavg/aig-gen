@@ -39,6 +39,7 @@ class GraphEBM(Generator):
         self.n_edge_type = n_edge_type
         self.num_actual_node_features = n_atom_type
 
+
     def _transform_node_features_add_virtual_channel(self, x_features_actual_BNF, device):
         """
         Transforms node features from (B, N, NUM_ACTUAL_FEATURES)
@@ -72,7 +73,7 @@ class GraphEBM(Generator):
         for b in range(batch_size):
             padding_node_indices_in_sample = torch.where(is_padding_node_BN[b])[0]
             if len(padding_node_indices_in_sample) > 0:
-                x_transformed_BFN[b, self.n_atom_type, padding_node_indices_in_sample] = 1.0
+                x_transformed_BFN[b, self.num_actual_node_features, padding_node_indices_in_sample] = 1.0
                 # Ensure other channels are zero for these virtual nodes
                 x_transformed_BFN[b, :self.num_actual_node_features, padding_node_indices_in_sample] = 0.0
 
@@ -269,7 +270,7 @@ class GraphEBM(Generator):
         gen_adj = gen_adj.detach()
         gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
 
-        gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list, correct_validity=True)
+        gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list)
 
         return gen_mols
 

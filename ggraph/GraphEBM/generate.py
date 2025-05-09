@@ -135,6 +135,7 @@ def gen_mol_from_one_shot_tensor(adj, x, atomic_num_list, largest_connected_comp
     #     gen_mols = [construct_mol(x_elem, adj_elem, atomic_num_list) for x_elem, adj_elem in zip(x, adj)]
     # else:
     gen_mols = []
+    # TODO I think atomic num list should be 0, 1, 2, 3, 4 where 4 is virtual?
     for x_elem, adj_elem in zip(x, adj):
         mol = construct_mol(x_elem, adj_elem, atomic_num_list)
         cmol = correct_mol(mol)
