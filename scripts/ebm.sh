@@ -40,7 +40,7 @@ echo "Conda environment activated."
 
 #
 #
-echo "lower thresh 0.25"
+echo "super low threshold higher number of cycles broken"
 srun python -u ggraph/sample_graphs.py \
     --model 'GraphEBM' \
     --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \

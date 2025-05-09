@@ -288,8 +288,8 @@ def valid_aig_can_with_seg(aig: nx.DiGraph, sample_idx_debug=None, verbose_canon
 
 
 def gen_mol_from_one_shot_tensor(adj, x,
-                                 edge_score_thresh_for_construct=0.25,
-                                 max_cycle_break_attempts_in_correct=5,
+                                 edge_score_thresh_for_construct=0.03,
+                                 max_cycle_break_attempts_in_correct=25,
                                  verbose_generation=False):
     """
     Generates AIGs from batched tensor representations.
