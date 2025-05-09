@@ -33,16 +33,16 @@ source activate ${CONDA_ENV_NAME}
 echo "Conda environment activated."
 # --- End Setup ---
 
-
-## Call the simplified train_graphs.py script, ensuring all required args are present
-srun python -u ggraph/train_graphs.py \
-    --model 'GraphAF'
-
+#
+### Call the simplified train_graphs.py script, ensuring all required args are present
+#srun python -u ggraph/train_graphs.py \
+#    --model 'GraphAF'
+#
 
 
 srun python -u ggraph/sample_graphs.py \
     --model 'GraphAF' \
-    --checkpoint "./ggraph/checkpoint/GraphAF/ckpt_30.pth" \
+    --checkpoint "./ggraph/checkpoints/GraphAF/ckpt_30.pth" \
     --evaluate \
     --save
 

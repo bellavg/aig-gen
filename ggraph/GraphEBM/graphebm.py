@@ -198,7 +198,7 @@ class GraphEBM(Generator):
                 f'Epoch: {epoch + 1:03d}, Loss: {avg_total_loss:.6f}, Energy Loss: {avg_en_loss:.6f}, Regularizer Loss: {avg_reg_loss:.6f}, Sec/Epoch: {t_end - t_start:.2f}')
             print('==========================================')
 
-    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples, atomic_num_list):
+    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples):
         r"""
             Running graph generation for random generation task.
 
@@ -268,7 +268,7 @@ class GraphEBM(Generator):
         gen_adj = gen_adj.detach()
         gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
 
-        gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list)
+        gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x)
 
         return gen_mols
 
