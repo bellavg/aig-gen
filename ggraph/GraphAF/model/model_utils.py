@@ -1,17 +1,14 @@
-import sys
-import os
-
-import numpy as np
-import networkx as nx
 import random
+
+import networkx as nx
+import numpy as np
+import torch
+
 
 # from rdkit import Chem
 # from rdkit.Chem import rdmolops
 # from rdkit.Chem import rdMolDescriptors
 # from rdkit import DataStructs
-
-import torch
-import torch.nn.functional as F
 
 def mol_to_nx(mol):
     G = nx.Graph()

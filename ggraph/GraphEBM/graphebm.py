@@ -1,9 +1,9 @@
-import time
-import os
 import copy
+import os
 import pickle  # For saving generated AIGs
-import networkx as nx  # For DiGraph
+import time
 
+import networkx as nx  # For DiGraph
 import torch
 from torch.optim import Adam
 from tqdm import tqdm

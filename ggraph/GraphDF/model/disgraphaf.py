@@ -1,9 +1,11 @@
 import torch
 from torch import nn
-from .st_net import ST_Dis
+
+from ggraph.aig_config import (NUM_NODE_FEATURES, NUM_ADJ_CHANNELS, MAX_NODE_COUNT, VIRTUAL_EDGE_INDEX)
 from .df_utils import one_hot_add, one_hot_minus
 from .rgcn import RGCN
-from ggraph.aig_config import (NUM_NODE_FEATURES,NUM_ADJ_CHANNELS, MAX_NODE_COUNT, VIRTUAL_EDGE_INDEX)
+from .st_net import ST_Dis
+
 
 class DisGraphAF(nn.Module):
     def __init__(self, mask_node, mask_edge, index_select_edge, num_flow_layer=12, graph_size=MAX_NODE_COUNT,

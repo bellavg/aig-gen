@@ -1,8 +1,9 @@
 import os
+
 import torch
+
 from ggraph.generator import Generator
 from .model import GraphFlowModel
-
 
 
 class GraphDF(Generator):

@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # train_graphs.py - Modified to use loader-only dataset
-import os
 import argparse
-import torch
-from torch_geometric.loader import DenseDataLoader
-import warnings
+import os
 import os.path as osp
 import traceback  # For error logging
 
-from aig_config import *
-from GraphDF import GraphDF
-from use_dataset import AIGPreprocessedDatasetLoader
+import torch
+from torch_geometric.loader import DenseDataLoader
 
+from GraphDF import GraphDF
+from aig_config import *
+from use_dataset import AIGPreprocessedDatasetLoader
 
 # --- Base Configuration Dictionary (Defaults) ---
 base_conf = {
@@ -51,7 +50,7 @@ def main(args):
     conf['max_epochs'] = getattr(args, 'max_epochs', conf['max_epochs'])
     conf['save_interval'] = getattr(args, 'save_interval', conf['save_interval'])
     conf['grad_clip_value'] = getattr(args, 'grad_clip_value', conf['grad_clip_value'])
-    conf['data_name'] = args.dataset_name
+
 
     # Model-specific params (GraphAF/GraphDF)
     conf['model']['edge_unroll'] = getattr(args, 'edge_unroll', conf['model']['edge_unroll'])
@@ -75,13 +74,13 @@ def main(args):
     # conf['model_ebm']['dropout'] = getattr(args, 'ebm_dropout', conf['model_ebm']['dropout'])
     # conf['model_ebm']['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations',
     #                                                   conf['model_ebm']['n_power_iterations'])
-    # EBM Training params
-    conf['train_ebm']['c'] = getattr(args, 'ebm_c', conf['train_ebm']['c'])
-    conf['train_ebm']['ld_step'] = getattr(args, 'ebm_ld_step', conf['train_ebm']['ld_step'])
-    conf['train_ebm']['ld_noise'] = getattr(args, 'ebm_ld_noise', conf['train_ebm']['ld_noise'])
-    conf['train_ebm']['ld_step_size'] = getattr(args, 'ebm_ld_step_size', conf['train_ebm']['ld_step_size'])
-    conf['train_ebm']['alpha'] = getattr(args, 'ebm_alpha', conf['train_ebm']['alpha'])
-    conf['train_ebm']['clamp_lgd_grad'] = getattr(args, 'ebm_clamp_lgd_grad', conf['train_ebm']['clamp_lgd_grad'])
+    # # EBM Training params
+    # conf['train_ebm']['c'] = getattr(args, 'ebm_c', conf['train_ebm']['c'])
+    # conf['train_ebm']['ld_step'] = getattr(args, 'ebm_ld_step', conf['train_ebm']['ld_step'])
+    # conf['train_ebm']['ld_noise'] = getattr(args, 'ebm_ld_noise', conf['train_ebm']['ld_noise'])
+    # conf['train_ebm']['ld_step_size'] = getattr(args, 'ebm_ld_step_size', conf['train_ebm']['ld_step_size'])
+    # conf['train_ebm']['alpha'] = getattr(args, 'ebm_alpha', conf['train_ebm']['alpha'])
+    # conf['train_ebm']['clamp_lgd_grad'] = getattr(args, 'ebm_clamp_lgd_grad', conf['train_ebm']['clamp_lgd_grad'])
 
     # --- Device Setup ---
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -223,8 +222,8 @@ if __name__ == "__main__":
                         help=f"Maximum training epochs (default: {base_conf['max_epochs']}).")
     parser.add_argument('--save_interval', type=int, default=base_conf['save_interval'],
                         help=f"Save checkpoints every N epochs (default: {base_conf['save_interval']}).")
-    parser.add_argument('--grad_clip_value', type=float, default=base_conf['grad_clip_value'],
-                        help=f"Max norm for gradient clipping (default: {base_conf['grad_clip_value']}). 0 or None to disable.")
+    # parser.add_argument('--grad_clip_value', type=float, default=base_conf['grad_clip_value'],
+    #                     help=f"Max norm for gradient clipping (default: {base_conf['grad_clip_value']}). 0 or None to disable.")
 
     # --- Model Architecture Hyperparameters ---
     # Note: edge_unroll is essential and required
@@ -236,38 +235,38 @@ if __name__ == "__main__":
                         help=f"Hidden dim for GAF/GDF (default: {base_conf['model']['nhid']}).")
     parser.add_argument('--gaf_nout', type=int, default=base_conf['model']['nout'],
                         help=f"Output dim for GAF/GDF (default: {base_conf['model']['nout']}).")
-    parser.add_argument('--deq_coeff', type=float,  # No default here, handled in main()
-                        help=f"Dequantization coefficient (default from base_conf: {base_conf['model']['deq_coeff']}).")
-    parser.add_argument('--st_type', type=str, choices=['exp', 'sigmoid', 'softplus'],
-                        # No default here, handled in main()
-                        help=f"ST network type (default from base_conf: {base_conf['model']['st_type']}).")
-    # EBM specific architecture args
-    parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'],
-                        help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
-    parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'],
-                        help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
-    parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction,
-                        default=base_conf['model_ebm']['swish_act'], help="Use Swish activation in EBM.")
-    parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction,
-                        default=base_conf['model_ebm']['add_self'], help="Add self-connections in EBM.")
-    parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'],
-                        help=f"EBM dropout (default: {base_conf['model_ebm']['dropout']}).")
-    parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'],
-                        help=f"EBM power iterations (default: {base_conf['model_ebm']['n_power_iterations']}).")
+    # parser.add_argument('--deq_coeff', type=float,  # No default here, handled in main()
+    #                     help=f"Dequantization coefficient (default from base_conf: {base_conf['model']['deq_coeff']}).")
+    # parser.add_argument('--st_type', type=str, choices=['exp', 'sigmoid', 'softplus'],
+    #                     # No default here, handled in main()
+    #                     help=f"ST network type (default from base_conf: {base_conf['model']['st_type']}).")
+    # # EBM specific architecture args
+    # parser.add_argument('--ebm_hidden', type=int, default=base_conf['model_ebm']['hidden'],
+    #                     help=f"EBM hidden dim (default: {base_conf['model_ebm']['hidden']}).")
+    # parser.add_argument('--ebm_depth', type=int, default=base_conf['model_ebm']['depth'],
+    #                     help=f"EBM depth (default: {base_conf['model_ebm']['depth']}).")
+    # parser.add_argument('--ebm_swish_act', action=argparse.BooleanOptionalAction,
+    #                     default=base_conf['model_ebm']['swish_act'], help="Use Swish activation in EBM.")
+    # parser.add_argument('--ebm_add_self', action=argparse.BooleanOptionalAction,
+    #                     default=base_conf['model_ebm']['add_self'], help="Add self-connections in EBM.")
+    # parser.add_argument('--ebm_dropout', type=float, default=base_conf['model_ebm']['dropout'],
+    #                     help=f"EBM dropout (default: {base_conf['model_ebm']['dropout']}).")
+    # parser.add_argument('--ebm_n_power_iterations', type=int, default=base_conf['model_ebm']['n_power_iterations'],
+    #                     help=f"EBM power iterations (default: {base_conf['model_ebm']['n_power_iterations']}).")
 
-    # --- EBM Training Hyperparameters ---
-    parser.add_argument('--ebm_c', type=float, default=base_conf['train_ebm']['c'],
-                        help=f"EBM dequant scale (default: {base_conf['train_ebm']['c']}).")
-    parser.add_argument('--ebm_ld_step', type=int, default=base_conf['train_ebm']['ld_step'],
-                        help=f"EBM Langevin steps (default: {base_conf['train_ebm']['ld_step']}).")
-    parser.add_argument('--ebm_ld_noise', type=float, default=base_conf['train_ebm']['ld_noise'],
-                        help=f"EBM Langevin noise std (default: {base_conf['train_ebm']['ld_noise']}).")
-    parser.add_argument('--ebm_ld_step_size', type=float, default=base_conf['train_ebm']['ld_step_size'],
-                        help=f"EBM Langevin step size (default: {base_conf['train_ebm']['ld_step_size']}).")
-    parser.add_argument('--ebm_alpha', type=float, default=base_conf['train_ebm']['alpha'],
-                        help=f"EBM regularization weight (default: {base_conf['train_ebm']['alpha']}).")
-    parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
-                        default=base_conf['train_ebm']['clamp_lgd_grad'], help="Clamp Langevin gradients.")
+    # # --- EBM Training Hyperparameters ---
+    # parser.add_argument('--ebm_c', type=float, default=base_conf['train_ebm']['c'],
+    #                     help=f"EBM dequant scale (default: {base_conf['train_ebm']['c']}).")
+    # parser.add_argument('--ebm_ld_step', type=int, default=base_conf['train_ebm']['ld_step'],
+    #                     help=f"EBM Langevin steps (default: {base_conf['train_ebm']['ld_step']}).")
+    # parser.add_argument('--ebm_ld_noise', type=float, default=base_conf['train_ebm']['ld_noise'],
+    #                     help=f"EBM Langevin noise std (default: {base_conf['train_ebm']['ld_noise']}).")
+    # parser.add_argument('--ebm_ld_step_size', type=float, default=base_conf['train_ebm']['ld_step_size'],
+    #                     help=f"EBM Langevin step size (default: {base_conf['train_ebm']['ld_step_size']}).")
+    # parser.add_argument('--ebm_alpha', type=float, default=base_conf['train_ebm']['alpha'],
+    #                     help=f"EBM regularization weight (default: {base_conf['train_ebm']['alpha']}).")
+    # parser.add_argument('--ebm_clamp_lgd_grad', action=argparse.BooleanOptionalAction,
+    #                     default=base_conf['train_ebm']['clamp_lgd_grad'], help="Clamp Langevin gradients.")
 
     args = parser.parse_args()
     main(args)

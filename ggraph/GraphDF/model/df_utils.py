@@ -6,9 +6,11 @@ And modified for PyTorch.
 """
 import sys
 import warnings
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+
 
 def one_hot(inputs, vocab_size = None):
     """Returns one hot of data over each element of the inputs"""

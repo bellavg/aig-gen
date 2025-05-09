@@ -1,9 +1,10 @@
+import warnings
+from collections import defaultdict
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import defaultdict
-import warnings
 
 # Assuming MaskedGraphAF is in .graphaf (i.e., a sibling file in the 'model' directory)
 from .graphaf import MaskedGraphAF

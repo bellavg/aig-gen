@@ -1,10 +1,7 @@
-from .generator import Generator
-from .GraphEBM.graphebm import GraphEBM
-from .GraphDF import GraphDF
 from .GraphAF import GraphAF
-from .aig_config import *
-
-
+from .GraphDF import GraphDF
+from .GraphEBM.graphebm import GraphEBM
+from .generator import Generator
 
 __all__ = [
     'Generator',

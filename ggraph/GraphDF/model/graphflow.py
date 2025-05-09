@@ -1,14 +1,7 @@
-import networkx as nx
 import torch
 import torch.nn as nn
-import numpy as np
-from sympy.multipledispatch.dispatcher import source
 
 from .disgraphaf import DisGraphAF
-from ggraph.aig_config import NUM2NODETYPE, NUM2EDGETYPE, VIRTUAL_EDGE_INDEX, check_validity
-import networkx as nx
-
-
 
 
 class GraphFlowModel(nn.Module):

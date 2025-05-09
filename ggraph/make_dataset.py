@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
-import os
-import torch
-from torch_geometric.data import InMemoryDataset, Dataset
-from torch_geometric.data.data import BaseData  # For type hinting
-import os.path as osp
-from typing import List, Tuple, Dict, Optional, Any
-import torch_geometric.io.fs as pyg_fs  # Import PyG's filesystem utilities
-import pickle
-import warnings
 import argparse
 import gc
+import os
+import os.path as osp
+import pickle
 import shutil
+import warnings
+from typing import List, Tuple, Optional
+
 import networkx as nx
 import numpy as np
+import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
+from torch_geometric.data import InMemoryDataset
 from tqdm import tqdm
-from aig_config import (
-        MAX_NODE_COUNT, NUM_NODE_FEATURES, NUM_ADJ_CHANNELS,
-        NUM_EXPLICIT_EDGE_TYPES, NODE_TYPE_KEYS, EDGE_TYPE_KEYS,
-        NODE_TYPE_ENCODING_NX, EDGE_TYPE_ENCODING_NX
-    )
 
+from aig_config import (
+    MAX_NODE_COUNT, NUM_NODE_FEATURES, NUM_ADJ_CHANNELS,
+    NUM_EXPLICIT_EDGE_TYPES
+)
 
 
 def _convert_nx_to_pyg_data(graph: nx.DiGraph,
@@ -508,8 +506,6 @@ class AIGProcessedDataset(InMemoryDataset):
         torch.save((data, slices), final_save_path)
         print(f"Successfully saved final data for split '{self.split}'.")
 
-
-from itertools import repeat
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -30,7 +30,6 @@ module load Anaconda3/2024.06-1
 echo "Modules loaded."
 echo "Activating conda environment: ${CONDA_ENV_NAME}..."
 source activate ${CONDA_ENV_NAME}
-check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
 # --- End Setup ---
 
