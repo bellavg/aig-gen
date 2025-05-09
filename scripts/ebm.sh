@@ -2,7 +2,7 @@
 #SBATCH --job-name=ebm # Updated job name
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
-#SBATCH --time=00:59:00 # Keep increased time
+#SBATCH --time=08:00:00 # Keep increased time
 #SBATCH --output=../slurm_logs/sample_ebm_%j.out
 
 
@@ -43,9 +43,9 @@ echo "Conda environment activated."
 srun python -u ggraph/sample_graphs.py \
     --model 'GraphEBM' \
     --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \
-    --num_samples 2
-#    --evaluate \
-#    --save
+    --num_samples 1000 \
+    --evaluate \
+    --save
 #
 #
 ##
