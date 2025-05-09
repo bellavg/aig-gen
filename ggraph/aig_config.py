@@ -1,4 +1,5 @@
 import networkx as nx
+import warnings
 
 # --- Primary Configuration Constants ---
 dataset = 'aig'
@@ -162,4 +163,90 @@ def check_validity(graph: nx.DiGraph) -> bool:
             return False
 
     return True
+
+
+def check_aig_component_minimums(current_aig_graph: nx.DiGraph) -> bool:
+    """
+    Checks if the given AIG meets the minimum component criteria.
+    - At least 1 "NODE_AND"
+    - At least 2 "NODE_PI"
+    - At least 1 "NODE_PO"
+    """
+    if current_aig_graph is None or current_aig_graph.number_of_nodes() == 0:
+        return False
+
+    type_counts = {"NODE_AND": 0, "NODE_PI": 0, "NODE_PO": 0}
+    # Node types are stored as strings like "NODE_PI", "NODE_AND" etc.
+    # These strings are the values in the NUM2NODETYPE dictionary.
+
+    # We need to find the string values for PI, PO, AND from NUM2NODETYPE
+    # This assumes NUM2NODETYPE is {0: "NODE_CONST0", 1: "NODE_PI", 2: "NODE_AND", 3: "NODE_PO"}
+    # A more robust way would be to iterate NUM2NODETYPE's values if keys are not fixed.
+    # For now, assuming fixed mapping or direct string comparison.
+
+    # String representations for target node types
+    # These should match the values in your NUM2NODETYPE from aig_config.py
+    # Example: if NUM2NODETYPE = {0:"const0", 1:"pi", 2:"and", 3:"po"}
+    # then target_node_type_and = "and", etc.
+    # For this example, I'll assume the strings are exactly "NODE_AND", "NODE_PI", "NODE_PO"
+    # as per common naming, but ensure these match your config's string values.
+
+    # Find the string representation for AND, PI, PO from NUM2NODETYPE
+    str_node_and = None
+    str_node_pi = None
+    str_node_po = None
+
+    for key, value in NUM2NODETYPE.items():
+        if "AND" in value.upper():  # Case-insensitive check for "AND"
+            str_node_and = value
+        elif "PI" in value.upper():  # Case-insensitive check for "PI"
+            str_node_pi = value
+        elif "PO" in value.upper():  # Case-insensitive check for "PO"
+            str_node_po = value
+
+    if not all([str_node_and, str_node_pi, str_node_po]):
+        warnings.warn(
+            f"Could not find all required node type strings (AND, PI, PO) in NUM2NODETYPE: {NUM2NODETYPE}. Component check might be inaccurate.")
+        # Fallback to direct string comparison if mapping is complex
+        str_node_and = str_node_and or "NODE_AND"
+        str_node_pi = str_node_pi or "NODE_PI"
+        str_node_po = str_node_po or "NODE_PO"
+
+    for _, data in current_aig_graph.nodes(data=True):
+        node_type_str = data.get('type')
+        if node_type_str == str_node_and:
+            type_counts["NODE_AND"] += 1
+        elif node_type_str == str_node_pi:
+            type_counts["NODE_PI"] += 1
+        elif node_type_str == str_node_po:
+            type_counts["NODE_PO"] += 1
+
+    meets_criteria = (
+            type_counts["NODE_AND"] >= 1 and
+            type_counts["NODE_PI"] >= 2 and
+            type_counts["NODE_PO"] >= 1
+    )
+    return meets_criteria
+
+
+# --- Base Configuration Dictionary (Defaults) ---
+base_conf = {
+    "data_name": "aig",  # This will be overridden by args.dataset_name
+    "model": {
+        "max_size": MAX_NODE_COUNT, "node_dim": NUM_NODE_FEATURES, "bond_dim": NUM_ADJ_CHANNELS, "use_gpu": True,
+        "edge_unroll": 25, "num_flow_layer": 12, "num_rgcn_layer": 3,
+        "nhid": 128, "nout": 128,
+        "deq_coeff": 0.9, "st_type": "exp", "use_df": False
+    },
+    # "model_ebm": {
+    #     "hidden": 64, "depth": 2, "swish_act": True, "add_self": False,
+    #     "dropout": 0.0, "n_power_iterations": 1
+    # },
+    "lr": 0.001, "weight_decay": 1e-5, "batch_size": 32, "max_epochs": 30,
+    "save_interval": 3, "grad_clip_value": 1.0,
+    # "train_ebm": {
+    #     "c": 0.0, "ld_step": 150, "ld_noise": 0.005, "ld_step_size": 30,
+    #     "clamp_lgd_grad": True, "alpha": 1.0
+    # }
+}
 

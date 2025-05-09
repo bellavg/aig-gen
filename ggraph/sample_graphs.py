@@ -6,7 +6,8 @@ import torch
 import pickle
 import warnings
 from GraphDF import GraphDF
-import aig_config as config
+from GraphAF import GraphAF
+from aig_config import *
 from evaluate_aigs import run_standalone_evaluation
 
 
@@ -23,42 +24,30 @@ def main(args):
         print("Using CPU.")
     use_gpu = (device.type == 'cuda')
 
-
-    model_conf = {
-        "max_size": config.MAX_NODE_COUNT,
-        "node_dim": config.NUM_NODE_FEATURES,
-        "bond_dim": config.NUM_ADJ_CHANNELS,
-        "use_gpu": use_gpu,
-        "edge_unroll": args.edge_unroll,      # CRITICAL: Must match training
-        "num_flow_layer": args.num_flow_layer,
-        "num_rgcn_layer": args.num_rgcn_layer,
-        "nhid": args.nhid,
-        "nout": args.nout,
-    }
     print("\nUsing Model Configuration:")
-    for key, value in model_conf.items():
+    for key, value in base_conf.items():
         print(f"  {key}: {value}")
     print("-" * 30)
 
-    # --- Instantiate GraphDF Runner ---
-    print(f"Instantiating GraphDF runner...")
-    try:
-        runner = GraphDF()
-    except Exception as e_init:
-        print(f"Error during GraphDF runner instantiation: {e_init}")
-        sys.exit(1)
-
     # --- Prepare Generation Arguments ---
     generation_args = {
-        "model_conf_dict": model_conf,
+        "model_conf_dict": base_conf["model"],
         "checkpoint_path": args.checkpoint,
         "n_mols": args.num_samples,
         "num_min_node": args.min_nodes,
-        "temperature": [args.temperature_node, args.temperature_edge],
-
     }
 
-    print(f"\nStarting AIG generation with GraphDF...")
+    # --- Instantiate GraphDF Runner ---
+    print(f"Instantiating GraphDF runner...")
+    if args.model == 'GraphDF':
+        runner = GraphDF()
+        generation_args["temperature"]: [args.temperature_node, args.temperature_edge]
+    elif args.model == 'GraphAF':
+        runner = GraphAF()
+        generation_args["temperature"]: args.temperature_af
+
+
+    print(f"\nStarting AIG generation with {args.model}...")
     generated_graphs = runner.run_rand_gen(**generation_args)
     print(f"\nGeneration finished for GraphDF.")
     if generated_graphs is not None and len(generated_graphs) > 0:
@@ -84,7 +73,7 @@ if __name__ == "__main__":
     )
 
     # --- Essential Arguments ---
-    parser.add_argument('--model', type=str,default='GraphDF',
+    parser.add_argument('--model', type=str, default='GraphDF',
                         help='model type')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to the trained GraphDF model checkpoint (.pth file).')
@@ -102,9 +91,11 @@ if __name__ == "__main__":
     # --- Generation Control Arguments ---
     parser.add_argument('--min_nodes', type=int, default=5,
                         help='Minimum number of actual nodes in generated AIGs.')
-    parser.add_argument('--temperature_node', type=float, default=0.7,
+    parser.add_argument('--temperature_node', type=float, default=0.3,
                         help='Temperature for node type sampling in GraphDF.')
-    parser.add_argument('--temperature_edge', type=float, default=0.7,
+    parser.add_argument('--temperature_edge', type=float, default=0.3,
+                        help='Temperature for edge type sampling in GraphDF.')
+    parser.add_argument('--temperature_af', type=float, default=0.6,
                         help='Temperature for edge type sampling in GraphDF.')
     parser.add_argument('--device', type=str, default='cpu', choices=['cuda', 'cpu'],
                         help='Device for generation ("cuda" or "cpu").')
@@ -125,6 +116,7 @@ if __name__ == "__main__":
                         help='Hidden dimension size in RGCN/ST_Dis. MUST match training.')
     parser.add_argument('--nout', type=int, default=128,
                         help='Output dimension size (embedding size) from RGCN. MUST match training.')
+    parser.add_argument('--temperature_af', type=float, default=0.75, help='Temperature (GraphAF).')
 
     args = parser.parse_args()
     main(args)
