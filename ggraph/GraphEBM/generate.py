@@ -94,7 +94,7 @@ def print_graph_summary(g, stage_name="Graph", sample_idx=None):
 
 
 def construct_aig(x_features_matrix, adj_channel_tensor, node_type_list=NODE_TYPE_KEYS,
-                  edge_score_threshold=0.5, sample_idx_debug=None):  # Added edge_score_threshold
+                  edge_score_threshold=0.75, sample_idx_debug=None):  # Added edge_score_threshold
     """
     Constructs an AIG (And-Inverter Graph) from raw feature matrices.
     Args:
