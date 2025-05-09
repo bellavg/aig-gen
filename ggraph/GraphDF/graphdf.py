@@ -70,7 +70,8 @@ class GraphDF(Generator):
                 optimizer.step()
 
                 total_loss += loss.to('cpu').item()
-                print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
+                if batch % 100 == 0:
+                    print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
 
             avg_loss = total_loss / (batch + 1)
             print("Training | Average loss {}".format(avg_loss))
