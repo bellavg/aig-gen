@@ -35,8 +35,8 @@ echo "Conda environment activated."
 
 
 ## Call the simplified train_graphs.py script, ensuring all required args are present
-srun python -u ggraph/train_graphs.py \
-    --model 'GraphEBM'
+#srun python -u ggraph/train_graphs.py \
+#    --model 'GraphEBM'
 
 #
 #
