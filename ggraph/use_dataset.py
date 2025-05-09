@@ -44,14 +44,25 @@ class AIGPreprocessedDatasetLoader(Dataset):
 
                 # Calculate initial length based on slices for comparison
                 initial_len_from_slices = 0
-                if self.slices is not None:
-                    for _, value in self.slices.items():
-                        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.numel() > 0:
-                            cat_dim_check_key = next(iter(self.slices))  # get a key to check cat_dim
-                            if self.data[cat_dim_check_key].size(
-                                    self.data.__cat_dim__(cat_dim_check_key, self.data[cat_dim_check_key])) > 0:
-                                initial_len_from_slices = value.size(0) - 1 if value.size(0) > 0 else 0
-                                break
+                if self.slices is not None and len(self.slices) > 0:  # Check if slices is not empty
+                    # Attempt to find a key that exists in both self.data and self.slices for a robust cat_dim check
+                    valid_key_for_cat_dim = None
+                    for key_check in self.slices.keys():
+                        if key_check in self.data and torch.is_tensor(self.data[key_check]):
+                            valid_key_for_cat_dim = key_check
+                            break
+
+                    if valid_key_for_cat_dim:
+                        for _, value in self.slices.items():  # Iterate to find a valid slice tensor
+                            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.numel() > 0:
+                                # Ensure the key used for cat_dim check is valid and its item is a tensor
+                                item_for_cat_dim = self.data[valid_key_for_cat_dim]
+                                cat_dim = self.data.__cat_dim__(valid_key_for_cat_dim, item_for_cat_dim)
+                                if cat_dim is not None and item_for_cat_dim.size(cat_dim) > 0:
+                                    initial_len_from_slices = value.size(0) - 1 if value.size(0) > 0 else 0
+                                    break
+                    else:  # No common key or self.data items are not tensors for slice keys
+                        pass  # initial_len_from_slices remains 0
 
                 num_graphs_from_dunder_nodes = 0
                 if has_batch_dunder_num_nodes_attr:
@@ -59,6 +70,7 @@ class AIGPreprocessedDatasetLoader(Dataset):
 
                 if has_num_nodes_key_in_data and not has_num_nodes_key_in_slices:
                     if has_batch_dunder_num_nodes_attr:
+                        # Check if num_graphs_from_dunder_nodes is positive before comparing
                         self._batch_has_valid_dunder_num_nodes = (
                                     num_graphs_from_dunder_nodes == initial_len_from_slices and num_graphs_from_dunder_nodes > 0)
                         if self._batch_has_valid_dunder_num_nodes:
@@ -69,7 +81,7 @@ class AIGPreprocessedDatasetLoader(Dataset):
                                 f"The loader will use 'self.data.__num_nodes__'. This is usually acceptable.",
                                 UserWarning
                             )
-                        else:
+                        else:  # Mismatch in length or zero length
                             warnings.warn(
                                 f"Dataset Inconsistency for split '{self.split}': "
                                 f"'num_nodes' key exists in self.data but is missing from 'self.slices'. "
@@ -128,17 +140,25 @@ class AIGPreprocessedDatasetLoader(Dataset):
         if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None and \
                 torch.is_tensor(self.data.__num_nodes__):
             return self.data.__num_nodes__.size(0)
-        elif hasattr(self.data, '__num_nodes__') and isinstance(self.data.__num_nodes__, (list, tuple)):
+        elif hasattr(self.data, '__num_nodes__') and isinstance(self.data.__num_nodes__,
+                                                                (list, tuple)):  # Should be a tensor from PyG collate
             return len(self.data.__num_nodes__)
 
-        if self.slices is not None:
-            for key_for_len, slice_tensor_for_len in self.slices.items():
-                if isinstance(slice_tensor_for_len,
-                              torch.Tensor) and slice_tensor_for_len.ndim > 0 and slice_tensor_for_len.numel() > 0:
-                    # Ensure the key exists in data and is a tensor before checking its cat_dim size
-                    if key_for_len in self.data and torch.is_tensor(self.data[key_for_len]):
-                        cat_dim = self.data.__cat_dim__(key_for_len, self.data[key_for_len])
-                        if cat_dim is not None and self.data[key_for_len].size(cat_dim) > 0:
+        if self.slices is not None and len(self.slices) > 0:
+            # Attempt to find a key that exists in both self.data and self.slices for a robust cat_dim check
+            valid_key_for_cat_dim = None
+            for key_check in self.slices.keys():
+                if key_check in self.data and torch.is_tensor(self.data[key_check]):
+                    valid_key_for_cat_dim = key_check
+                    break
+
+            if valid_key_for_cat_dim:
+                for key_for_len, slice_tensor_for_len in self.slices.items():
+                    if isinstance(slice_tensor_for_len,
+                                  torch.Tensor) and slice_tensor_for_len.ndim > 0 and slice_tensor_for_len.numel() > 0:
+                        item_for_cat_dim = self.data[valid_key_for_cat_dim]  # Use the validated key
+                        cat_dim = self.data.__cat_dim__(valid_key_for_cat_dim, item_for_cat_dim)
+                        if cat_dim is not None and item_for_cat_dim.size(cat_dim) > 0:
                             return slice_tensor_for_len.size(0) - 1 if slice_tensor_for_len.size(0) > 0 else 0
             return 0
         return 0
@@ -159,7 +179,9 @@ class AIGPreprocessedDatasetLoader(Dataset):
 
             data_obj_dunder_num_nodes_was_set = False
             if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None:
-                if idx < len(self.data.__num_nodes__):
+                # Ensure self.data.__num_nodes__ is a sequence (tensor, list, or tuple) before len()
+                if isinstance(self.data.__num_nodes__, (torch.Tensor, list, tuple)) and idx < len(
+                        self.data.__num_nodes__):
                     val = self.data.__num_nodes__[idx]
                     true_num_nodes_for_this_item = None
                     if torch.is_tensor(val) and val.numel() == 1:
@@ -176,27 +198,31 @@ class AIGPreprocessedDatasetLoader(Dataset):
                             f"data_obj.__num_nodes__ not set from this source for item {idx}.", UserWarning)
                 else:
                     warnings.warn(
-                        f"Index {idx} out of bounds for self.data.__num_nodes__ (len {len(self.data.__num_nodes__)}). "
+                        f"Index {idx} out of bounds for self.data.__num_nodes__ (len {len(self.data.__num_nodes__) if isinstance(self.data.__num_nodes__, (torch.Tensor, list, tuple)) else 'N/A'}). "
                         f"data_obj.__num_nodes__ not set for item {idx}. PyG will infer num_nodes.", UserWarning
                     )
 
             for key in self.data.keys():
                 if key == 'num_nodes' and data_obj_dunder_num_nodes_was_set:
-                    continue  # Already handled by setting data_obj.__num_nodes__
+                    continue
 
                 if key not in self.slices:
-                    # Conditional warning for 'num_nodes' if it's missing from slices
-                    if key == 'num_nodes':  # Implies data_obj_dunder_num_nodes_was_set is False
-                        if self._batch_has_valid_dunder_num_nodes:  # Batch was supposed to have good __num_nodes__
-                            warnings.warn(
-                                f"Note: 'num_nodes' is missing from slices for index {idx}, and data_obj.__num_nodes__ "
-                                f"could not be set for this specific item (e.g. bad value in self.data.__num_nodes__[{idx}]). "
-                                f"PyG will infer num_nodes for this item, which might be from padded 'x'.", UserWarning)
-                        else:  # Batch __num_nodes__ was already problematic or missing
-                            warnings.warn(
-                                f"Warning: Key 'num_nodes' is missing from slices for index {idx}, and batch-level "
-                                f"'self.data.__num_nodes__' was not valid/available. "
-                                f"PyG will infer num_nodes for this item.", UserWarning)
+                    if key == 'num_nodes':
+                        if not self._batch_has_valid_dunder_num_nodes:
+                            # This is the specific warning you wanted to remove.
+                            # It's triggered if 'num_nodes' is missing from slices AND
+                            # the batch-level __num_nodes__ was also deemed invalid/unavailable.
+                            # By commenting it out, we accept PyG's inference without warning in this specific case.
+                            # warnings.warn(
+                            #     f"Warning: Key 'num_nodes' is missing from slices for index {idx}, and batch-level "
+                            #     f"'self.data.__num_nodes__' was not valid/available. "
+                            #     f"PyG will infer num_nodes for this item.", UserWarning)
+                            pass  # Suppress this specific warning
+                        # If _batch_has_valid_dunder_num_nodes is True, it means data_obj_dunder_num_nodes_was_set
+                        # was False due to an item-specific issue with self.data.__num_nodes__[idx].
+                        # The warning for that specific item issue would have already been printed.
+                        # So, no additional warning here if _batch_has_valid_dunder_num_nodes was true.
+
                     else:  # For keys other than 'num_nodes'
                         warnings.warn(
                             f"Key '{key}' found in self.data but not in self.slices. "

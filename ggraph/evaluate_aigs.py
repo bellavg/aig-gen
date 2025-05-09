@@ -9,55 +9,20 @@ from typing import Dict, Any, List, Optional, Set, Tuple
 import numpy as np
 import sys
 from tqdm import tqdm
+import io
+from aig_config import *
 # Removed json, torch imports as they were primarily for bin loading
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("evaluate_aigs_pkl")
 
-# --- Import the AIG configuration ---
-try:
-    # Assuming aig_config.py is accessible
-    import data.aig_config as aig_config
-except ImportError:
-    import G2PT.configs.aig as aig_config
-
-# --- Constants from Config or Fallbacks ---
-if aig_config:
-    NODE_TYPE_KEYS = getattr(aig_config, 'NODE_TYPE_KEYS', ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"])
-    EDGE_TYPE_KEYS = getattr(aig_config, 'EDGE_TYPE_KEYS', ["EDGE_REG", "EDGE_INV"]) # Needed for isomorphism check maybe?
-    VALID_AIG_NODE_TYPES = set(NODE_TYPE_KEYS)
-    VALID_AIG_EDGE_TYPES = set(EDGE_TYPE_KEYS)
-    NODE_CONST0 = getattr(aig_config, 'NODE_CONST0_KEY', "NODE_CONST0")
-    NODE_PI = getattr(aig_config, 'NODE_PI_KEY', "NODE_PI")
-    NODE_AND = getattr(aig_config, 'NODE_AND_KEY', "NODE_AND")
-    NODE_PO = getattr(aig_config, 'NODE_PO_KEY', "NODE_PO")
-    MIN_AND_COUNT_CONFIG = getattr(aig_config, 'MIN_AND_COUNT', 1)
-    MIN_PO_COUNT_CONFIG = getattr(aig_config, 'MIN_PO_COUNT', 1)
-    NODE_TYPE_ENCODING = getattr(aig_config, 'NODE_TYPE_ENCODING', {
-        "NODE_CONST0": [1.0, 0.0, 0.0, 0.0], "NODE_PI": [0.0, 1.0, 0.0, 0.0],
-        "NODE_AND": [0.0, 0.0, 1.0, 0.0], "NODE_PO": [0.0, 0.0, 0.0, 1.0]
-    })
-    EDGE_LABEL_ENCODING = getattr(aig_config, 'EDGE_LABEL_ENCODING', {
-         "EDGE_REG": [1.0, 0.0], "EDGE_INV": [0.0, 1.0]
-    })
-    # Create reverse mappings if needed for isomorphism check or validation
-    ONE_HOT_TO_NODE_TYPE_STR = {tuple(float(x) for x in v): k for k, v in NODE_TYPE_ENCODING.items()}
-    ONE_HOT_TO_EDGE_TYPE_STR = {tuple(float(x) for x in v): k for k, v in EDGE_LABEL_ENCODING.items()}
+NODE_CONST0 = NODE_TYPE_KEYS[0]
+NODE_PI = NODE_TYPE_KEYS[1]
+NODE_AND = NODE_TYPE_KEYS[2]
+NODE_PO = NODE_TYPE_KEYS[3]
 
 
-else: # Fallbacks if aig_config is not loaded
-    NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-    EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
-    VALID_AIG_NODE_TYPES = set(NODE_TYPE_KEYS)
-    VALID_AIG_EDGE_TYPES = set(EDGE_TYPE_KEYS)
-    NODE_CONST0 = "NODE_CONST0"; NODE_PI = "NODE_PI"; NODE_AND = "NODE_AND"; NODE_PO = "NODE_PO"
-    MIN_AND_COUNT_CONFIG = 1; MIN_PO_COUNT_CONFIG = 1
-    ONE_HOT_TO_NODE_TYPE_STR = {
-        (1.0, 0.0, 0.0, 0.0): "NODE_CONST0", (0.0, 1.0, 0.0, 0.0): "NODE_PI",
-        (0.0, 0.0, 1.0, 0.0): "NODE_AND", (0.0, 0.0, 0.0, 1.0): "NODE_PO"
-    }
-    ONE_HOT_TO_EDGE_TYPE_STR = { (1.0, 0.0): "EDGE_REG", (0.0, 1.0): "EDGE_INV" }
 
 # Helper to get type string from node attributes (list/array)
 def get_node_type_from_attrs(node_attrs: dict) -> str:
@@ -65,7 +30,7 @@ def get_node_type_from_attrs(node_attrs: dict) -> str:
     if raw_type is None: return "UNKNOWN_MISSING_ATTR"
     try:
         type_tuple = tuple(float(x) for x in raw_type)
-        return ONE_HOT_TO_NODE_TYPE_STR.get(type_tuple, "UNKNOWN_ENCODING")
+        return DECODING_NODE_TYPE_NX.get(type_tuple, "UNKNOWN_ENCODING")
     except Exception: return "UNKNOWN_CONVERSION_ERROR"
 
 # Helper to get type string from edge attributes (list/array)
@@ -74,7 +39,7 @@ def get_edge_type_from_attrs(edge_attrs: dict) -> str:
     if raw_type is None: return "UNKNOWN_MISSING_ATTR"
     try:
         type_tuple = tuple(float(x) for x in raw_type)
-        return ONE_HOT_TO_EDGE_TYPE_STR.get(type_tuple, "UNKNOWN_ENCODING")
+        return DECODING_EDGE_TYPE_NX.get(type_tuple, "UNKNOWN_ENCODING")
     except Exception: return "UNKNOWN_CONVERSION_ERROR"
 
 
@@ -106,28 +71,28 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         node_type = get_node_type_from_attrs(data)
         node_type_counts[node_type] += 1
 
-        if node_type not in VALID_AIG_NODE_TYPES:
+        if node_type not in NODE_TYPE_KEYS:
             metrics['num_unknown_nodes'] += 1; continue
 
         try: in_deg = G.in_degree(node); out_deg = G.out_degree(node)
         except Exception: metrics['degree_check_errors'] += 1; continue # Count errors
 
-        if node_type == NODE_CONST0:
+        if node_type == NODE_TYPE_KEYS[0]:
             if in_deg != 0: metrics['const0_indegree_violations'] += 1
-        elif node_type == NODE_PI:
+        elif node_type == NODE_TYPE_KEYS[1]:
             if in_deg != 0: metrics['pi_indegree_violations'] += 1
-        elif node_type == NODE_AND:
+        elif node_type == NODE_TYPE_KEYS[2]:
             if in_deg != 2: metrics['and_indegree_violations'] += 1
-        elif node_type == NODE_PO:
+        elif node_type == NODE_TYPE_KEYS[3]:
             if out_deg != 0: metrics['po_outdegree_violations'] += 1
             if in_deg == 0: metrics['po_indegree_violations'] += 1 # PO needs input
 
     # Add node counts to metrics
-    metrics['num_pi'] = float(node_type_counts.get(NODE_PI, 0))
-    metrics['num_po'] = float(node_type_counts.get(NODE_PO, 0))
-    metrics['num_and'] = float(node_type_counts.get(NODE_AND, 0))
-    metrics['num_const0'] = float(node_type_counts.get(NODE_CONST0, 0))
-    metrics['num_unknown_nodes'] = float(sum(v for k, v in node_type_counts.items() if k not in VALID_AIG_NODE_TYPES))
+    metrics['num_pi'] = float(node_type_counts.get(NODE_TYPE_KEYS[1], 0))
+    metrics['num_po'] = float(node_type_counts.get(NODE_TYPE_KEYS[3], 0))
+    metrics['num_and'] = float(node_type_counts.get(NODE_TYPE_KEYS[2], 0))
+    metrics['num_const0'] = float(node_type_counts.get(NODE_TYPE_KEYS[0], 0))
+    metrics['num_unknown_nodes'] = float(sum(v for k, v in node_type_counts.items() if k not in NODE_TYPE_KEYS))
 
     # Add failure reasons based on type/degree checks
     if metrics['num_unknown_nodes'] > 0: metrics['constraints_failed'].append("Unknown node types")
@@ -140,7 +105,7 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     # 3. Check Edge Types
     for u, v, data in G.edges(data=True):
         edge_type = get_edge_type_from_attrs(data)
-        if edge_type not in VALID_AIG_EDGE_TYPES:
+        if edge_type not in EDGE_TYPE_KEYS:
             metrics['num_unknown_edges'] += 1
     if metrics['num_unknown_edges'] > 0:
         metrics['constraints_failed'].append("Unknown edge types")
@@ -148,10 +113,10 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     # 4. Check Basic AIG Requirements
     if metrics['num_pi'] == 0 and metrics['num_const0'] == 0 :
          metrics['constraints_failed'].append("No PIs or Const0")
-    if metrics['num_and'] < MIN_AND_COUNT_CONFIG :
-        metrics['constraints_failed'].append(f"AND gates < {MIN_AND_COUNT_CONFIG}")
-    if metrics['num_po'] < MIN_PO_COUNT_CONFIG:
-        metrics['constraints_failed'].append(f"POs < {MIN_PO_COUNT_CONFIG}")
+    if metrics['num_and'] < MIN_AND_COUNT :
+        metrics['constraints_failed'].append(f"AND gates < {MIN_AND_COUNT}")
+    if metrics['num_po'] < MIN_PO_COUNT:
+        metrics['constraints_failed'].append(f"POs < {MIN_PO_COUNT}")
 
     # 5. Check isolated nodes (excluding CONST0)
     try:
@@ -174,8 +139,8 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         metrics['po_outdegree_violations'] == 0 and
         metrics['po_indegree_violations'] == 0 and
         (metrics['num_pi'] > 0 or metrics['num_const0'] > 0) and
-        metrics['num_and'] >= MIN_AND_COUNT_CONFIG and
-        metrics['num_po'] >= MIN_PO_COUNT_CONFIG
+        metrics['num_and'] >= MIN_AND_COUNT and
+        metrics['num_po'] >= MIN_PO_COUNT
     )
     metrics['is_structurally_valid'] = float(is_valid) # Store as float
     if not is_valid and not metrics['constraints_failed']:
@@ -376,34 +341,43 @@ def load_training_graphs_from_pkl(train_pkl_dir: str, train_pkl_prefix: str, num
 
 
 # --- Main Evaluation Logic ---
-def run_standalone_evaluation(args):
-    """Runs the evaluation including Validity, Uniqueness, and Novelty."""
-    logger.info(f"Loading generated AIGs from: {args.input_pickle_file}")
-    try:
-        with open(args.input_pickle_file, 'rb') as f: generated_graphs = pickle.load(f)
-        if not isinstance(generated_graphs, list): logger.error("Pickle file does not contain a list."); return
-        logger.info(f"Loaded {len(generated_graphs)} generated graphs.")
-    except FileNotFoundError: logger.error(f"Input pickle file not found: {args.input_pickle_file}"); return
-    except Exception as e: logger.error(f"Error loading generated graphs pickle file: {e}"); return
+def run_standalone_evaluation(inputs, results_filename, train_pkl_dir="./data/aigs/", train_pkl_prefix="real_aigs_part_", num_train_pkl_files=4):
+    """Runs the evaluation, prints results to console, AND saves them to a file."""
+    if not isinstance(inputs, list):
+        try:
+            with open(inputs, 'rb') as f:
+                generated_graphs = pickle.load(f)
+        except FileNotFoundError:
+            err_msg = f"Error: Input file {inputs} not found.\n"
+            logger.error(err_msg.strip())
+            with open(results_filename, 'w') as res_file: res_file.write(err_msg)
+            print(err_msg, file=sys.stderr) # Also print error to console (stderr)
+            return
+        except Exception as e:
+            err_msg = f"Error: Could not load graphs from {inputs}. Reason: {e}\n"
+            logger.error(err_msg.strip())
+            with open(results_filename, 'w') as res_file: res_file.write(err_msg)
+            print(err_msg, file=sys.stderr)
+            return
+    else:
+        generated_graphs = inputs
 
-    if not generated_graphs: logger.warning("No generated graphs found in the pickle file. Exiting."); return
+    if not generated_graphs:
+        warn_msg = "No generated graphs found to evaluate.\n"
+        logger.warning(warn_msg.strip())
+        with open(results_filename, 'w') as res_file: res_file.write(warn_msg)
+        print(warn_msg) # Print warning to console
+        return
 
-    # --- Load Training Data (Using new PKL method) ---
+    # --- Load Training Data ---
     train_graphs = None
-    if args.train_pkl_dir and args.train_pkl_prefix:
-        train_graphs = load_training_graphs_from_pkl(
-            args.train_pkl_dir,
-            args.train_pkl_prefix,
-            args.num_train_pkl_files
-        )
+    if train_pkl_dir and train_pkl_prefix and num_train_pkl_files > 0:
+        train_graphs = load_training_graphs_from_pkl(train_pkl_dir, train_pkl_prefix, num_train_pkl_files)
         if train_graphs is None:
-             logger.warning(f"Could not load training graphs from PKL files in {args.train_pkl_dir}. Novelty will not be calculated.")
-        elif not train_graphs:
-             logger.warning(f"Loaded 0 training graphs from PKL files in {args.train_pkl_dir}. Novelty will be 100%.")
+             logger.warning(f"Could not load training graphs from PKL files in {train_pkl_dir}. Novelty will not be calculated.")
+    else:
+        logger.info("Training data directory/prefix not provided or num_files is 0. Novelty will not be calculated against a training set.")
 
-    elif args.train_pkl_dir or args.train_pkl_prefix:
-         logger.warning("Both --train_pkl_dir and --train_pkl_prefix must be provided to load training graphs for novelty.")
-    # --- End Load Training Data ---
 
     num_total = len(generated_graphs)
     valid_graphs = []
@@ -412,96 +386,158 @@ def run_standalone_evaluation(args):
     failed_constraints_summary = Counter()
 
     logger.info("Starting evaluation (Pass 1: Validity and Metrics)...")
-    for i, graph in enumerate(tqdm(generated_graphs, desc="Evaluating Validity")):
-        if not isinstance(graph, nx.DiGraph):
-            logger.warning(f"Item {i} is not a NetworkX DiGraph, skipping.")
-            failed_constraints_summary["Invalid Graph Object"] += 1; continue
+    for i, graph_candidate in enumerate(tqdm(generated_graphs, desc="Evaluating Validity")):
+        # Ensure it's a graph, even if empty, before metric calculation
+        if not isinstance(graph_candidate, nx.DiGraph):
+            logger.warning(f"Item {i} is not a NetworkX DiGraph (type: {type(graph_candidate)}), skipping.")
+            failed_constraints_summary["Invalid Graph Object Type"] += 1
+            # Add to aggregate_metrics for completeness if desired, e.g. num_nodes = 0
+            aggregate_metrics['num_nodes'].append(0) # Or some other default
+            aggregate_metrics['is_structurally_valid'].append(0.0)
+            continue
+
+        graph = graph_candidate # It's a DiGraph
 
         struct_metrics = calculate_structural_aig_metrics(graph)
         for key, value in struct_metrics.items():
              if isinstance(value, (int, float, bool)): aggregate_metrics[key].append(float(value))
+
         if struct_metrics.get('is_structurally_valid', 0.0) > 0.5:
             valid_graphs.append(graph)
             try:
                  path_metrics = count_pi_po_paths(graph)
-                 if path_metrics.get('error') is None:
+                 if path_metrics and path_metrics.get('error') is None:
                     for key, value in path_metrics.items():
                         if isinstance(value, (int, float)): aggregate_path_metrics[key].append(value)
-                 else: logger.warning(f"Skipping path metrics for valid graph {i} due to error: {path_metrics['error']}")
-            except Exception as e: logger.error(f"Error calculating path metrics for valid graph {i}: {e}")
+                 elif path_metrics:
+                     logger.warning(f"Skipping path metrics for valid graph {i} due to error: {path_metrics['error']}")
+                 else:
+                     logger.warning(f"Path metrics calculation returned None for valid graph {i}.")
+            except Exception as e: logger.error(f"Error calculating path metrics for valid graph {i}: {e}", exc_info=True)
         else:
-            for reason in struct_metrics.get('constraints_failed', ["Unknown Failure"]):
+            # Ensure constraints_failed is a list before iterating
+            reasons = struct_metrics.get('constraints_failed', ["Unknown Failure"])
+            if not isinstance(reasons, list): reasons = [str(reasons)]
+            for reason in reasons:
                 failed_constraints_summary[reason] += 1
     logger.info("Evaluation (Pass 1) finished.")
 
     num_valid_structurally = len(valid_graphs)
     uniqueness_score, num_unique = calculate_uniqueness(valid_graphs)
-    novelty_score, num_novel = (-1.0, -1) # Default if not calculated
-    if train_graphs is not None: # Check if training graphs were loaded
+    novelty_score, num_novel = (-1.0, -1)
+    if train_graphs is not None:
         novelty_score, num_novel = calculate_novelty(valid_graphs, train_graphs)
+    elif train_graphs is None and (train_pkl_dir and train_pkl_prefix and num_train_pkl_files > 0):
+        # This case means loading failed, but was attempted.
+        logger.info("Novelty calculation skipped as training graphs failed to load.")
+    else: # No attempt to load training graphs
+        logger.info("Novelty calculation skipped as no training graph path was provided.")
 
-    # --- Reporting (remains the same) ---
+
+    # --- Reporting ---
+    original_stdout = sys.stdout
+    string_buffer = io.StringIO()
+    sys.stdout = string_buffer # Redirect stdout to buffer
+
+    # --- All print statements below will be captured by string_buffer ---
     validity_fraction = (num_valid_structurally / num_total) if num_total > 0 else 0.0
     validity_percentage = validity_fraction * 100
     print("\n--- G2PT AIG V.U.N. Evaluation Summary ---")
     print(f"Total Graphs Loaded             : {num_total}")
     print(f"Structurally Valid AIGs (V)     : {num_valid_structurally} ({validity_percentage:.2f}%)")
     if num_valid_structurally > 0:
-         print(f"Unique Valid AIGs             : {num_unique}")
-         print(f"Uniqueness (U) among valid    : {uniqueness_score:.4f} ({uniqueness_score*100:.2f}%)")
-         if train_graphs is not None:
-             print(f"Novel Valid AIGs vs Train Set : {num_novel}")
-             print(f"Novelty (N) among valid       : {novelty_score:.4f} ({novelty_score*100:.2f}%)")
-         else:
-             print(f"Novelty (N) among valid       : Not calculated (training set PKL files not provided/loaded)")
+            print(f"Unique Valid AIGs             : {num_unique}")
+            print(f"Uniqueness (U) among valid    : {uniqueness_score:.4f} ({uniqueness_score*100:.2f}%)")
+            if novelty_score != -1.0 : # Check if novelty was calculated
+                print(f"Novel Valid AIGs vs Train Set : {num_novel}")
+                print(f"Novelty (N) among valid       : {novelty_score:.4f} ({novelty_score*100:.2f}%)")
+            else:
+                print(f"Novelty (N) among valid       : Not calculated (training set not available or loading failed)")
     else:
-         print(f"Uniqueness (U) among valid    : N/A (0 valid graphs)")
-         print(f"Novelty (N) among valid       : N/A (0 valid graphs)")
+            print(f"Uniqueness (U) among valid    : N/A (0 valid graphs)")
+            print(f"Novelty (N) among valid       : N/A (0 valid graphs)")
 
-    print("\n--- Average Structural Metrics (All Generated Graphs) ---")
-    for key, values in sorted(aggregate_metrics.items()):
-        if key == 'is_structurally_valid': continue
-        if not values: continue
-        avg_value = np.mean(values)
-        if key == 'is_dag': print(f"  - Avg {key:<27}: {avg_value*100:.2f}%")
-        else: print(f"  - Avg {key:<27}: {avg_value:.3f}")
+    print("\n--- Average Structural Metrics (All Processed Graphs) ---")
+    if aggregate_metrics:
+        for key, values in sorted(aggregate_metrics.items()):
+            if key == 'is_structurally_valid': continue # Already reported as percentage
+            if not values:
+                print(f"  - Avg {key:<27}: N/A (no data)")
+                continue
+            avg_value = np.mean(values) if values else 0
+            std_value = np.std(values) if values and len(values) > 1 else 0
+            if key == 'is_dag':
+                print(f"  - Percentage {key:<22}: {avg_value*100:.2f}%")
+            else:
+                print(f"  - Avg {key:<27}: {avg_value:.3f} (Std: {std_value:.3f})")
+    else:
+        print("  No structural metrics data collected.")
+
 
     print("\n--- Constraint Violation Summary (Across Invalid Graphs) ---")
-    num_invalid_graphs = num_total - num_valid_structurally
-    if num_invalid_graphs == 0: print("  No structural violations detected.")
+    num_invalid_graphs = num_total - num_valid_structurally # Re-calculate based on struct_valid flag
+    # Or, more accurately:
+    num_actually_invalid_structurally = sum(1 for v in aggregate_metrics.get('is_structurally_valid', []) if v < 0.5)
+
+    if not failed_constraints_summary and num_actually_invalid_structurally == 0 :
+        print("  No structural violations detected among processed graphs.")
+    elif not failed_constraints_summary and num_actually_invalid_structurally > 0:
+        print(f"  {num_actually_invalid_structurally} graphs were structurally invalid, but no specific reasons were logged.")
     else:
         sorted_reasons = sorted(failed_constraints_summary.items(), key=lambda item: item[1], reverse=True)
-        print(f"  (Violations summarized across {num_invalid_graphs} invalid graphs)")
+        print(f"  (Violations summarized across {num_actually_invalid_structurally} structurally invalid graphs)")
         total_violation_instances = sum(failed_constraints_summary.values())
         print(f"  (Total violation instances logged: {total_violation_instances})")
         for reason, count in sorted_reasons:
-            reason_percentage_of_invalid = (count / num_invalid_graphs) * 100 if num_invalid_graphs > 0 else 0
+            reason_percentage_of_invalid = (count / num_actually_invalid_structurally) * 100 if num_actually_invalid_structurally > 0 else 0
             print(f"  - {reason:<45}: {count:<6} graphs ({reason_percentage_of_invalid:.1f}% of invalid)")
 
-    print("\n--- Average Path Connectivity Metrics (Valid Graphs Only) ---")
-    num_graphs_for_path_metrics = len(aggregate_path_metrics.get('num_pi', []))
-    if num_graphs_for_path_metrics == 0: print("  No structurally valid graphs to calculate path metrics for.")
+    print("\n--- Average Path Connectivity Metrics (Structurally Valid Graphs Only) ---")
+    num_graphs_for_path_metrics = len(aggregate_path_metrics.get('num_pi', [])) # Relies on 'num_pi' being consistently added
+    if num_graphs_for_path_metrics == 0:
+        print("  No structurally valid graphs had path metrics calculated (or no valid graphs).")
     else:
-        print(f"  (Based on {num_graphs_for_path_metrics} structurally valid graphs)")
+        print(f"  (Based on {num_graphs_for_path_metrics} structurally valid graphs with path data)")
         for key, values in sorted(aggregate_path_metrics.items()):
-             if key == 'error' or not values: continue
-             avg_value = np.mean(values)
-             print(f"  - Avg {key:<27}: {avg_value:.3f}")
+                if key == 'error' or not values:
+                    if key != 'error': print(f"  - Avg {key:<27}: N/A (no data)")
+                    continue
+                avg_value = np.mean(values)
+                std_value = np.std(values) if len(values) > 1 else 0.0
+                print(f"  - Avg {key:<27}: {avg_value:.3f} (Std: {std_value:.3f})")
     print("------------------------------------")
+    # --- End of print statements to be captured ---
+
+    # Get the content from the string buffer
+    results_output = string_buffer.getvalue()
+    sys.stdout = original_stdout # Restore original stdout
+    string_buffer.close()
+
+    # Now print the captured output to the (restored) console
+    print(results_output)
+
+    # And write the captured output to the specified file
+    try:
+        with open(results_filename, 'w') as res_file:
+            res_file.write(results_output)
+        logger.info(f"Evaluation results also saved to {results_filename}")
+    except IOError as e:
+        logger.error(f"Failed to write results to file {results_filename}: {e}")
+        print(f"Error: Failed to write results to file {results_filename}: {e}", file=sys.stderr)
 
 
-# --- Main Execution Block (Updated Arguments) ---
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Evaluate generated AIGs for Validity, Uniqueness, and Novelty.')
-    parser.add_argument('input_pickle_file', type=str,
-                        help='Path to the pickle file containing the list of generated NetworkX DiGraphs.')
-    # Arguments for loading training graphs from PKL files
-    parser.add_argument('--train_pkl_dir', type=str, default="./data/aigs/",
-                        help='(Optional) Path to the directory containing training PKL files (e.g., ./raw_aigs_pkl/) for Novelty calculation.')
-    parser.add_argument('--train_pkl_prefix', type=str, default="real_aigs_part_",
-                        help='(Optional) Prefix of the training PKL files (used with --train_pkl_dir).')
-    parser.add_argument('--num_train_pkl_files', type=int, default=4,
-                        help='(Optional) Number of training PKL files to load (used with --train_pkl_dir).')
-
-    parsed_args = parser.parse_args()
-    run_standalone_evaluation(parsed_args)
+# # --- Main Execution Block (Updated Arguments) ---
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description='Evaluate generated AIGs for Validity, Uniqueness, and Novelty.')
+#     parser.add_argument('input_pickle_file', type=str,
+#                         help='Path to the pickle file containing the list of generated NetworkX DiGraphs.')
+#     # Arguments for loading training graphs from PKL files
+#     parser.add_argument('--train_pkl_dir', type=str, default="./data/aigs/",
+#                         help='(Optional) Path to the directory containing training PKL files (e.g., ./raw_aigs_pkl/) for Novelty calculation.')
+#     parser.add_argument('--train_pkl_prefix', type=str, default="real_aigs_part_",
+#                         help='(Optional) Prefix of the training PKL files (used with --train_pkl_dir).')
+#     parser.add_argument('--num_train_pkl_files', type=int, default=4,
+#                         help='(Optional) Number of training PKL files to load (used with --train_pkl_dir).')
+#
+#     parsed_args = parser.parse_args()
+#     run_standalone_evaluation(parsed_args)

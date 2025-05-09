@@ -37,23 +37,11 @@ echo "Conda environment activated."
 ## Call the simplified train_graphs.py script, ensuring all required args are present
 srun python -u ggraph/train_graphs.py
 
-#    --model_type ${MODEL_NAME} \
-#    --device ${REQUESTED_DEVICE} \
-#    --data_root ${DATA_ROOT_PROCESSED} \
-#    --dataset_name ${DATASET_NAME} \
-#    --lr ${LR} \
-#    --weight_decay ${WEIGHT_DECAY} \
-#    --batch_size ${BATCH_SIZE} \
-#    --max_epochs ${MAX_EPOCHS} \
-#    --save_interval ${SAVE_INTERVAL} \
-#    --save_dir ${SAVE_DIR} \
-#    --edge_unroll ${EDGE_UNROLL} \
-#    --grad_clip_value ${GRAD_CLIP} \
-#    --num_flow_layer ${NUM_FLOW_LAYER} \
-#    --num_rgcn_layer ${NUM_RGCN_LAYER} \
-#    --gaf_nhid ${GAF_NHID} \
-#    --gaf_nout ${GAF_NOUT} \
-#    # Add --st_type, --deq_coeff if needed by train_graphs.py
+
+srun python -u ggraph/sample_graphs.py \
+    --checkpoint "./ggraph/checkpoint/GraphDF/ckpt_30.pth" \
+    --evaluate \
+    --save
 
 
 #
@@ -73,9 +61,7 @@ srun python -u ggraph/train_graphs.py
 
 # Execute the generation script
 # *** Use --temperature_df for GraphDF ***
-#srun python -u sample_df.py \
-#    --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/graphdf_rand_gen_ckpt_epoch_20.pth" \
-#    --output_file "./GraphDF/generated_graphs.pkl"
+
 #
 #
 ## Execute the evaluation script
