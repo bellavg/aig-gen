@@ -2,7 +2,7 @@
 #SBATCH --job-name=ebm # Updated job name
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
-#SBATCH --time=12:00:00 # Keep increased time
+#SBATCH --time=00:59:00 # Keep increased time
 #SBATCH --output=../slurm_logs/sample_ebm_%j.out
 
 
