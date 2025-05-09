@@ -62,20 +62,6 @@ GEN_SCRIPT="sample_graphs.py"
 EVAL_SCRIPT="evaluate_aigs.py"
 # --- End Configuration ---
 
-# --- Helper Function for Error Checking ---
-check_exit_code() {
-  exit_code=$1
-  step_name=$2
-  if [ $exit_code -ne 0 ]; then
-    echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
-    echo "Last 50 lines of output from slurm log:"
-    tail -n 50 "./slurm_logs/graphebm_aig_retrain_pipe_${SLURM_JOB_ID}.out" # Match output file name
-    exit $exit_code
-  fi
-  echo "Step '${step_name}' completed successfully."
-}
-# --- End Helper Function ---
-
 
 # --- Setup ---
 mkdir -p slurm_logs
@@ -94,53 +80,53 @@ check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
 # --- End Setup ---
 
+#
+## === STEP 1: Training ===
+#echo "--- Starting Step 1: Training ${MODEL_NAME} from scratch ---"
+#
+#srun python -u ${TRAIN_SCRIPT} \
+#    --model_type ${MODEL_NAME} \
+#    --device ${REQUESTED_DEVICE} \
+#    --data_root ${DATA_ROOT} \
+#    --dataset_name ${DATASET_NAME} \
+#    --edge_unroll ${EDGE_UNROLL} \
+#    --save_dir "${CKPT_SAVE_DIR}" \
+#    --lr ${LR} \
+#    --weight_decay ${WEIGHT_DECAY} \
+#    --batch_size ${BATCH_SIZE} \
+#    --max_epochs ${MAX_EPOCHS} \
+#    --save_interval ${SAVE_INTERVAL} \
+#    --grad_clip_value ${GRAD_CLIP_VALUE} \
+#    `# --- EBM Specific Training Hyperparameters ---` \
+#    --ebm_alpha ${EBM_ALPHA} \
+#    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
+#    --ebm_ld_noise ${EBM_LD_NOISE} \
+#    --ebm_ld_step ${EBM_LD_STEP} \
+#    --ebm_c ${EBM_C} \
+#    ${EBM_CLAMP_LGD_GRAD} \
+#    `# --- Optional: Pass EBM architecture params if different from defaults ---` \
+#    --ebm_hidden ${EBM_HIDDEN} \
+#    --ebm_depth ${EBM_DEPTH} \
+#    # Add other EBM arch params like --ebm_swish_act if needed
+#
+#check_exit_code $? "Training"
+#echo "--- Finished Step 1: Training ---"
 
-# === STEP 1: Training ===
-echo "--- Starting Step 1: Training ${MODEL_NAME} from scratch ---"
-
-srun python -u ${TRAIN_SCRIPT} \
-    --model_type ${MODEL_NAME} \
-    --device ${REQUESTED_DEVICE} \
-    --data_root ${DATA_ROOT} \
-    --dataset_name ${DATASET_NAME} \
-    --edge_unroll ${EDGE_UNROLL} \
-    --save_dir "${CKPT_SAVE_DIR}" \
-    --lr ${LR} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --batch_size ${BATCH_SIZE} \
-    --max_epochs ${MAX_EPOCHS} \
-    --save_interval ${SAVE_INTERVAL} \
-    --grad_clip_value ${GRAD_CLIP_VALUE} \
-    `# --- EBM Specific Training Hyperparameters ---` \
-    --ebm_alpha ${EBM_ALPHA} \
-    --ebm_ld_step_size ${EBM_LD_STEP_SIZE} \
-    --ebm_ld_noise ${EBM_LD_NOISE} \
-    --ebm_ld_step ${EBM_LD_STEP} \
-    --ebm_c ${EBM_C} \
-    ${EBM_CLAMP_LGD_GRAD} \
-    `# --- Optional: Pass EBM architecture params if different from defaults ---` \
-    --ebm_hidden ${EBM_HIDDEN} \
-    --ebm_depth ${EBM_DEPTH} \
-    # Add other EBM arch params like --ebm_swish_act if needed
-
-check_exit_code $? "Training"
-echo "--- Finished Step 1: Training ---"
-
-
-# === STEP 2: Generation ===
-echo "--- Starting Step 2: Generating ${NUM_SAMPLES} Samples using checkpoint ${FINAL_CKPT_PATH} ---"
-if [ ! -f "${FINAL_CKPT_PATH}" ]; then
-    echo "Error: Expected checkpoint file not found after training: ${FINAL_CKPT_PATH}"
-    echo "Check if MAX_EPOCHS (${MAX_EPOCHS}) matches the final saved epoch or if training failed."
-    exit 1
-fi
+#
+## === STEP 2: Generation ===
+#echo "--- Starting Step 2: Generating ${NUM_SAMPLES} Samples using checkpoint ${FINAL_CKPT_PATH} ---"
+#if [ ! -f "${FINAL_CKPT_PATH}" ]; then
+#    echo "Error: Expected checkpoint file not found after training: ${FINAL_CKPT_PATH}"
+#    echo "Check if MAX_EPOCHS (${MAX_EPOCHS}) matches the final saved epoch or if training failed."
+#    exit 1
+#fi
 
 # Using corrected argument names for sample_graphs.py
-srun python -u ${GEN_SCRIPT} \
-    --model ${MODEL_NAME} \
-    --device ${REQUESTED_DEVICE} \
+srun python -u sample_graphs.py \
+    --model GraphEBM \
+    --device 'cuda' \
     --checkpoint "${FINAL_CKPT_PATH}" \
-    --num_samples ${NUM_SAMPLES} \
+    --num_samples 1000 \
     --output_file "${GEN_PICKLE_PATH}" \
     --min_nodes ${NUM_MIN_NODES} \
     `# *** Added necessary ARCHITECTURE args for model instantiation ***` \

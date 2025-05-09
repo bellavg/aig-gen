@@ -22,7 +22,7 @@ except ImportError as e:
 # --- Import AIG Config ---
 # Need this for node/edge type keys used in conversion helper
 try:
-    import data.aig_config
+    import data.aig_config as aig_config
 except ImportError:
     import G2PT.configs.aig as aig_config
 

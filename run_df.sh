@@ -62,20 +62,6 @@ EVAL_SCRIPT="evaluate_aigs.py"
 # --- End Configuration ---
 
 
-# --- Helper Function for Error Checking ---
-check_exit_code() {
-  exit_code=$1
-  step_name=$2
-  if [ $exit_code -ne 0 ]; then
-    echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
-    echo "Last 50 lines of output from slurm log:"
-    tail -n 50 "./slurm_logs/graphdf_aig_train_gen_${SLURM_JOB_ID}.out" # Match log file name
-    exit $exit_code
-  fi
-  echo "Step '${step_name}' completed successfully."
-}
-# --- End Helper Function ---
-
 
 # --- Setup ---
 mkdir -p slurm_logs
@@ -92,42 +78,42 @@ check_exit_code $? "Activate Conda Env"
 echo "Conda environment activated."
 # --- End Setup ---
 
-
-# === Step 1: Training ===
-echo "========================================"
-echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
-echo "========================================"
-echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
-echo " - Dataset Name: ${DATASET_NAME}"
-echo " - Raw Data Dir: ${RAW_DATA_DIR}"
-echo " - Learning Rate: ${LR}"
-echo " - Weight Decay: ${WEIGHT_DECAY}"
-echo " - Batch Size: ${BATCH_SIZE}"
-echo " - Max Epochs: ${MAX_EPOCHS}"
-echo " - Edge Unroll: ${EDGE_UNROLL}"
-echo " - Grad Clip: ${GRAD_CLIP}"
-echo " - Save Directory: ${SAVE_DIR}"
-echo "----------------------------------------"
-
-# Call the simplified train_graphs.py script, ensuring all required args are present
-srun python -u ${TRAIN_SCRIPT} \
-    --model_type ${MODEL_NAME} \
-    --device ${REQUESTED_DEVICE} \
-    --data_root ${DATA_ROOT_PROCESSED} \
-    --dataset_name ${DATASET_NAME} \
-    --lr ${LR} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --batch_size ${BATCH_SIZE} \
-    --max_epochs ${MAX_EPOCHS} \
-    --save_interval ${SAVE_INTERVAL} \
-    --save_dir ${SAVE_DIR} \
-    --edge_unroll ${EDGE_UNROLL} \
-    --grad_clip_value ${GRAD_CLIP} \
-    --num_flow_layer ${NUM_FLOW_LAYER} \
-    --num_rgcn_layer ${NUM_RGCN_LAYER} \
-    --gaf_nhid ${GAF_NHID} \
-    --gaf_nout ${GAF_NOUT} \
-    # Add --st_type, --deq_coeff if needed by train_graphs.py
+#
+## === Step 1: Training ===
+#echo "========================================"
+#echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
+#echo "========================================"
+#echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
+#echo " - Dataset Name: ${DATASET_NAME}"
+#echo " - Raw Data Dir: ${RAW_DATA_DIR}"
+#echo " - Learning Rate: ${LR}"
+#echo " - Weight Decay: ${WEIGHT_DECAY}"
+#echo " - Batch Size: ${BATCH_SIZE}"
+#echo " - Max Epochs: ${MAX_EPOCHS}"
+#echo " - Edge Unroll: ${EDGE_UNROLL}"
+#echo " - Grad Clip: ${GRAD_CLIP}"
+#echo " - Save Directory: ${SAVE_DIR}"
+#echo "----------------------------------------"
+#
+## Call the simplified train_graphs.py script, ensuring all required args are present
+#srun python -u ${TRAIN_SCRIPT} \
+#    --model_type ${MODEL_NAME} \
+#    --device ${REQUESTED_DEVICE} \
+#    --data_root ${DATA_ROOT_PROCESSED} \
+#    --dataset_name ${DATASET_NAME} \
+#    --lr ${LR} \
+#    --weight_decay ${WEIGHT_DECAY} \
+#    --batch_size ${BATCH_SIZE} \
+#    --max_epochs ${MAX_EPOCHS} \
+#    --save_interval ${SAVE_INTERVAL} \
+#    --save_dir ${SAVE_DIR} \
+#    --edge_unroll ${EDGE_UNROLL} \
+#    --grad_clip_value ${GRAD_CLIP} \
+#    --num_flow_layer ${NUM_FLOW_LAYER} \
+#    --num_rgcn_layer ${NUM_RGCN_LAYER} \
+#    --gaf_nhid ${GAF_NHID} \
+#    --gaf_nout ${GAF_NOUT} \
+#    # Add --st_type, --deq_coeff if needed by train_graphs.py
 
 
 
@@ -147,25 +133,11 @@ echo "----------------------------------------"
 
 # Execute the generation script
 # *** Use --temperature_df for GraphDF ***
-srun python -u ${GEN_SCRIPT} \
-    --model ${MODEL_NAME} \
-    --checkpoint ${CHECKPOINT_PATH} \
-    --output_file ${GEN_PICKLE_PATH} \
-    --num_samples ${NUM_SAMPLES} \
-    --temperature_df ${TEMP_NODE} ${TEMP_EDGE} \
-    --min_nodes ${MIN_NODES} \
-    --device ${REQUESTED_DEVICE} \
-    `# *** Added necessary ARCHITECTURE args for model instantiation ***` \
-    `# These MUST match the parameters used during training!` \
-    --edge_unroll ${EDGE_UNROLL} \
-    --max_size ${MAX_SIZE} \
-    --node_dim ${NODE_DIM} \
-    --bond_dim ${BOND_DIM} \
-    --num_flow_layer ${NUM_FLOW_LAYER} \
-    --num_rgcn_layer ${NUM_RGCN_LAYER} \
-    --gaf_nhid ${GAF_NHID} \
-    --gaf_nout ${GAF_NOUT} \
-    # Add --st_type, --deq_coeff if needed by sample_graphs.py
+srun python -u sample_graphs.py \
+    --model GraphDF \
+    --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/ graphdf_rand_gen_ckpt_epoch_20.pth" \
+    --output_file "./GraphDF/generated_graphs.pkl" \
+    --num_samples 1000 \
 
 
 # === Step 3: Evaluation ===
@@ -176,7 +148,6 @@ echo "----------------------------------------"
 
 # Execute the evaluation script
 srun python -u ${EVAL_SCRIPT} \
-    ${GEN_PICKLE_PATH} \
-    --train_data_dir ${TRAIN_DATA_DIR_FOR_NOVELTY} \
+    "./GraphDF/generated_graphs.pkl"
 
 
