@@ -3,6 +3,8 @@
 import re
 import numpy as np
 from rdkit import Chem
+import networkx as nx
+from aig_config import *
 #
 # NUM2EDGETYPE = {
 #     0: "EDGE_REG",  # Index 0 feature
@@ -12,20 +14,20 @@ from rdkit import Chem
 #TODO figureout equivalent
 ATOM_VALENCY = {6: 4, 7: 3, 8: 2, 9: 1, 15: 3, 16: 2, 17: 1, 35: 1, 53: 1}
 
-bond_decoder_m = {1: "EDGE_REG", 2: "EDGE_INV"}
+bond_decoder_m = {1: "EDGE_REG", 2: "EDGE_INV", 3: "NONE"}
 #bond_decoder_m = {1: Chem.rdchem.BondType.SINGLE, 2: Chem.rdchem.BondType.DOUBLE, 3: Chem.rdchem.BondType.TRIPLE}
 
 
 def construct_mol(x, A, atomic_num_list):
     #mol = Chem.RWMol()
-    graph = nx.DiGraph()
+    aig = nx.DiGraph()
     atoms = np.argmax(x, axis=1)
     atoms_exist = atoms != len(atomic_num_list) - 1
     atoms = atoms[atoms_exist]
 
     #for atom in atoms:
     for i, atom in enumerate(atoms):
-        mol.AddAtom(Chem.Atom(int(atomic_num_list[atom])))
+        #mol.AddAtom(Chem.Atom(int(atomic_num_list[atom])))
         aig.add_node(i, type=num2atom[feature_id])
 
     # A (edge_type, num_node, num_node)
@@ -36,13 +38,18 @@ def construct_mol(x, A, atomic_num_list):
     adj += 1
     for start, end in zip(*np.nonzero(adj)):
         if start > end:
-            mol.AddBond(int(start), int(end), bond_decoder_m[adj[start, end]])
+            aig.add_edge(int(start), int(end), type=bond_decoder_m[adj[start, end]]) #??
+            #mol.AddBond(int(start), int(end), bond_decoder_m[adj[start, end]])
+
             # add formal charge to atom: e.g. [O+], [N+] [S+]
             # not support [O-], [N-] [S-]  [NH+] etc.
+            flag = check_validity(aig)
             flag, atomid_valence = check_valency(mol)
+            #TODO fix above
             if flag:
                 continue
             else:
+                #TODO what do here?
                 assert len(atomid_valence) == 2
                 idx = atomid_valence[0]
                 v = atomid_valence[1]
