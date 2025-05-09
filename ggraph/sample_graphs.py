@@ -98,7 +98,7 @@ def main(args):
     generated_graphs, pure_valids = runner.run_rand_gen(**generation_args)
     print(f"\nGeneration finished for {args.model}.")
     print(f"Generated graphs: {len(generated_graphs)}")
-    print(f"Pure valids: {len(pure_valids)}/1000")
+    print(f"Pure valids: {pure_valids}/1000")
 
     if generated_graphs is not None and len(generated_graphs) > 0:
         print(f"Successfully generated {len(generated_graphs)} graphs.")
@@ -142,7 +142,7 @@ if __name__ == "__main__":
                         help='Directory to save the generated AIGs (Pickle file). Empty means current directory.')
     parser.add_argument('--output_file', type=str, default="_aigs.pkl",
                         help='Filename for the generated AIGs (Pickle file). Will be prefixed by model name.')
-    parser.add_argument('--num_samples', type=int, default=10,  # Reduced default for quicker testing
+    parser.add_argument('--num_samples', type=int, default=1000,  # Reduced default for quicker testing
                         help='Number of AIG samples to generate.')
 
     # Saving and Evaluating
