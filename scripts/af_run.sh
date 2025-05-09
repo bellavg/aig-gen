@@ -42,7 +42,7 @@ echo "Conda environment activated."
 
 srun python -u ggraph/sample_graphs.py \
     --model 'GraphAF' \
-    --checkpoint "./ggraph/checkpoints/GraphAF/ckpt_24.pth" \
+    --checkpoint "./ggraph/checkpoints/GraphAF/rand_gen_ckpt_24.pth" \
     --evaluate \
     --save
 
