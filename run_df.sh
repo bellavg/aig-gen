@@ -116,24 +116,24 @@ echo "Conda environment activated."
 #    # Add --st_type, --deq_coeff if needed by train_graphs.py
 
 
-
-# === Step 2: Generation ===
-echo ""; echo "========================================"; echo "Starting Generation: ${MODEL_NAME}"; echo "========================================"
-CHECKPOINT_FILENAME="${MODEL_NAME,,}_ckpt_epoch_${MAX_EPOCHS}.pth" # Use lowercase model name
-CHECKPOINT_PATH="${SAVE_DIR}/${CHECKPOINT_FILENAME}"
-# Checkpoint finding logic
-if [ ! -f "${CHECKPOINT_PATH}" ]; then echo "Warning: Final checkpoint '${CHECKPOINT_PATH}' not found." ; LATEST_CHECKPOINT=$(ls -t "${SAVE_DIR}"/${MODEL_NAME,,}_ckpt_epoch_*.pth 2>/dev/null | head -n 1); if [ -f "${LATEST_CHECKPOINT}" ]; then echo "Warning: Using latest found checkpoint instead: ${LATEST_CHECKPOINT}"; CHECKPOINT_PATH=${LATEST_CHECKPOINT}; else echo "Error: No checkpoints found in ${SAVE_DIR}. Cannot generate."; exit 1; fi; fi
-
-echo " - Using Checkpoint: ${CHECKPOINT_PATH}"
-echo " - Number of Samples: ${NUM_SAMPLES}"
-echo " - Temperature (Node, Edge): ${TEMP_NODE}, ${TEMP_EDGE}" # GraphDF uses two temps
-echo " - Min Nodes: ${MIN_NODES}"
-echo " - Output File: ${GEN_PICKLE_PATH}"
-echo "----------------------------------------"
+#
+## === Step 2: Generation ===
+#echo ""; echo "========================================"; echo "Starting Generation: ${MODEL_NAME}"; echo "========================================"
+#CHECKPOINT_FILENAME="${MODEL_NAME,,}_ckpt_epoch_${MAX_EPOCHS}.pth" # Use lowercase model name
+#CHECKPOINT_PATH="${SAVE_DIR}/${CHECKPOINT_FILENAME}"
+## Checkpoint finding logic
+#if [ ! -f "${CHECKPOINT_PATH}" ]; then echo "Warning: Final checkpoint '${CHECKPOINT_PATH}' not found." ; LATEST_CHECKPOINT=$(ls -t "${SAVE_DIR}"/${MODEL_NAME,,}_ckpt_epoch_*.pth 2>/dev/null | head -n 1); if [ -f "${LATEST_CHECKPOINT}" ]; then echo "Warning: Using latest found checkpoint instead: ${LATEST_CHECKPOINT}"; CHECKPOINT_PATH=${LATEST_CHECKPOINT}; else echo "Error: No checkpoints found in ${SAVE_DIR}. Cannot generate."; exit 1; fi; fi
+#
+#echo " - Using Checkpoint: ${CHECKPOINT_PATH}"
+#echo " - Number of Samples: ${NUM_SAMPLES}"
+#echo " - Temperature (Node, Edge): ${TEMP_NODE}, ${TEMP_EDGE}" # GraphDF uses two temps
+#echo " - Min Nodes: ${MIN_NODES}"
+#echo " - Output File: ${GEN_PICKLE_PATH}"
+#echo "----------------------------------------"
 
 # Execute the generation script
 # *** Use --temperature_df for GraphDF ***
-srun python -u sample_dfs.py \
+srun python -u sample_df.py \
     --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/ graphdf_rand_gen_ckpt_epoch_20.pth" \
     --output_file "./GraphDF/generated_graphs.pkl"
 
