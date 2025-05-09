@@ -43,7 +43,7 @@ base_model_conf = {
     "node_dim": 4,
     "bond_dim": 3,
     "use_gpu": True, # Will be determined by args.device
-    "edge_unroll": 12, # *** Default, MUST be overridden by args to match training ***
+    "edge_unroll": 25, # *** Default, MUST be overridden by args to match training ***
     "num_flow_layer": 12,
     "num_rgcn_layer": 3,
     "nhid": 128,

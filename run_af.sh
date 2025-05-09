@@ -65,21 +65,6 @@ EVAL_SCRIPT="evaluate_aigs.py"
 # --- End Configuration ---
 
 
-# --- Helper Function for Error Checking ---
-check_exit_code() {
-  exit_code=$1
-  step_name=$2
-  if [ $exit_code -ne 0 ]; then
-    echo "Error: Step '${step_name}' failed with exit code ${exit_code}."
-    echo "Last 50 lines of output from slurm log:"
-    tail -n 50 "${SLURM_SUBMIT_DIR}/slurm_logs/graphaf_aig_train_gen_${SLURM_JOB_ID}.out"
-    exit $exit_code
-  fi
-  echo "Step '${step_name}' completed successfully."
-}
-# --- End Helper Function ---
-
-
 # --- Setup ---
 mkdir -p "${SLURM_SUBMIT_DIR}/slurm_logs"
 mkdir -p ${SAVE_DIR}
@@ -113,102 +98,78 @@ echo "Conda environment activated."
 # --- End Setup ---
 
 
-# === Step 1: Training ===
-echo "========================================"
-echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
-echo "========================================"
-# ... (rest of the script remains the same) ...
-echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
-echo " - Dataset Name: ${DATASET_NAME}"
-echo " - Raw Data Dir: ${RAW_DATA_DIR}"
-echo " - Learning Rate: ${LR}"
-echo " - Weight Decay: ${WEIGHT_DECAY}"
-echo " - Batch Size: ${BATCH_SIZE}"
-echo " - Max Epochs: ${MAX_EPOCHS}"
-echo " - Edge Unroll: ${EDGE_UNROLL}"
-echo " - Grad Clip: ${GRAD_CLIP}"
-echo " - Save Directory: ${SAVE_DIR}"
-echo "----------------------------------------"
+## === Step 1: Training ===
+#echo "========================================"
+#echo "Starting Training: ${MODEL_NAME} on ${DATASET_NAME}"
+#echo "========================================"
+## ... (rest of the script remains the same) ...
+#echo " - Data Root (Processed): ${DATA_ROOT_PROCESSED}"
+#echo " - Dataset Name: ${DATASET_NAME}"
+#echo " - Raw Data Dir: ${RAW_DATA_DIR}"
+#echo " - Learning Rate: ${LR}"
+#echo " - Weight Decay: ${WEIGHT_DECAY}"
+#echo " - Batch Size: ${BATCH_SIZE}"
+#echo " - Max Epochs: ${MAX_EPOCHS}"
+#echo " - Edge Unroll: ${EDGE_UNROLL}"
+#echo " - Grad Clip: ${GRAD_CLIP}"
+#echo " - Save Directory: ${SAVE_DIR}"
+#echo "----------------------------------------"
+#
+#srun python -u "${SLURM_SUBMIT_DIR}/${TRAIN_SCRIPT}" \
+#    --model_type ${MODEL_NAME} \
+#    --device ${REQUESTED_DEVICE} \
+#    --data_root "${DATA_ROOT_PROCESSED}" \
+#    --dataset_name "${DATASET_NAME}" \
+#    --lr ${LR} \
+#    --weight_decay ${WEIGHT_DECAY} \
+#    --batch_size ${BATCH_SIZE} \
+#    --max_epochs ${MAX_EPOCHS} \
+#    --save_interval ${SAVE_INTERVAL} \
+#    --save_dir "${SAVE_DIR}" \
+#    --edge_unroll ${EDGE_UNROLL} \
+#    --grad_clip_value ${GRAD_CLIP} \
+#    --num_flow_layer ${NUM_FLOW_LAYER} \
+#    --num_rgcn_layer ${NUM_RGCN_LAYER} \
+#    --gaf_nhid ${GAF_NHID} \
+#    --gaf_nout ${GAF_NOUT}
+#check_exit_code $? "Training Step"
+#
+#
+## === Step 2: Generation ===
+#echo ""; echo "========================================"; echo "Starting Generation: ${MODEL_NAME}"; echo "========================================"
+#CHECKPOINT_FILENAME="${MODEL_NAME,,}_ckpt_epoch_${MAX_EPOCHS}.pth"
+#CHECKPOINT_PATH="${SAVE_DIR}/${CHECKPOINT_FILENAME}"
+#
+#if [ ! -f "${CHECKPOINT_PATH}" ]; then
+#    echo "Warning: Final checkpoint '${CHECKPOINT_PATH}' not found."
+#    LATEST_CHECKPOINT=$(ls -t "${SAVE_DIR}"/${MODEL_NAME,,}_ckpt_epoch_*.pth 2>/dev/null | head -n 1)
+#    if [ -f "${LATEST_CHECKPOINT}" ]; then
+#        echo "Warning: Using latest found checkpoint instead: ${LATEST_CHECKPOINT}"
+#        CHECKPOINT_PATH=${LATEST_CHECKPOINT}
+#    else
+#        echo "Error: No checkpoints found in ${SAVE_DIR}. Cannot generate."
+#    fi
+#fi
+#
+#if [ -f "${CHECKPOINT_PATH}" ]; then
+#    echo " - Using Checkpoint: ${CHECKPOINT_PATH}"
+#    echo " - Number of Samples: ${NUM_SAMPLES}"
+#    echo " - Temperature: ${TEMPERATURE_AF}"
+#    echo " - Min Nodes: ${MIN_NODES}"
+#    echo " - Output File: ${GEN_PICKLE_PATH}"
+#    echo "----------------------------------------"
 
-srun python -u "${SLURM_SUBMIT_DIR}/${TRAIN_SCRIPT}" \
-    --model_type ${MODEL_NAME} \
-    --device ${REQUESTED_DEVICE} \
-    --data_root "${DATA_ROOT_PROCESSED}" \
-    --dataset_name "${DATASET_NAME}" \
-    --lr ${LR} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --batch_size ${BATCH_SIZE} \
-    --max_epochs ${MAX_EPOCHS} \
-    --save_interval ${SAVE_INTERVAL} \
-    --save_dir "${SAVE_DIR}" \
-    --edge_unroll ${EDGE_UNROLL} \
-    --grad_clip_value ${GRAD_CLIP} \
-    --num_flow_layer ${NUM_FLOW_LAYER} \
-    --num_rgcn_layer ${NUM_RGCN_LAYER} \
-    --gaf_nhid ${GAF_NHID} \
-    --gaf_nout ${GAF_NOUT}
-check_exit_code $? "Training Step"
-
-
-# === Step 2: Generation ===
-echo ""; echo "========================================"; echo "Starting Generation: ${MODEL_NAME}"; echo "========================================"
-CHECKPOINT_FILENAME="${MODEL_NAME,,}_ckpt_epoch_${MAX_EPOCHS}.pth"
-CHECKPOINT_PATH="${SAVE_DIR}/${CHECKPOINT_FILENAME}"
-
-if [ ! -f "${CHECKPOINT_PATH}" ]; then
-    echo "Warning: Final checkpoint '${CHECKPOINT_PATH}' not found."
-    LATEST_CHECKPOINT=$(ls -t "${SAVE_DIR}"/${MODEL_NAME,,}_ckpt_epoch_*.pth 2>/dev/null | head -n 1)
-    if [ -f "${LATEST_CHECKPOINT}" ]; then
-        echo "Warning: Using latest found checkpoint instead: ${LATEST_CHECKPOINT}"
-        CHECKPOINT_PATH=${LATEST_CHECKPOINT}
-    else
-        echo "Error: No checkpoints found in ${SAVE_DIR}. Cannot generate."
-    fi
-fi
-
-if [ -f "${CHECKPOINT_PATH}" ]; then
-    echo " - Using Checkpoint: ${CHECKPOINT_PATH}"
-    echo " - Number of Samples: ${NUM_SAMPLES}"
-    echo " - Temperature: ${TEMPERATURE_AF}"
-    echo " - Min Nodes: ${MIN_NODES}"
-    echo " - Output File: ${GEN_PICKLE_PATH}"
-    echo "----------------------------------------"
-
-    srun python -u "${SLURM_SUBMIT_DIR}/${GEN_SCRIPT}" \
-        --model ${MODEL_NAME} \
-        --checkpoint "${CHECKPOINT_PATH}" \
-        --output_file "${GEN_PICKLE_PATH}" \
-        --num_samples ${NUM_SAMPLES} \
-        --temperature_af ${TEMPERATURE_AF} \
-        --min_nodes ${MIN_NODES} \
-        --device ${REQUESTED_DEVICE} \
-        --edge_unroll ${EDGE_UNROLL} \
-        --max_size ${MAX_SIZE} \
-        --node_dim ${NODE_DIM} \
-        --bond_dim ${BOND_DIM} \
-        --num_flow_layer ${NUM_FLOW_LAYER} \
-        --num_rgcn_layer ${NUM_RGCN_LAYER} \
-        --gaf_nhid ${GAF_NHID} \
-        --gaf_nout ${GAF_NOUT}
-    check_exit_code $? "Generation Step"
-else
-    echo "Skipping generation step as no valid checkpoint was found."
-fi
+srun python -u sample_graphs.py \
+    --model GraphAF \
+    --checkpoint "./GraphAF/rand_gen_aig_ckpts/graphaf_rand_gen_ckpt_epoch_35.pth" \
+    --output_file "./GraphAF/generated_aigs.pkl" \
+    --num_samples 1000 \
+    --device 'cuda'
 
 
-# === Step 3: Evaluation ===
-echo ""; echo "========================================"; echo "Starting Evaluation"; echo "========================================"
-if [ -f "${GEN_PICKLE_PATH}" ]; then
-    echo " - Evaluating File: ${GEN_PICKLE_PATH}"
-    echo " - Training Data Dir (for Novelty): ${TRAIN_DATA_DIR_FOR_NOVELTY}"
-    echo "----------------------------------------"
 
-    srun python -u "${SLURM_SUBMIT_DIR}/${EVAL_SCRIPT}" \
-        "${GEN_PICKLE_PATH}" \
-        --train_data_dir "${TRAIN_DATA_DIR_FOR_NOVELTY}"
-    check_exit_code $? "Evaluation Step"
-else
-    echo "Skipping evaluation step as generated pickle file '${GEN_PICKLE_PATH}' not found."
-fi
+srun python -u "${SLURM_SUBMIT_DIR}/${EVAL_SCRIPT}" \
+      "./GraphAF/generated_aigs.pkl" \
+      --train_data_dir "${TRAIN_DATA_DIR_FOR_NOVELTY}"
 
-echo "Job finished."
+
