@@ -65,7 +65,7 @@ class GraphFlowModel(nn.Module):
         z, logdet = self.flow_core(inp_node_features, inp_adj_features, inp_node_features_cont, inp_adj_features_cont)
         return z, logdet
 
-    def generate(self, temperature=0.75, min_atoms=5, max_atoms=48):
+    def generate(self, temperature=0.75, min_atoms=5, max_atoms=48,  disconnection_patience=20):
         """
         inverse flow to generate molecule
         Args:
@@ -186,6 +186,11 @@ class GraphFlowModel(nn.Module):
                 if is_connect:  # new generated node has at least one bond with previous node, do not stop generation, backup mol from rw_mol to mol
                     is_continue = True
                     graph = aig.copy()
+                    disconnection_streak = 0
+                elif not is_connect and disconnection_streak < disconnection_patience:
+                    is_continue = True
+                    graph = aig.copy()
+                    disconnection_streak += 1
                 else:
                     is_continue = False
 
