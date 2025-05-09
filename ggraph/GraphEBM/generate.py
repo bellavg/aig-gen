@@ -27,36 +27,43 @@ NODE_TYPE_ENCODING_PYG = {
     "VIRTUAL": 4
 }
 
-def construct_aig(x, A, node_type_list=NODE_TYPE_KEYS):
-    #mol = Chem.RWMol()
-    # N, Atom Types + 1 is X and A is N, 3
+
+def construct_aig(x_features_matrix, adj_channel_tensor, node_type_list=NODE_TYPE_KEYS):
+    """
+    Constructs an AIG from node features and adjacency tensor.
+    Stores edge scores for later use in correction.
+    """
     aig = nx.DiGraph()
-    #atoms = np.argmax(x, axis=1)
-    node_type_indices_all = np.argmax(x, axis=1)
+    node_type_indices_all = np.argmax(x_features_matrix, axis=1)
     pad_node_type_index = len(node_type_list) - 1
     active_node_mask = node_type_indices_all != pad_node_type_index
-    #atoms_exist = atoms != len(atomic_num_list) - 1
-    #atoms = atoms[atoms_exist]
-    active_nodes = node_type_indices_all[active_node_mask]
+    active_node_assigned_type_indices = node_type_indices_all[active_node_mask]
 
-    #for atom in atoms:
-    for i, assigned_type_idx in enumerate(active_nodes):
-        #mol.AddAtom(Chem.Atom(int(atomic_num_list[atom])))
-        node_type = node_type_list[assigned_type_idx]
-        aig.add_node(i, type=node_type)
+    for compact_idx, assigned_type_idx in enumerate(active_node_assigned_type_indices):
+        actual_node_type_str = node_type_list[assigned_type_idx]
+        aig.add_node(compact_idx, type=actual_node_type_str)
 
-    # A (edge_type, num_node, num_node)
-    adj = np.argmax(A, axis=0)
-    adj = np.array(adj)
-    filtered_adj = adj[active_node_mask, :][:, active_node_mask]
-    # adj[adj == 3] = -1
-    # adj += 1
-    for start, end in zip(*np.nonzero(adj)):
-        if start > end:
-            edge_type_idx = filtered_adj[start, end]
-            aig.add_edge(int(start), int(end), type=bond_decoder_m[int(edge_type_idx)]) #??
-            #mol.AddBond(int(start), int(end), bond_decoder_m[adj[start, end]])
+    # adj_channel_tensor shape: (num_edge_type_channels, max_nodes, max_nodes)
+    # Get the index of the chosen edge type for each (source, target) pair
+    adj_matrix_edge_indices = np.argmax(adj_channel_tensor, axis=0)
+    # Get the actual score (e.g., logit or probability) for the chosen edge type
+    adj_matrix_edge_scores = np.max(adj_channel_tensor, axis=0)
 
+    # Filter for active nodes
+    filtered_adj_matrix_edge_indices = adj_matrix_edge_indices[active_node_mask, :][:, active_node_mask]
+    filtered_adj_matrix_edge_scores = adj_matrix_edge_scores[active_node_mask, :][:, active_node_mask]
+
+    for start_node_compact_idx, end_node_compact_idx in zip(*np.nonzero(filtered_adj_matrix_edge_indices)):
+        edge_type_idx = filtered_adj_matrix_edge_indices[start_node_compact_idx, end_node_compact_idx]
+        edge_score = filtered_adj_matrix_edge_scores[start_node_compact_idx, end_node_compact_idx]
+
+        actual_edge_type_str = bond_decoder_m[edge_type_idx]
+        aig.add_edge(
+            int(start_node_compact_idx),
+            int(end_node_compact_idx),
+            type=actual_edge_type_str,
+            score=float(edge_score)  # Store the score as an edge attribute
+        )
     return aig
 
 
@@ -75,6 +82,7 @@ def check_valency(mol):
         e_sub = e[p:]
         atomid_valence = list(map(int, re.findall(r'\d+', e_sub)))
         return False, atomid_valence
+Fan_ins = { "NODE_PO":1, "NODE_AND":2}
 
 # prev correct_mol
 def correct_fanins(aig):
@@ -84,39 +92,28 @@ def correct_fanins(aig):
         node_type = node_data.get('type')
         if node_type == "NODE_CONST0" or node_type == "NODE_PI":
             if any(aig.predecessors(node_id)):
-                for source in aig.predecessors(node_id):
+                for source in list(aig.predecessors(node_id)):
                     aig.remove_edge(source, node_id)
         elif node_type == "NODE_PO":
-            if any(aig.successors(node_id)):
-                for target in aig.successors(node_id):
+            successors_to_remove = list(aig.successors(node_id))
+            if successors_to_remove:
+                for target in successors_to_remove:
                     aig.remove_edge(node_id, target)
-            if len(aig.predecessors(node_id)) > 1:
+
+        if len(list(aig.predecessors(node_id))) > Fan_ins[node_type]:
+                incoming_edges_with_scores = []
+                for source, data in aig.predecessors(node_id):
+                    score = data.get('score', float('-inf'))  # float('inf') for missing scores (least preferred)
+                    incoming_edges_with_scores.append(((source, node_id), score))
+                incoming_edges_with_scores.sort(key=lambda x: x[1])
+                for incoming_edge, score in incoming_edges_with_scores[Fan_ins[node_type]:]:
+                    aig.remove_edge(incoming_edge[0], incoming_edge[1])
+
+    return aig
 
 
-        if node_type == "NODE_AND" and aig.predecessors(node_id) > 2:
 
 
-
-    while True:
-        if check_validity(aig):
-            break
-        else:
-            assert len(atomid_valence) == 2
-            idx = atomid_valence[0]
-            queue = []
-            for b in mol.GetAtomWithIdx(idx).GetBonds():
-                queue.append(
-                    (b.GetIdx(), int(b.GetBondType()), b.GetBeginAtomIdx(), b.GetEndAtomIdx())
-                )
-            queue.sort(key=lambda tup: tup[1], reverse=True)
-            if len(queue) > 0:
-                start = queue[0][2]
-                end = queue[0][3]
-                t = queue[0][1] - 1
-                mol.RemoveBond(start, end)
-                if t >= 1:
-                    mol.AddBond(start, end, bond_decoder_m[t])
-    return mol
 
 
 def valid_mol_can_with_seg(x, largest_connected_comp=True):

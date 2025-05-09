@@ -208,7 +208,7 @@ class GraphFlowModel(nn.Module):
                     if graph is not None:
                         cur_graph_num_nodes = graph.number_of_nodes()
                         if cur_graph_num_nodes >= min_atoms:
-                            if self._check_aig_component_minimums(graph):
+                            if check_aig_component_minimums(graph):
                                 current_graph_is_candidate = True
                                 # If it's a good candidate, ensure `aig` reflects this state
                                 # as it might be used by final_graph_to_return logic.
