@@ -138,12 +138,6 @@ srun python -u sample_df.py \
     --output_file "./GraphDF/generated_graphs.pkl"
 
 
-# === Step 3: Evaluation ===
-echo ""; echo "========================================"; echo "Starting Evaluation"; echo "========================================"
-echo " - Evaluating File: ${GEN_PICKLE_PATH}"
-echo " - Training Data Dir (for Novelty): ${TRAIN_DATA_DIR_FOR_NOVELTY}"
-echo "----------------------------------------"
-
 # Execute the evaluation script
 srun python -u ${EVAL_SCRIPT} \
     "./GraphDF/generated_graphs.pkl"

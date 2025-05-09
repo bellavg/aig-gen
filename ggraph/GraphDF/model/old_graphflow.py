@@ -4,10 +4,10 @@ import numpy as np
 import torch.nn.functional as F
 from collections import defaultdict
 import warnings # Added for warnings
-
+from .disgraphaf import DisGraphAF
 # Assuming DisGraphAF is defined in .disgraphaf
 try:
-    from .disgraphaf import DisGraphAF
+
 except ImportError:
     print("Warning: DisGraphAF not found directly. Ensure it's correctly placed for GraphDF's GraphFlowModel.")
     class DisGraphAF(nn.Module): # Placeholder
