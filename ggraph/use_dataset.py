@@ -130,7 +130,7 @@ class AIGPreprocessedDatasetLoader(Dataset):
                     warnings.warn(
                         f"Index {idx} out of bounds for self.data.__num_nodes__ (len {len(self.data.__num_nodes__)}). num_nodes might not be set correctly.")
 
-            for key in self.data.keys:
+            for key in self.data.keys():
                 item, slices_for_key = self.data[key], self.slices[key]
 
                 if not isinstance(slices_for_key,
