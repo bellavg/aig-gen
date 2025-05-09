@@ -62,7 +62,7 @@ def print_graph_summary(g, stage_name="Graph", sample_idx=None):
     if g.number_of_nodes() > 0:
         is_dag_val = nx.is_directed_acyclic_graph(g)
         print(f"{prefix}  Is DAG? {is_dag_val}")
-        if not is_dag_val:
+        if not is_dag_val and g.number_of_edges() < 100:
             try:
                 cycles = list(nx.simple_cycles(g))
                 print(f"{prefix}    Cycles found (first few): {cycles[:min(3, len(cycles))]}")
