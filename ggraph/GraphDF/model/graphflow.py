@@ -140,7 +140,7 @@ class GraphFlowModel(nn.Module):
                     while not valid:
                         # I believe this is 3 because that is where three virtual edge index is
                         #if len(invalid_bond_type_set) < 3 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
-                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX and resample_edge <= 50:
+                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX+1 and resample_edge <= 50:
                             prior_edge_dist = torch.distributions.OneHotCategorical(logits=edge_dis / temperature[1])
                             latent_edge = prior_edge_dist.sample().view(1, -1)
                             latent_id = torch.argmax(latent_edge, dim=1)
@@ -157,7 +157,7 @@ class GraphFlowModel(nn.Module):
                             edge_discrete_id = torch.argmax(latent_edge).item()
                         else:
                             #assert resample_edge > 50 or len(invalid_bond_type_set) == 3
-                            assert resample_edge > 50 or len(invalid_bond_type_set) == VIRTUAL_EDGE_INDEX #I believe that is why this is 3
+                            assert resample_edge > 50 or len(invalid_bond_type_set) == NUM_EXPLICIT_EDGE_TYPES #I believe that is why this is 3
                             #edge_discrete_id = 3  # we have no choice but to choose not to add edge between (i, j+start)
                             edge_discrete_id = VIRTUAL_EDGE_INDEX
 
