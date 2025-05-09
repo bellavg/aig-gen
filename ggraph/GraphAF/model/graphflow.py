@@ -199,17 +199,20 @@ class GraphFlowModel(nn.Module):
 
             if graph is not None and graph.number_of_nodes() >= min_atoms and check_aig_component_minimums(graph):
                 final_graph_to_return = graph
+                num_nodes = final_graph_to_return.number_of_nodes()
             # Fallback: if the loop completed fully (is_continue still true) and `aig` is valid
             elif is_continue and aig.number_of_nodes() >= min_atoms and check_aig_component_minimums(aig):
                 final_graph_to_return = aig
+                num_nodes = final_graph_to_return.number_of_nodes()
             else:
                 final_graph_to_return = None
+                num_nodes = 0
 
-            num_nodes_generated = final_graph_to_return.number_of_nodes()
+
 
             pure_valid = 1.0 if total_resample == 0 else 0.0
 
-            return final_graph_to_return, pure_valid, num_nodes_generated
+            return final_graph_to_return, pure_valid, num_nodes
 
 
     def initialize_masks(self, max_node_unroll=64, max_edge_unroll=25):
