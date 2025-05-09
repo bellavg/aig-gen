@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=08:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/sample_ebm_%j.out
+#SBATCH --output=../slurm_logs/eval_ebm_%j.out
 
 
 # --- Configuration ---
@@ -40,7 +40,7 @@ echo "Conda environment activated."
 
 #
 #
-srun python -u ggraph/evaluate_graphs.py \
+srun python -u ggraph/evaluate_aigs.py \
     "./ggraph/data/generated_graphs/GraphEBM_aigs.pkl"
 #
 #
