@@ -58,25 +58,13 @@ echo " - File Splits (T/V/T): ${NUM_TRAIN_FILES}/${NUM_VAL_FILES}/${NUM_TEST_FIL
 echo "----------------------------------------"
 
 # Execute the processing script
-srun python -u ${PROCESS_SCRIPT} \
+srun python -u  ggraph/dataset.py \
     --raw_dir "${RAW_PKL_DIR}" \
     --output_root "${OUTPUT_ROOT_DIR}" \
     --file_prefix "${FILE_PREFIX}" \
     --num_train_files ${NUM_TRAIN_FILES} \
     --run_conversion_test
 
-process_status=$?
-
-if [ $process_status -ne 0 ]; then
-    echo "Error: Processing script failed with exit code ${process_status}."
-    echo "Check log file: ./slurm_logs/process_aig_pyg_${SLURM_JOB_ID}.out"
-    exit $process_status
-fi
-
-echo "----------------------------------------"
-echo "Processing script finished successfully."
-echo "Processed data should be in: ${OUTPUT_ROOT_DIR}/${DATASET_NAME}/processed/"
-echo "========================================"
 
 # Deactivate environment (optional)
 # conda deactivate
