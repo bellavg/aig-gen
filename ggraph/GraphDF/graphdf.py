@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from ggraph.generator import Generator
+from generator import Generator
 from .model import GraphFlowModel
 
 
