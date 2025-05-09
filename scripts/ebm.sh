@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ebm, # Updated job name
+#SBATCH --job-name=ebm # Updated job name
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
