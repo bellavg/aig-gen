@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ggraph.aig_config import (NUM_NODE_FEATURES, NUM_ADJ_CHANNELS, MAX_NODE_COUNT, VIRTUAL_EDGE_INDEX)
+from aig_config import (NUM_NODE_FEATURES, NUM_ADJ_CHANNELS, MAX_NODE_COUNT, VIRTUAL_EDGE_INDEX)
 from .df_utils import one_hot_add, one_hot_minus
 from .rgcn import RGCN
 from .st_net import ST_Dis
