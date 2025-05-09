@@ -69,11 +69,12 @@ class GraphAF(Generator):
                 optimizer.step()
 
                 total_loss += loss.to('cpu').item()
-                print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
+                if batch % 100 == 0:
+                    print('Training iteration {} | loss {}'.format(batch, loss.to('cpu').item()))
 
             avg_loss = total_loss / (batch + 1)
-            if batch % 100 == 0:
-                print("Training | Average loss {}".format(avg_loss))
+
+            print("Epoch| Average loss {}".format(avg_loss))
 
             if epoch % save_interval == 0:
                 torch.save(self.model.state_dict(), os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))

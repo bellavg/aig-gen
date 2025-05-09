@@ -88,7 +88,6 @@ def main(args):
     print(f"Created Training DataLoader with batch size {conf['batch_size']}.")
 
 
-
     default_save_dir_base = "./ggraph/checkpoints"  # Relative to where script is run
     model_specific_path = f"{args.model}"
     save_dir = osp.join(default_save_dir_base, model_specific_path)
@@ -101,36 +100,15 @@ def main(args):
 
     # --- Training ---
     print(f"\n--- Starting Training ({args.model}")
-    try:
-        if args.model == 'GraphDF' or args.model == 'GraphAF':
-            if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
-                f"{args.model} runner missing 'train_rand_gen' method.")
-            # Pass the relevant parts of the configuration to the training method
-            runner.train_rand_gen(
-                loader=train_loader,
-                lr=conf['lr'],
-                wd=conf['weight_decay'],
-                max_epochs=conf['max_epochs'],
-                model_conf_dict=conf['model'],  # Pass model config
-                save_interval=conf['save_interval'],
-                save_dir=save_dir
-            )
-
-        else:
-            print(f"Model type {args.model} not recognized for training delegation.");
-            exit(1)
-        print("\n--- Training Process Delegated and Finished ---")
-    except NotImplementedError as nie:
-        print(f"\nError: Method not implemented: {nie}");
-        exit(1)
-    except Exception as train_e:
-        print(f"\nAn error occurred during training delegated to {args.model}.train_rand_gen:");
-        print(f"Error Type: {type(train_e).__name__}");
-        print(f"Error Details: {train_e}");
-        print("--- Traceback ---");
-        traceback.print_exc();
-        print("-----------------");
-        exit(1)
+    runner.train_rand_gen(
+        loader=train_loader,
+        lr=conf['lr'],
+        wd=conf['weight_decay'],
+        max_epochs=conf['max_epochs'],
+        model_conf_dict=conf['model'],  # Pass model config
+        save_interval=conf['save_interval'],
+        save_dir=save_dir
+    )
 
 
 if __name__ == "__main__":
