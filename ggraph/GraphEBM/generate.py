@@ -52,12 +52,6 @@ def print_graph_summary(g, stage_name="Graph", sample_idx=None):
     edge_types = Counter(d.get('type', 'UNTYPED') for _, _, d in g.edges(data=True))
     print(f"{prefix}  Edge Types: {dict(edge_types)}")
 
-    # Inside print_graph_summary, when not is_dag_val:
-    try:
-        cycles = list(nx.simple_cycles(g))
-        print(f"{prefix}    Cycles found (first few if many): {cycles[:min(3, len(cycles))]}")  # Limit to 3 cycles
-    except Exception as e_cycle:
-        print(f"{prefix}    Error finding cycles: {e_cycle}")
 
     if g.number_of_nodes() > 0:
         is_dag_val = nx.is_directed_acyclic_graph(g)
