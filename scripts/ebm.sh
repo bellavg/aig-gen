@@ -40,12 +40,8 @@ echo "Conda environment activated."
 
 #
 #
-srun python -u ggraph/sample_graphs.py \
-    --model 'GraphEBM' \
-    --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \
-    --num_samples 1000 \
-    --evaluate \
-    --save
+srun python -u ggraph/evaluate_graphs.py \
+    "./ggraph/data/generated_graphs/GraphEBM_aigs.pkl"
 #
 #
 ##
