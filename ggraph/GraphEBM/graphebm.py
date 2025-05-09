@@ -2,6 +2,7 @@ import time
 import os
 import copy
 
+import networkx as nx
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
@@ -9,7 +10,8 @@ from generator import Generator
 #from dig.ggraph.utils import gen_mol_from_one_shot_tensor
 from .energy_func import EnergyFunc
 from .util import rescale_adj, requires_grad, clip_grad
-
+from aig_config import *
+from .generate import gen_mol_from_one_shot_tensor
 
 class GraphEBM(Generator):
     r"""
@@ -36,7 +38,7 @@ class GraphEBM(Generator):
         self.n_atom_type = n_atom_type
         self.n_edge_type = n_edge_type
 
-    def train_rand_gen(self, loader, lr, wd, max_epochs, c, ld_step, ld_noise, ld_step_size, clamp, alpha,
+    def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict,
                        save_interval, save_dir):
         r"""
             Running training for random generation task.
@@ -57,6 +59,13 @@ class GraphEBM(Generator):
                     *e.g.*, if save_interval=2, the model parameters will be saved for every 2 training epochs.
                 save_dir (str): the directory to save the model parameters.
         """
+        c = model_conf_dict['c']
+        ld_step = model_conf_dict['ld_step']
+        ld_noise = model_conf_dict['ld_noise']
+        ld_step_size = model_conf_dict['ld_step_size']
+        clamp = model_conf_dict['clamp']
+        alpha = model_conf_dict['alpha']
+
         parameters = self.energy_function.parameters()
         optimizer = Adam(parameters, lr=lr, betas=(0.0, 0.999), weight_decay=wd)
 
@@ -148,7 +157,7 @@ class GraphEBM(Generator):
                     (sum(losses_reg) / len(losses_reg)).item(), t_end - t_start))
             print('==========================================')
 
-    def run_rand_gen(self, checkpoint_path, n_samples, c, ld_step, ld_noise, ld_step_size, clamp, atomic_num_list):
+    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples, atomic_num_list):
         r"""
             Running graph generation for random generation task.
 
@@ -166,6 +175,12 @@ class GraphEBM(Generator):
                 gen_mols (list): A list of generated molecules represented by rdkit Chem.Mol objects;
 
         """
+        c = model_conf_dict['c']
+        ld_step = model_conf_dict['ld_step']
+        ld_noise = model_conf_dict['ld_noise']
+        ld_step_size = model_conf_dict['ld_step_size']
+        clamp = model_conf_dict['clamp']
+
         print("Loading paramaters from {}".format(checkpoint_path))
         self.energy_function.load_state_dict(torch.load(checkpoint_path))
         parameters = self.energy_function.parameters()
@@ -215,4 +230,5 @@ class GraphEBM(Generator):
         gen_mols = gen_mol_from_one_shot_tensor(gen_adj, gen_x, atomic_num_list, correct_validity=True)
 
         return gen_mols
+
 

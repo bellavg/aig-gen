@@ -236,15 +236,12 @@ base_conf = {
         "max_size": MAX_NODE_COUNT, "node_dim": NUM_NODE_FEATURES, "bond_dim": NUM_ADJ_CHANNELS, "use_gpu": True,
         "edge_unroll": 25, "num_flow_layer": 12, "num_rgcn_layer": 3,
         "nhid": 128, "nout": 128,
-        "deq_coeff": 0.9, "st_type": "exp", "use_df": False
+        "deq_coeff": 0.9, "st_type": "exp", "use_df": False,
+
     },
-    # "model_ebm": {
-    #     "hidden": 64, "depth": 2, "swish_act": True, "add_self": False,
-    #     "dropout": 0.0, "n_power_iterations": 1
-    # },
     "lr": 0.001, "weight_decay": 1e-5, "batch_size": 32, "max_epochs": 30,
     "save_interval": 3, "grad_clip_value": 1.0,
-    # "train_ebm": {
+    #"train_ebm": {
     #     "c": 0.0, "ld_step": 150, "ld_noise": 0.005, "ld_step_size": 30,
     #     "clamp_lgd_grad": True, "alpha": 1.0
     # }

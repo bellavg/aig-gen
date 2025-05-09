@@ -116,7 +116,7 @@ if __name__ == "__main__":
                         help='Hidden dimension size in RGCN/ST_Dis. MUST match training.')
     parser.add_argument('--nout', type=int, default=128,
                         help='Output dimension size (embedding size) from RGCN. MUST match training.')
-    parser.add_argument('--temperature_af', type=float, default=0.75, help='Temperature (GraphAF).')
+
 
     args = parser.parse_args()
     main(args)
