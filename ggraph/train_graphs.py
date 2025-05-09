@@ -71,8 +71,8 @@ def main(args):
     elif args.model == 'GraphAF':
         runner = GraphAF()  # Assuming GraphAF() takes no args or uses conf internally
     elif args.model == 'GraphEBM':
-        runner = GraphEBM(n_atom=MAX_NODE_COUNT, n_atom_type=NUM_NODE_FEATURES,
-                          n_edge_type=NUM_EXPLICIT_EDGE_TYPES, hidden=base_conf['model']['hidden'], device=device)
+        runner = GraphEBM(n_atom=MAX_NODE_COUNT, n_atom_type_actual=NUM_NODE_FEATURES,
+                          n_edge_type_actual=NUM_EXPLICIT_EDGE_TYPES, hidden=base_conf['model']['hidden'], device=device)
         conf['lr'] = base_conf['ebm_lr']
         conf['batch_size'] = base_conf['ebm_bs']
 
