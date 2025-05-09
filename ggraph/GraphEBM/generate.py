@@ -2,7 +2,6 @@
 ### Code adapted from MoFlow (under MIT License) https://github.com/calvin-zcx/moflow
 import re
 import numpy as np
-from rdkit import Chem
 import networkx as nx
 from aig_config import *
 #
@@ -67,66 +66,76 @@ def construct_aig(x_features_matrix, adj_channel_tensor, node_type_list=NODE_TYP
     return aig
 
 
-def check_valency(mol):
-    """
-    Checks that no atoms in the mol have exceeded their possible
-    valency
-    :return: True if no valency issues, False otherwise
-    """
-    try:
-        Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_PROPERTIES)
-        return True, None
-    except ValueError as e:
-        e = str(e)
-        p = e.find('#')
-        e_sub = e[p:]
-        atomid_valence = list(map(int, re.findall(r'\d+', e_sub)))
-        return False, atomid_valence
-Fan_ins = { "NODE_PO":1, "NODE_AND":2}
+Fan_ins = { "NODE_PO":1, "NODE_AND":2, "NODE_PI":0, "NODE_CONST0": 0 }
 
 # prev correct_mol
 def correct_fanins(aig):
-    if check_valency(aig):
-        return aig
+    if check_validity(aig):
+        return aig, 1
     for node_id, node_data in aig.nodes(data=True):
         node_type = node_data.get('type')
-        if node_type == "NODE_CONST0" or node_type == "NODE_PI":
-            if any(aig.predecessors(node_id)):
-                for source in list(aig.predecessors(node_id)):
-                    aig.remove_edge(source, node_id)
-        elif node_type == "NODE_PO":
+        if len(list(aig.predecessors(node_id))) > Fan_ins[node_type]:
+            incoming_edges_with_scores = []
+            for u, v, edge_attributes in aig.in_edges(node_id, data=True):
+                score = edge_attributes.get('score', float('-inf'))  # float('inf') for missing scores (least preferred)
+                incoming_edges_with_scores.append(((u, v), score))
+            incoming_edges_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+            for incoming_edge, _ in incoming_edges_with_scores[Fan_ins[node_type]:]:
+                aig.remove_edge(incoming_edge[0], incoming_edge[1])
+        if node_type == "NODE_PO":
             successors_to_remove = list(aig.successors(node_id))
             if successors_to_remove:
                 for target in successors_to_remove:
                     aig.remove_edge(node_id, target)
 
-        if len(list(aig.predecessors(node_id))) > Fan_ins[node_type]:
-                incoming_edges_with_scores = []
-                for source, data in aig.predecessors(node_id):
-                    score = data.get('score', float('-inf'))  # float('inf') for missing scores (least preferred)
-                    incoming_edges_with_scores.append(((source, node_id), score))
-                incoming_edges_with_scores.sort(key=lambda x: x[1])
-                for incoming_edge, score in incoming_edges_with_scores[Fan_ins[node_type]:]:
-                    aig.remove_edge(incoming_edge[0], incoming_edge[1])
+    if check_validity(aig):
+        return aig, 0
+    else:
+        print("Warning: issues everywhere still wtf")
+    return None, 0
+
+
+def valid_aig_can_with_seg(aig: nx.DiGraph):
+    """
+    Validates an AIG (checks for DAG property), optionally canonicalizes node labels
+    if it's a DAG, and extracts the largest connected component.
+
+    Args:
+        aig (AIG): The AIG object to process.
+        largest_connected_comp (bool, optional): Whether to only keep the largest
+                                                 weakly connected component. Defaults to True.
+
+    Returns:
+        Optional[AIG]: The processed AIG object, or None if the input is None or
+                       becomes invalid (e.g., not a DAG and handling chooses to return None).
+    """
+    if aig is None:
+        return None
+
+    if not isinstance(aig, nx.DiGraph):  # Ensure it's our AIG class for the description attribute
+        pass
+
+    # 1. Validity Check: Must be a Directed Acyclic Graph (DAG) for combinational AIGs
+    if not nx.is_directed_acyclic_graph(aig):
+        return aig
+
+    else:
+        # This re-labels nodes 0 to N-1 according to topological sort.
+        # Note: This creates a new graph object. We need to wrap it in AIG again.
+        topo_sorted_nodes = list(nx.topological_sort(aig))
+        mapping = {old_label: new_label for new_label, old_label in enumerate(topo_sorted_nodes)}
+
+        # Create a new AIG instance for the relabeled graph
+        aig = nx.relabel_nodes(aig, mapping, copy=True)
+
+
+    if aig.number_of_nodes() > 1:
+        aig.remove_nodes_from(list(nx.isolates(aig)))
 
     return aig
 
 
-
-
-
-
-def valid_mol_can_with_seg(x, largest_connected_comp=True):
-    # mol = None
-    if x is None:
-        return None
-    sm = Chem.MolToSmiles(x, isomericSmiles=True)
-    mol = Chem.MolFromSmiles(sm)
-    if largest_connected_comp and '.' in sm:
-        vsm = [(s, len(s)) for s in sm.split('.')]  # 'C.CC.CCc1ccc(N)cc1CCC=O'.split('.')
-        vsm.sort(key=lambda tup: tup[1], reverse=True)
-        mol = Chem.MolFromSmiles(vsm[0][0])
-    return mol
 
 
 def gen_mol_from_one_shot_tensor(adj, x, largest_connected_comp=True):
@@ -158,10 +167,13 @@ def gen_mol_from_one_shot_tensor(adj, x, largest_connected_comp=True):
     # else:
     gen_graphs = []
     # TODO I think atomic num list should be 0, 1, 2, 3, 4 where 4 is virtual?
+    uncorrected_graphs = 0
     for x_elem, adj_elem in zip(x, adj):
         aig = construct_aig(x_elem, adj_elem)
-        cmol = correct_fanins(aig)
-        vcmol = valid_mol_can_with_seg(cmol, largest_connected_comp=largest_connected_comp)
-        gen_graphs.append(vcmol)
+        aig, pure = correct_fanins(aig)
+        uncorrected_graphs += pure
+        aig = valid_aig_can_with_seg(aig)
+        gen_graphs.append(aig)
 
-    return gen_graphs, 0
+    return gen_graphs, uncorrected_graphs
+

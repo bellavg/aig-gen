@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/df_%j.out
+#SBATCH --output=../slurm_logs/sample_df_%j.out
 
 
 # --- Configuration ---

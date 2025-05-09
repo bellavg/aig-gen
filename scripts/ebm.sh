@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/ebm_%j.out
+#SBATCH --output=../slurm_logs/sample_ebm_%j.out
 
 
 # --- Configuration ---
@@ -40,11 +40,11 @@ srun python -u ggraph/train_graphs.py \
 
 #
 #
-#srun python -u ggraph/sample_graphs.py \
-#    --model 'GraphAF' \
-#    --checkpoint "./ggraph/checkpoint/GraphAF/ckpt_30.pth" \
-#    --evaluate \
-#    --save
+srun python -u ggraph/sample_graphs.py \
+    --model 'GraphEBM' \
+    --checkpoint "./ggraph/checkpoints/GraphEBM/ckpt_30.pth" \
+    --evaluate \
+    --save
 #
 #
 ##

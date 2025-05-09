@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/af_%j.out
+#SBATCH --output=../slurm_logs/sample_af_%j.out
 
 
 # --- Configuration ---
@@ -42,7 +42,7 @@ echo "Conda environment activated."
 
 srun python -u ggraph/sample_graphs.py \
     --model 'GraphAF' \
-    --checkpoint "./ggraph/checkpoints/GraphAF/ckpt_30.pth" \
+    --checkpoint "./ggraph/checkpoints/GraphAF/ckpt_24.pth" \
     --evaluate \
     --save
 
