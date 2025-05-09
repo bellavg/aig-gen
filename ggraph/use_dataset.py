@@ -125,7 +125,7 @@ class AIGPreprocessedDatasetLoader(Dataset):
 
             if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None:
                 if idx < len(self.data.__num_nodes__):
-                    data_obj.num_nodes = self.data.__num_nodes__[idx]
+                    data_obj['num_nodes'] = self.data.__num_nodes__[idx]
                 else:
                     warnings.warn(
                         f"Index {idx} out of bounds for self.data.__num_nodes__ (len {len(self.data.__num_nodes__)}). num_nodes might not be set correctly.")
