@@ -4,7 +4,13 @@ import numpy as np
 import networkx as nx
 from aig_config import *  # Imports NODE_TYPE_KEYS, NUM_NODE_FEATURES, VIRTUAL_EDGE_INDEX, NUM2EDGETYPE, check_validity, Fan_ins
 import warnings  # Ensure warnings is imported
-
+### Code adapted from MoFlow (under MIT License) https://github.com/calvin-zcx/moflow
+import re
+import numpy as np
+import networkx as nx
+from aig_config import * # Imports NODE_TYPE_KEYS, NUM_NODE_FEATURES, VIRTUAL_EDGE_INDEX, NUM2EDGETYPE, check_validity, Fan_ins
+import warnings # Ensure warnings is imported
+from collections import Counter # <<<< ----- ADDED THIS IMPORT
 # For detailed debugging of array contents
 np.set_printoptions(threshold=50, edgeitems=5)  # Controls numpy array printing
 
