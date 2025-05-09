@@ -39,7 +39,7 @@ echo "Conda environment activated."
 
 
 srun python -u ggraph/evaluate_aigs.py \
-   " ./ggraph/data/generated_graphs/GraphDF_aigs.pkl"
+   "./ggraph/data/generated_graphs/GraphDF_aigs.pkl"
 
 
 

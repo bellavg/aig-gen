@@ -596,11 +596,11 @@ if __name__ == "__main__":
                         help='Path to the pickle file containing the list of generated NetworkX DiGraphs, or the list itself.')
     parser.add_argument('--results_file', type=str, default="evaluation_results.txt",
                         help="Filename to save the evaluation summary.")
-    parser.add_argument('--train_pkl_dir', type=str, default=None,
+    parser.add_argument('--train_pkl_dir', type=str, default="./data/aigs",
                         help='(Optional) Path to the directory containing training PKL files.')
-    parser.add_argument('--train_pkl_prefix', type=str, default=None,
+    parser.add_argument('--train_pkl_prefix', type=str, default="real_aigs_par_",
                         help='(Optional) Prefix of the training PKL files.')
-    parser.add_argument('--num_train_pkl_files', type=int, default=0,
+    parser.add_argument('--num_train_pkl_files', type=int, default=4,
                         help='(Optional) Number of training PKL files to load.')
 
     parsed_args = parser.parse_args()
