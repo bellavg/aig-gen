@@ -168,8 +168,7 @@ srun python -u sample_graphs.py \
 
 
 
-srun python -u "${SLURM_SUBMIT_DIR}/${EVAL_SCRIPT}" \
-      "./GraphAF/generated_aigs.pkl" \
-      --train_data_dir "${TRAIN_DATA_DIR_FOR_NOVELTY}"
+srun python -u evaluate_aigs.py \
+      "./GraphAF/generated_aigs.pkl"
 
 

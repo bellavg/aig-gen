@@ -133,11 +133,9 @@ echo "----------------------------------------"
 
 # Execute the generation script
 # *** Use --temperature_df for GraphDF ***
-srun python -u sample_graphs.py \
-    --model GraphDF \
+srun python -u sample_dfs.py \
     --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/ graphdf_rand_gen_ckpt_epoch_20.pth" \
-    --output_file "./GraphDF/generated_graphs.pkl" \
-    --num_samples 1000 \
+    --output_file "./GraphDF/generated_graphs.pkl"
 
 
 # === Step 3: Evaluation ===
