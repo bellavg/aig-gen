@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/eval_df_%j.out
+#SBATCH --output=../slurm_logs/sample_df_%j.out
 
 
 # --- Configuration ---
@@ -38,9 +38,10 @@ echo "Conda environment activated."
 #srun python -u ggraph/train_graphs.py
 
 
-srun python -u ggraph/evaluate_aigs.py \
-   "./ggraph/data/generated_graphs/GraphDF_aigs.pkl"
-
+srun python -u ggraph/sample_graphs.py \
+    --checkpoint "./ggraph/checkpoints/GraphDF/ckpt_30.pth" \
+    --evaluate \
+    --save
 
 
 #
