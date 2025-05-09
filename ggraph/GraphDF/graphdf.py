@@ -1,6 +1,6 @@
 import os
 import torch
-from generator import Generator
+from ggraph.generator import Generator
 from .model import GraphFlowModel
 
 
@@ -77,40 +77,40 @@ class GraphDF(Generator):
             if epoch % save_interval == 0:
                 torch.save(self.model.state_dict(), os.path.join(save_dir, 'rand_gen_ckpt_{}.pth'.format(epoch)))
 
-    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_mols=1000, num_min_node=5, num_max_node=64,
-                     temperature=[0.3, 0.3], atomic_num_list=[0, 1, 2, 3]):
-        r"""
-            Running graph generation for random generation task.
-
-            Args:
-                model_conf_dict (dict): The python dict for configuring the model hyperparameters.
-                checkpoint_path (str): The path to the saved model checkpoint file.
-                n_mols (int, optional): The number of molecules to generate. (default: :obj:`100`)
-                num_min_node (int, optional): The minimum number of nodes in the generated molecular graphs. (default: :obj:`7`)
-                num_max_node (int, optional): the maximum number of nodes in the generated molecular graphs. (default: :obj:`25`)
-                temperature (list, optional): a list of two float numbers, the temperature parameter of prior distribution. (default: :obj:`[0.3, 0.3]`)
-                atomic_num_list (list, optional): a list of integers, the list of atomic numbers indicating the node types in the generated molecular graphs. (default: :obj:`[6, 7, 8, 9]`)
-
-            :rtype:
-                (all_mols, pure_valids),
-                all_mols is a list of generated molecules represented by rdkit Chem.Mol objects;
-                pure_valids is a list of integers, all are 0 or 1, indicating whether bond resampling happens.
-        """
-
-        self.get_model('rand_gen', model_conf_dict, checkpoint_path)
-        self.model.eval()
-        all_graphs, pure_valids = [], []
-        cnt_mol = 0
-
-        while cnt_mol < n_mols:
-            mol, no_resample, num_atoms = self.model.generate(atom_list=atomic_num_list, min_atoms=num_min_node,
-                                                              max_atoms=num_max_node, temperature=temperature)
-            if (num_atoms >= num_min_node):
-                cnt_mol += 1
-                all_graphs.append(mol)
-                pure_valids.append(no_resample)
-                if cnt_mol % 10 == 0:
-                    print('Generated {} Graphs'.format(cnt_mol))
-
-        assert cnt_mol == n_mols, 'number of generated molecules does not equal num'
-        return all_graphs, pure_valids
+    # def run_rand_gen(self, model_conf_dict, checkpoint_path, n_mols=1000, num_min_node=5, num_max_node=64,
+    #                  temperature=[0.3, 0.3], atomic_num_list=[0, 1, 2, 3]):
+    #     r"""
+    #         Running graph generation for random generation task.
+    #
+    #         Args:
+    #             model_conf_dict (dict): The python dict for configuring the model hyperparameters.
+    #             checkpoint_path (str): The path to the saved model checkpoint file.
+    #             n_mols (int, optional): The number of molecules to generate. (default: :obj:`100`)
+    #             num_min_node (int, optional): The minimum number of nodes in the generated molecular graphs. (default: :obj:`7`)
+    #             num_max_node (int, optional): the maximum number of nodes in the generated molecular graphs. (default: :obj:`25`)
+    #             temperature (list, optional): a list of two float numbers, the temperature parameter of prior distribution. (default: :obj:`[0.3, 0.3]`)
+    #             atomic_num_list (list, optional): a list of integers, the list of atomic numbers indicating the node types in the generated molecular graphs. (default: :obj:`[6, 7, 8, 9]`)
+    #
+    #         :rtype:
+    #             (all_mols, pure_valids),
+    #             all_mols is a list of generated molecules represented by rdkit Chem.Mol objects;
+    #             pure_valids is a list of integers, all are 0 or 1, indicating whether bond resampling happens.
+    #     """
+    #
+    #     self.get_model('rand_gen', model_conf_dict, checkpoint_path)
+    #     self.model.eval()
+    #     all_graphs, pure_valids = [], []
+    #     cnt_mol = 0
+    #
+    #     while cnt_mol < n_mols:
+    #         mol, no_resample, num_atoms = self.model.generate(atom_list=atomic_num_list, min_atoms=num_min_node,
+    #                                                           max_atoms=num_max_node, temperature=temperature)
+    #         if (num_atoms >= num_min_node):
+    #             cnt_mol += 1
+    #             all_graphs.append(mol)
+    #             pure_valids.append(no_resample)
+    #             if cnt_mol % 10 == 0:
+    #                 print('Generated {} Graphs'.format(cnt_mol))
+    #
+    #     assert cnt_mol == n_mols, 'number of generated molecules does not equal num'
+    #     return all_graphs, pure_valids

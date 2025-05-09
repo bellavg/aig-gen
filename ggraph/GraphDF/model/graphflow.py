@@ -2,6 +2,8 @@ import networkx as nx
 import torch
 import torch.nn as nn
 import numpy as np
+from sympy.multipledispatch.dispatcher import source
+
 from .disgraphaf import DisGraphAF
 from ggraph.aig_config import NUM2NODETYPE, NUM2EDGETYPE, VIRTUAL_EDGE_INDEX, check_validity
 import networkx as nx
@@ -60,226 +62,222 @@ class GraphFlowModel(nn.Module):
         z = self.flow_core(inp_node_features, inp_adj_features, inp_node_features_cont, inp_adj_features_cont)
         return z
 
-    def generate(self, atom_list, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=10):
-        """
-        inverse flow to generate molecule
-        Args:
-            temp: temperature of normal distributions, we sample from (0, temp^2 * I)
-        """
-
-        disconnection_streak = 0
-
-        with torch.no_grad():
-            #num2bond = {0: Chem.rdchem.BondType.SINGLE, 1: Chem.rdchem.BondType.DOUBLE, 2: Chem.rdchem.BondType.TRIPLE}
-            num2bond =NUM2EDGETYPE
-            #num2atom = {i: atom_list[i] for i in range(len(atom_list))}
-            num2atom = NUM2NODETYPE
-
-            if self.dp:
-                cur_node_features = torch.zeros([1, max_atoms, self.node_dim]).cuda()
-                cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms]).cuda()
-            else:
-                cur_node_features = torch.zeros([1, max_atoms, self.node_dim])
-                cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms])
-
-            node_features_each_iter_backup = cur_node_features.clone()  # backup of features, updated when newly added node is connected to previous subgraph
-            adj_features_each_iter_backup = cur_adj_features.clone()
-
-
-            #rw_mol = Chem.RWMol()  # editable mol
-            aig = nx.DiGraph() # editable aig
-
-            #mol = None
-            graph = None
-
-            is_continue = True
-            edge_idx = 0
-            total_resample = 0
-            each_node_resample = np.zeros([max_atoms])
-
-            for i in range(max_atoms):
-                if not is_continue:
-                    break
-                if i < self.edge_unroll:
-                    edge_total = i  # edge to sample for current node
-                    start = 0
-                else:
-                    edge_total = self.edge_unroll
-                    start = i - self.edge_unroll
-                # first generate node
-                ## reverse flow
-
-                prior_node_dist = torch.distributions.OneHotCategorical(
-                    logits=self.node_base_log_probs[i] * temperature[0])
-                latent_node = prior_node_dist.sample().view(1, -1)
-
-                if self.dp:
-                    latent_node = self.flow_core.module.reverse(cur_node_features, cur_adj_features, latent_node,
-                                                                mode=0).view(-1)  # (9, )
-                else:
-                    latent_node = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_node, mode=0).view(
-                        -1)  # (9, )
-
-                feature_id = torch.argmax(latent_node).item()
-                cur_node_features[0, i, feature_id] = 1.0
-                cur_adj_features[0, :, i, i] = 1.0
-
-                #rw_mol.AddAtom(Chem.Atom(num2atom[feature_id]))
-                # TODO i is correct here right?
-                aig.add_node(i, type=num2atom[feature_id])
-
-
-                if i == 0:
-                    is_connect = True
-                else:
-                    is_connect = False
-
-                for j in range(edge_total):
-                    valid = False
-                    resample_edge = 0
-                    edge_dis = self.edge_base_log_probs[edge_idx].clone()
-                    invalid_bond_type_set = set()
-                    while not valid:
-                        # I believe this is 3 because that is where three virtual edge index is
-                        #if len(invalid_bond_type_set) < 3 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
-                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX and resample_edge <= 50:
-                            prior_edge_dist = torch.distributions.OneHotCategorical(logits=edge_dis / temperature[1])
-                            latent_edge = prior_edge_dist.sample().view(1, -1)
-                            latent_id = torch.argmax(latent_edge, dim=1)
-
-                            if self.dp:
-                                latent_edge = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
-                                                                            latent_edge,
-                                                                            mode=1, edge_index=torch.Tensor(
-                                        [[j + start, i]]).long().cuda()).view(-1)  # (4, )
-                            else:
-                                latent_edge = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_edge,
-                                                                     mode=1, edge_index=torch.Tensor(
-                                        [[j + start, i]]).long()).view(-1)  # (4, )
-                            edge_discrete_id = torch.argmax(latent_edge).item()
-                        else:
-                            #assert resample_edge > 50 or len(invalid_bond_type_set) == 3
-                            assert resample_edge > 50 or len(invalid_bond_type_set) == VIRTUAL_EDGE_INDEX #I believe that is why this is 3
-                            #edge_discrete_id = 3  # we have no choice but to choose not to add edge between (i, j+start)
-                            edge_discrete_id = VIRTUAL_EDGE_INDEX
-
-                        cur_adj_features[0, edge_discrete_id, i, j + start] = 1.0
-                        cur_adj_features[0, edge_discrete_id, j + start, i] = 1.0
-                        if edge_discrete_id == VIRTUAL_EDGE_INDEX:  # virtual edge
-                            valid = True
-                        else:  # single/double/triple bond
-                            #rw_mol.AddBond(i, j + start, num2bond[edge_discrete_id])
-                            aig.add_edge(i, j + start, type=num2bond[edge_discrete_id])
-                            #TODO add edge between i,j+start of type edge discrete id
-                            #valid = check_valency(rw_mol)
-                            # TODO implement in aig config a validity function to return true/false
-                            valid = check_validity(aig)
-                            if valid:
-                                is_connect = True
-                                # print(num2bond_symbol[edge_discrete_id])
-                            else:  # backtrack
-                                edge_dis[latent_id] = float('-inf')
-                                #rw_mol.RemoveBond(i, j + start)
-                                aig.remove_edge(i, j + start)
-                                cur_adj_features[0, edge_discrete_id, i, j + start] = 0.0
-                                cur_adj_features[0, edge_discrete_id, j + start, i] = 0.0
-                                total_resample += 1.0
-                                each_node_resample[i] += 1.0
-                                resample_edge += 1
-
-                                invalid_bond_type_set.add(edge_discrete_id)
-
-                    edge_idx += 1
-
-                if is_connect:  # new generated node has at least one bond with previous node, do not stop generation, backup mol from rw_mol to mol
-                    is_continue = True
-                    #mol = rw_mol.GetMol()
-                    graph = aig
-                    node_features_each_iter_backup = cur_node_features.clone()  # update node backup since new node is valid
-                    adj_features_each_iter_backup = cur_adj_features.clone()
-                    disconnection_streak = 0
-                elif not is_connect and disconnection_streak < disconnection_patience:
-                    is_continue = True
-                    graph = aig
-                    node_features_each_iter_backup = cur_node_features.clone()  # update node backup since new node is valid
-                    adj_features_each_iter_backup = cur_adj_features.clone()
-                    disconnection_streak += 1
-                else:
-                    is_continue = False
-                    #cur_mol_size = mol.GetNumAtoms()
-                    cur_graph_size = graph.number_of_nodes()
-                    #if cur_mol_size >= min_atoms:
-                    if cur_graph_size >= min_atoms:
-                        #rw_mol = Chem.RWMol(mol)
-                        aig = graph
-                        cur_node_features = node_features_each_iter_backup.clone()
-                        cur_adj_features = adj_features_each_iter_backup.clone()
-                        cur_node_features_tmp = cur_node_features.clone()
-                        cur_adj_features_tmp = cur_adj_features.clone()
-                        #mol_demon_edit = Chem.RWMol(rw_mol)
-                        # TODO what do i do here?? instead of the line above
-                        added_num = np.random.randint(1, 5)
-                        # why added_num 1, 5???  is
-                        for _ in range(added_num):
-                            last_id2 = mol_demon_edit.AddAtom(Chem.Atom(6))
-                            # TODO figure out why this and what this is?
-                            cur_node_features_tmp[0, last_id2, 0] = 1.0
-                            cur_adj_features_tmp[0, :, last_id2, last_id2] = 1.0
-
-                            flag_success = False
-                            count = 0
-                            while True:
-                                if count > 100:
-                                    break
-                                if last_id2 > 12:
-                                    j = np.random.randint(1, 13)
-                                else:
-                                    j = np.random.randint(1, last_id2 + 1)
-
-                                mol_demon_edit.AddBond(int(last_id2 - j), int(last_id2), Chem.rdchem.BondType.SINGLE)
-                                # TODO figure out why this and what this is?
-                                cur_adj_features_tmp[0, 0, last_id2 - j, last_id2] = 1.0
-                                cur_adj_features_tmp[0, 0, last_id2, last_id2 - j] = 1.0
-
-                                #valid = check_valency(mol_demon_edit)
-                                #TODO figureout what goes here
-                                valid = check_validity()
-                                if valid:
-                                    flag_success = True
-                                    break
-                                else:
-                                    mol_demon_edit.RemoveBond(int(last_id2 - j), int(last_id2))
-                                    # TODO figureout what goes here and why
-                                    cur_adj_features_tmp[0, 0, last_id2 - j, last_id2] = 0.0
-                                    cur_adj_features_tmp[0, 0, last_id2, last_id2 - j] = 0.0
-                                    count += 1
-
-                            if flag_success:
-                                rw_mol = Chem.RWMol(mol_demon_edit)
-                                # TODO figureout what goes here and why?
-                                cur_node_features = cur_node_features_tmp.clone()
-                                cur_adj_features = cur_adj_features_tmp.clone()
-                                #mol = rw_mol.GetMol()
-                                graph = aig
-                                node_features_each_iter_backup = cur_node_features.clone()
-                                adj_features_each_iter_backup = cur_adj_features.clone()
-                            else:
-                                break
-
-
-            #assert mol is not None, 'mol is None...'
-            assert graph is not None
-
-            #final_mol = convert_radical_electrons_to_hydrogens(mol)
-            #TODO i think above is unncesary
-            #num_atoms = final_mol.GetNumAtoms()
-            num_nodes = graph.number_of_nodes()
-
-            pure_valid = 0
-            if total_resample == 0:
-                pure_valid = 1.0
-
-            return graph, pure_valid, num_nodes
+    # def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=10):
+    #     """
+    #     inverse flow to generate molecule
+    #     Args:
+    #         temp: temperature of normal distributions, we sample from (0, temp^2 * I)
+    #     """
+    #
+    #     disconnection_streak = 0
+    #
+    #     current_device = torch.device("cuda" if self.dp and torch.cuda.is_available() else "cpu")
+    #
+    #     with torch.no_grad():
+    #         #num2bond = {0: Chem.rdchem.BondType.SINGLE, 1: Chem.rdchem.BondType.DOUBLE, 2: Chem.rdchem.BondType.TRIPLE}
+    #         num2bond =NUM2EDGETYPE
+    #         #num2atom = {i: atom_list[i] for i in range(len(atom_list))}
+    #         num2atom = NUM2NODETYPE
+    #
+    #         cur_node_features = torch.zeros([1, max_atoms, self.node_dim], device=current_device)
+    #         cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms], device=current_device)
+    #
+    #         node_features_each_iter_backup = cur_node_features.clone()  # backup of features, updated when newly added node is connected to previous subgraph
+    #         adj_features_each_iter_backup = cur_adj_features.clone()
+    #
+    #         #rw_mol = Chem.RWMol()  # editable mol
+    #         aig = nx.DiGraph() # editable aig
+    #
+    #         #mol = None
+    #         graph = None
+    #
+    #         is_continue = True
+    #         edge_idx = 0
+    #         total_resample = 0
+    #         #each_node_resample = np.zeros([max_atoms])
+    #
+    #         for i in range(max_atoms):
+    #             if not is_continue:
+    #                 break
+    #             if i < self.edge_unroll:
+    #                 num_edges_to_try = i  # used to be called edge_total
+    #                 start = 0
+    #             else:
+    #                 num_edges_to_try = self.edge_unroll
+    #                 start = i - self.edge_unroll
+    #             # first generate node
+    #             ## reverse flow
+    #
+    #             prior_node_dist = torch.distributions.OneHotCategorical(
+    #                 logits=self.node_base_log_probs[i].to(current_device) * temperature[0])
+    #
+    #             latent_node_type_sample = prior_node_dist.sample().view(1, -1)
+    #
+    #             if self.dp:
+    #                 latent_node_type_sample = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
+    #                                                                         latent_node_type_sample,mode=0).view(-1)
+    #             else:
+    #                 latent_node_type_sample = self.flow_core.reverse(cur_node_features, cur_adj_features,
+    #                                                                  latent_node_type_sample, mode=0).view(-1)  # (9, )
+    #
+    #             feature_id = torch.argmax(latent_node_type_sample).item()
+    #             cur_node_features[0, i, feature_id] = 1.0
+    #             cur_adj_features[0, :, i, i] = 1.0
+    #
+    #             # Original: #rw_mol.AddAtom(Chem.Atom(num2atom[feature_id]))
+    #             # Node ID in NetworkX graph is `i`
+    #             aig.add_node(i, type=num2atom[feature_id])
+    #
+    #             is_connect = (i == 0)
+    #
+    #             for j in range(num_edges_to_try):
+    #                 source_prev_node_idx = j + start
+    #
+    #                 valid = False
+    #                 resample_edge = 0
+    #                 edge_dis = self.edge_base_log_probs[edge_idx].clone().to(current_device)
+    #                 invalid_bond_type_set = set()
+    #
+    #                 while not valid:
+    #                     # I believe this is 3 because that is where three virtual edge index is
+    #                     #if len(invalid_bond_type_set) < 3 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
+    #                     if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX and resample_edge <= 50:
+    #                         prior_edge_dist = torch.distributions.OneHotCategorical(logits=edge_dis / temperature[1])
+    #                         latent_edge = prior_edge_dist.sample().view(1, -1)
+    #                         latent_id = torch.argmax(latent_edge, dim=1)
+    #
+    #                         if self.dp:
+    #                             latent_edge = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
+    #                                                                         latent_edge,
+    #                                                                         mode=1, edge_index=torch.Tensor(
+    #                                     [[source_prev_node_idx, i]]).long().cuda()).view(-1)  # (4, )
+    #                         else:
+    #                             latent_edge = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_edge,
+    #                                                                  mode=1, edge_index=torch.Tensor(
+    #                                     [[source_prev_node_idx, i]]).long()).view(-1)  # (4, )
+    #                         edge_discrete_id = torch.argmax(latent_edge).item()
+    #                     else:
+    #                         #assert resample_edge > 50 or len(invalid_bond_type_set) == 3
+    #                         assert resample_edge > 50 or len(invalid_bond_type_set) == VIRTUAL_EDGE_INDEX #I believe that is why this is 3
+    #                         #edge_discrete_id = 3  # we have no choice but to choose not to add edge between (i, j+start)
+    #                         edge_discrete_id = VIRTUAL_EDGE_INDEX
+    #
+    #                     #cur_adj_features[0, edge_discrete_id, i, source_prev_node_idx] = 1.0
+    #                     cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 1.0
+    #                     # remove because directed
+    #                     if edge_discrete_id == VIRTUAL_EDGE_INDEX:  # virtual edge
+    #                         valid = True
+    #                     else:  # single/double/triple bond
+    #                         # Original: #rw_mol.AddBond(i, j + start, num2bond[edge_discrete_id])
+    #                         aig.add_edge(source_prev_node_idx, i, type=num2bond[edge_discrete_id])
+    #
+    #                         # Original: #valid = check_valency(rw_mol)
+    #                         valid = check_validity(aig)  # Your AIG validity check
+    #
+    #                         if valid:
+    #                             is_connect = True
+    #                             # print(num2bond_symbol[edge_discrete_id])
+    #                         else:  # backtrack
+    #                             edge_dis[latent_id] = float('-inf')
+    #                             #rw_mol.RemoveBond(i, j + start)
+    #                             aig.remove_edge(source_prev_node_idx, i,)
+    #                             cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 0.0
+    #                             #cur_adj_features[0, edge_discrete_id, i, j + start] = 0.0
+    #                             total_resample += 1.0
+    #                             resample_edge += 1
+    #                             invalid_bond_type_set.add(edge_discrete_id)
+    #
+    #                 edge_idx += 1
+    #
+    #             if is_connect:  # new generated node has at least one bond with previous node, do not stop generation, backup mol from rw_mol to mol
+    #                 is_continue = True
+    #                 #mol = rw_mol.GetMol()
+    #                 graph = aig.copy()
+    #                 node_features_each_iter_backup = cur_node_features.clone()  # update node backup since new node is valid
+    #                 adj_features_each_iter_backup = cur_adj_features.clone()
+    #                 disconnection_streak = 0
+    #             elif not is_connect and disconnection_streak < disconnection_patience:
+    #                 is_continue = True
+    #                 graph = aig
+    #                 node_features_each_iter_backup = cur_node_features.clone()  # update node backup since new node is valid
+    #                 adj_features_each_iter_backup = cur_adj_features.clone()
+    #                 disconnection_streak += 1
+    #             else:
+    #                 is_continue = False
+    #                 #cur_mol_size = mol.GetNumAtoms()
+    #                 cur_graph_size = graph.number_of_nodes()
+    #                 #if cur_mol_size >= min_atoms:
+    #                 if cur_graph_size >= min_atoms:
+    #                     #rw_mol = Chem.RWMol(mol)
+    #                     aig = graph
+    #                     cur_node_features = node_features_each_iter_backup.clone()
+    #                     cur_adj_features = adj_features_each_iter_backup.clone()
+    #                     cur_node_features_tmp = cur_node_features.clone()
+    #                     cur_adj_features_tmp = cur_adj_features.clone()
+    #                     #mol_demon_edit = Chem.RWMol(rw_mol)
+    #                     # TODO what do i do here?? instead of the line above
+    #                     added_num = np.random.randint(1, 5)
+    #                     # why added_num 1, 5???  is
+    #                     for _ in range(added_num):
+    #                         last_id2 = mol_demon_edit.AddAtom(Chem.Atom(6))
+    #                         # TODO figure out why this and what this is?
+    #                         cur_node_features_tmp[0, last_id2, 0] = 1.0
+    #                         cur_adj_features_tmp[0, :, last_id2, last_id2] = 1.0
+    #
+    #                         flag_success = False
+    #                         count = 0
+    #                         while True:
+    #                             if count > 100:
+    #                                 break
+    #                             if last_id2 > 12:
+    #                                 j = np.random.randint(1, 13)
+    #                             else:
+    #                                 j = np.random.randint(1, last_id2 + 1)
+    #
+    #                             mol_demon_edit.AddBond(int(last_id2 - j), int(last_id2), Chem.rdchem.BondType.SINGLE)
+    #                             # TODO figure out why this and what this is?
+    #                             cur_adj_features_tmp[0, 0, last_id2 - j, last_id2] = 1.0
+    #                             cur_adj_features_tmp[0, 0, last_id2, last_id2 - j] = 1.0
+    #
+    #                             #valid = check_valency(mol_demon_edit)
+    #                             #TODO figureout what goes here
+    #                             valid = check_validity()
+    #                             if valid:
+    #                                 flag_success = True
+    #                                 break
+    #                             else:
+    #                                 mol_demon_edit.RemoveBond(int(last_id2 - j), int(last_id2))
+    #                                 # TODO figureout what goes here and why
+    #                                 cur_adj_features_tmp[0, 0, last_id2 - j, last_id2] = 0.0
+    #                                 cur_adj_features_tmp[0, 0, last_id2, last_id2 - j] = 0.0
+    #                                 count += 1
+    #
+    #                         if flag_success:
+    #                             rw_mol = Chem.RWMol(mol_demon_edit)
+    #                             # TODO figureout what goes here and why?
+    #                             cur_node_features = cur_node_features_tmp.clone()
+    #                             cur_adj_features = cur_adj_features_tmp.clone()
+    #                             #mol = rw_mol.GetMol()
+    #                             graph = aig
+    #                             node_features_each_iter_backup = cur_node_features.clone()
+    #                             adj_features_each_iter_backup = cur_adj_features.clone()
+    #                         else:
+    #                             break
+    #
+    #
+    #         #assert mol is not None, 'mol is None...'
+    #         assert graph is not None
+    #
+    #         #final_mol = convert_radical_electrons_to_hydrogens(mol)
+    #         #TODO i think above is unncesary
+    #         #num_atoms = final_mol.GetNumAtoms()
+    #         num_nodes = graph.number_of_nodes()
+    #
+    #         pure_valid = 0
+    #         if total_resample == 0:
+    #             pure_valid = 1.0
+    #
+    #         return graph, pure_valid, num_nodes
 
     def initialize_masks(self, max_node_unroll=38, max_edge_unroll=12):
         """

@@ -8,57 +8,30 @@ import warnings
 import os.path as osp
 import traceback  # For error logging
 
-# --- Dataset and Model Imports ---
-try:
-    # Use the new loader-only dataset class
-    # Make sure to name your file/class accordingly
-    from data.aig_dataset import AIGPreprocessedDatasetLoader  # MODIFIED
-    from GraphDF import GraphDF
-    from GraphAF import GraphAF
-    from GraphEBM import GraphEBM
+from aig_config import *
+from GraphDF import GraphDF
+from use_dataset import AIGPreprocessedDatasetLoader
 
-    try:
-        from GraphDF import aig_config
-
-        print("Imported aig_config from GraphDF package.")
-    except ImportError:
-        try:
-            import data.aig_config as aig_config
-
-            print("Imported aig_config from data directory.")
-        except ImportError:
-            try:
-                import G2PT.configs.aig as aig_config
-
-                print("Imported aig_config from G2PT.configs.")
-            except ImportError:
-                print("CRITICAL ERROR: Cannot find aig_config.py. Please ensure it's accessible.")
-                exit(1)
-
-except ImportError as e:
-    print(f"Error importing necessary modules: {e}")
-    print("Please ensure dataset class, models (GraphDF, GraphAF, GraphEBM), and aig_config.py are accessible.")
-    exit(1)
-# --- End Imports ---
 
 # --- Base Configuration Dictionary (Defaults) ---
 base_conf = {
-    "data_name": "aig_ds",  # This will be overridden by args.dataset_name
+    "data_name": "aig",  # This will be overridden by args.dataset_name
     "model": {
-        "max_size": 64, "node_dim": 4, "bond_dim": 3, "use_gpu": True,
-        "edge_unroll": 15, "num_flow_layer": 12, "num_rgcn_layer": 3,
-        "nhid": 128, "nout": 128, "deq_coeff": 0.9, "st_type": "exp", "use_df": False
+        "max_size": MAX_NODE_COUNT, "node_dim": NUM_NODE_FEATURES, "bond_dim": NUM_ADJ_CHANNELS, "use_gpu": True,
+        "edge_unroll": 25, "num_flow_layer": 12, "num_rgcn_layer": 3,
+        "nhid": 128, "nout": 128,
+        # "deq_coeff": 0.9, "st_type": "exp", "use_df": False
     },
-    "model_ebm": {
-        "hidden": 64, "depth": 2, "swish_act": True, "add_self": False,
-        "dropout": 0.0, "n_power_iterations": 1
-    },
-    "lr": 0.0005, "weight_decay": 1e-5, "batch_size": 64, "max_epochs": 50,
-    "save_interval": 5, "grad_clip_value": 1.0,
-    "train_ebm": {
-        "c": 0.0, "ld_step": 150, "ld_noise": 0.005, "ld_step_size": 30,
-        "clamp_lgd_grad": True, "alpha": 1.0
-    }
+    # "model_ebm": {
+    #     "hidden": 64, "depth": 2, "swish_act": True, "add_self": False,
+    #     "dropout": 0.0, "n_power_iterations": 1
+    # },
+    "lr": 0.001, "weight_decay": 1e-5, "batch_size": 32, "max_epochs": 30,
+    "save_interval": 3, "grad_clip_value": 1.0,
+    # "train_ebm": {
+    #     "c": 0.0, "ld_step": 150, "ld_noise": 0.005, "ld_step_size": 30,
+    #     "clamp_lgd_grad": True, "alpha": 1.0
+    # }
 }
 
 
@@ -67,8 +40,8 @@ base_conf = {
 def main(args):
     conf = base_conf.copy()
     conf['model'] = base_conf['model'].copy()
-    conf['model_ebm'] = base_conf['model_ebm'].copy()
-    conf['train_ebm'] = base_conf['train_ebm'].copy()
+    # conf['model_ebm'] = base_conf['model_ebm'].copy()
+    # conf['train_ebm'] = base_conf['train_ebm'].copy()
 
     # --- Update Configuration from Arguments ---
     # General training params
@@ -87,27 +60,21 @@ def main(args):
     conf['model']['nhid'] = getattr(args, 'gaf_nhid', conf['model']['nhid'])
     conf['model']['nout'] = getattr(args, 'gaf_nout', conf['model']['nout'])
 
-    # CORRECTED handling for optional float/str args to prevent None overwriting defaults
-    if args.deq_coeff is not None:
-        conf['model']['deq_coeff'] = args.deq_coeff
-    if args.st_type is not None:
-        conf['model']['st_type'] = args.st_type
+    # # CORRECTED handling for optional float/str args to prevent None overwriting defaults
+    # if args.deq_coeff is not None:
+    #     conf['model']['deq_coeff'] = args.deq_coeff
+    # if args.st_type is not None:
+    #     conf['model']['st_type'] = args.st_type
 
-    # Ensure node/bond dimensions are set (e.g., from config or defaults)
-    conf['model']['node_dim'] = getattr(aig_config, 'NUM_NODE_FEATURES', 4)
-    conf['model']['bond_dim'] = getattr(aig_config, 'NUM_EDGE_FEATURES', 2) + 1  # +1 for no-edge channel
 
-    # Set flag for GraphDF if applicable
-    if args.model_type == 'GraphDF': conf['model']['use_df'] = True
-
-    # Model-specific params (GraphEBM)
-    conf['model_ebm']['hidden'] = getattr(args, 'ebm_hidden', conf['model_ebm']['hidden'])
-    conf['model_ebm']['depth'] = getattr(args, 'ebm_depth', conf['model_ebm']['depth'])
-    conf['model_ebm']['swish_act'] = getattr(args, 'ebm_swish_act', conf['model_ebm']['swish_act'])
-    conf['model_ebm']['add_self'] = getattr(args, 'ebm_add_self', conf['model_ebm']['add_self'])
-    conf['model_ebm']['dropout'] = getattr(args, 'ebm_dropout', conf['model_ebm']['dropout'])
-    conf['model_ebm']['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations',
-                                                      conf['model_ebm']['n_power_iterations'])
+    # # Model-specific params (GraphEBM)
+    # conf['model_ebm']['hidden'] = getattr(args, 'ebm_hidden', conf['model_ebm']['hidden'])
+    # conf['model_ebm']['depth'] = getattr(args, 'ebm_depth', conf['model_ebm']['depth'])
+    # conf['model_ebm']['swish_act'] = getattr(args, 'ebm_swish_act', conf['model_ebm']['swish_act'])
+    # conf['model_ebm']['add_self'] = getattr(args, 'ebm_add_self', conf['model_ebm']['add_self'])
+    # conf['model_ebm']['dropout'] = getattr(args, 'ebm_dropout', conf['model_ebm']['dropout'])
+    # conf['model_ebm']['n_power_iterations'] = getattr(args, 'ebm_n_power_iterations',
+    #                                                   conf['model_ebm']['n_power_iterations'])
     # EBM Training params
     conf['train_ebm']['c'] = getattr(args, 'ebm_c', conf['train_ebm']['c'])
     conf['train_ebm']['ld_step'] = getattr(args, 'ebm_ld_step', conf['train_ebm']['ld_step'])
@@ -128,31 +95,16 @@ def main(args):
         print("Using CPU.")
     conf['model']['use_gpu'] = (device.type == 'cuda')
 
-    # --- Dataset Loading ---
-    print(f"\nLoading pre-processed dataset from root: {args.data_root}, name: {args.dataset_name}")
-    try:
-        print("Instantiating AIGPreprocessedDatasetLoader for Training...")
-        train_dataset = AIGPreprocessedDatasetLoader(
-            root=args.data_root,
-            dataset_name=args.dataset_name,
-            split="train"
-        )
-        print(f"Total training samples available: {len(train_dataset)}")
-        if len(train_dataset) == 0:
-            raise ValueError("Training dataset is empty after loading. Check paths and file content.")
 
-    except FileNotFoundError as fnf_e:
-        print(f"Error: Pre-processed training file not found. {fnf_e}")
-        print("Please ensure dataset .pt files exist and paths are correct:")
-        print(f"  Expected location structure: {args.data_root}/{args.dataset_name}/processed/train_processed_data.pt")
-        exit(1)
-    except RuntimeError as rt_e:
-        print(f"Error loading training dataset (RuntimeError): {rt_e}")
-        exit(1)
-    except Exception as e:
-        print(f"An unexpected error occurred loading training dataset: {e}")
-        traceback.print_exc()
-        exit(1)
+    # --- Dataset Loading ---
+    print(f"\nLoading pre-processed dataset from root: {args.data_root}")
+    train_dataset = AIGPreprocessedDatasetLoader(
+        root=args.data_root,
+        split="train"
+    )
+
+    if len(train_dataset) == 0:
+        raise ValueError("Training dataset is empty after loading. Check paths and file content.")
 
     train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
     print(f"Created Training DataLoader with batch size {conf['batch_size']}.")
@@ -162,19 +114,16 @@ def main(args):
     runner = None
     if args.model_type == 'GraphDF':
         runner = GraphDF()  # Assuming GraphDF() takes no args or uses conf internally
-    elif args.model_type == 'GraphAF':
-        runner = GraphAF()  # Assuming GraphAF() takes no args or uses conf internally
-    elif args.model_type == 'GraphEBM':
-        try:
-            # Pass EBM specific config and device
-            runner = GraphEBM(n_atom=conf['model']['max_size'],
-                              n_atom_type=conf['model']['node_dim'],
-                              n_edge_type=conf['model']['bond_dim'],
-                              **conf['model_ebm'],
-                              device=device)
-        except Exception as e:
-            print(f"Error instantiating GraphEBM: {e}");
-            exit(1)
+    # elif args.model_type == 'GraphAF':
+    #     runner = GraphAF()  # Assuming GraphAF() takes no args or uses conf internally
+    # elif args.model_type == 'GraphEBM':
+    #     try:
+    #         # Pass EBM specific config and device
+    #         runner = GraphEBM(n_atom=conf['model']['max_size'],
+    #                           n_atom_type=conf['model']['node_dim'],
+    #                           n_edge_type=conf['model']['bond_dim'],
+    #                           **conf['model_ebm'],
+    #                           device=device)
     else:
         print(f"Error: Unknown model type '{args.model_type}'.");
         exit(1)
@@ -183,14 +132,10 @@ def main(args):
         print(f"Failed to instantiate model runner for {args.model_type}");
         exit(1)
 
-    # --- Save Directory Setup ---
-    if args.save_dir:
-        save_dir = args.save_dir
-    else:
-        # Construct default save dir if not provided
-        default_save_dir_base = "outputs"  # Relative to where script is run
-        model_specific_path = f"{args.model_type}/rand_gen_{args.dataset_name}_ckpts"
-        save_dir = osp.join(default_save_dir_base, model_specific_path)
+
+    default_save_dir_base = "./ggraph/checkpoints"  # Relative to where script is run
+    model_specific_path = f"{args.model_type}"
+    save_dir = osp.join(default_save_dir_base, model_specific_path)
 
     # Ensure save_dir is absolute if it was relative, using the CWD
     # Note: If using SBATCH, CWD is usually SLURM_SUBMIT_DIR, so this makes it absolute from there.
@@ -199,14 +144,12 @@ def main(args):
     print(f"Model checkpoints will be saved in: {save_dir}")
 
     # --- Training ---
-    print(f"\n--- Starting Training ({args.model_type} on {args.dataset_name}) ---")
-    print(f"Delegating training loop to runner: {args.model_type}.train_rand_gen")
+    print(f"\n--- Starting Training ({args.model_type}")
     try:
         if args.model_type == 'GraphDF' or args.model_type == 'GraphAF':
             if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
                 f"{args.model_type} runner missing 'train_rand_gen' method.")
             # Pass the relevant parts of the configuration to the training method
-            # *** REMOVED grad_clip_value from this call ***
             runner.train_rand_gen(
                 loader=train_loader,
                 lr=conf['lr'],
@@ -217,25 +160,25 @@ def main(args):
                 save_dir=save_dir
                 # grad_clip_value is NOT passed here
             )
-        elif args.model_type == 'GraphEBM':
-            if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
-                f"{args.model_type} runner missing 'train_rand_gen' method.")
-            # Pass EBM specific training parameters
-            runner.train_rand_gen(
-                loader=train_loader,
-                lr=conf['lr'],
-                wd=conf['weight_decay'],
-                max_epochs=conf['max_epochs'],
-                c=conf['train_ebm']['c'],
-                ld_step=conf['train_ebm']['ld_step'],
-                ld_noise=conf['train_ebm']['ld_noise'],
-                ld_step_size=conf['train_ebm']['ld_step_size'],
-                clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
-                alpha=conf['train_ebm']['alpha'],
-                save_interval=conf['save_interval'],
-                save_dir=save_dir,
-                grad_clip_value=conf['grad_clip_value']  # Correctly passed here
-            )
+        # elif args.model_type == 'GraphEBM':
+        #     if not hasattr(runner, 'train_rand_gen'): raise NotImplementedError(
+        #         f"{args.model_type} runner missing 'train_rand_gen' method.")
+        #     # Pass EBM specific training parameters
+        #     runner.train_rand_gen(
+        #         loader=train_loader,
+        #         lr=conf['lr'],
+        #         wd=conf['weight_decay'],
+        #         max_epochs=conf['max_epochs'],
+        #         c=conf['train_ebm']['c'],
+        #         ld_step=conf['train_ebm']['ld_step'],
+        #         ld_noise=conf['train_ebm']['ld_noise'],
+        #         ld_step_size=conf['train_ebm']['ld_step_size'],
+        #         clamp_lgd_grad=conf['train_ebm']['clamp_lgd_grad'],
+        #         alpha=conf['train_ebm']['alpha'],
+        #         save_interval=conf['save_interval'],
+        #         save_dir=save_dir,
+        #         grad_clip_value=conf['grad_clip_value']  # Correctly passed here
+        #     )
         else:
             print(f"Model type {args.model_type} not recognized for training delegation.");
             exit(1)
@@ -257,12 +200,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train graph generation models (delegated loop, pre-processed data).")
 
     # --- Essential Arguments ---
-    parser.add_argument('--model_type', type=str, required=True, choices=['GraphDF', 'GraphAF', 'GraphEBM'],
+    parser.add_argument('--model_type', type=str, default='GraphDF', choices=['GraphDF', 'GraphAF', 'GraphEBM'],
                         help='Model runner class to use.')
-    parser.add_argument('--data_root', required=True,
+    parser.add_argument('--data_root', default="./ggraph/data/aigs_pyg",
                         help="Root directory containing processed dataset folders (e.g., ./aigs_pyg). This is where 'dataset_name/processed/*.pt' will be expected.")
-    parser.add_argument('--dataset_name', required=True, help="Name of the dataset subfolder (e.g., 'aig_graphs_v1').")
-    parser.add_argument('--edge_unroll', type=int, required=True,
+    parser.add_argument('--edge_unroll', type=int, default=25,
                         help="Edge unroll value (potentially used by model or data interpretation).")
 
     # --- Optional Overrides & Configuration ---
