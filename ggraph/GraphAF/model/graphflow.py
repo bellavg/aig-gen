@@ -146,7 +146,7 @@ class GraphFlowModel(nn.Module):
                     invalid_bond_type_set = set()
 
                     while not valid:
-                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
+                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX+1 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
                             latent_edge = prior_edge_dist.sample().view(1, -1)  # (1, 4)
                             if self.dp:
                                 latent_edge = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
