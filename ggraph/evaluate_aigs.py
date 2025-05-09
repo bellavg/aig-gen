@@ -87,6 +87,11 @@ def get_edge_type_str_from_attrs(attrs: dict) -> str:
 # --- Structural Metrics Calculation (Updated to use new type helpers) ---
 def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     """Calculates structural AIG validity metrics based on assigned types (string or vector)."""
+    if G.number_of_nodes() > 1:
+        isolates = list(nx.isolates(G))
+        if isolates:
+            G.remove_nodes_from(isolates)
+
     metrics = defaultdict(float)
     metrics['num_nodes'] = G.number_of_nodes()
     metrics['constraints_failed'] = []
@@ -598,7 +603,7 @@ if __name__ == "__main__":
                         help="Filename to save the evaluation summary.")
     parser.add_argument('--train_pkl_dir', type=str, default="./data/aigs",
                         help='(Optional) Path to the directory containing training PKL files.')
-    parser.add_argument('--train_pkl_prefix', type=str, default="real_aigs_par_",
+    parser.add_argument('--train_pkl_prefix', type=str, default="real_aigs_part_",
                         help='(Optional) Prefix of the training PKL files.')
     parser.add_argument('--num_train_pkl_files', type=int, default=4,
                         help='(Optional) Number of training PKL files to load.')
