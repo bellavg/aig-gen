@@ -6,6 +6,7 @@ import torch
 import pickle
 import warnings
 
+
 # Assuming GraphDF and GraphAF are in sibling directories or properly installed
 from GraphDF import GraphDF  # Or from ggraph.GraphDF import GraphDF
 from GraphAF import GraphAF  # Or from ggraph.GraphAF import GraphAF
@@ -14,7 +15,7 @@ from GraphAF import GraphAF  # Or from ggraph.GraphAF import GraphAF
 # If GraphEBM is in ggraph/GraphEBM/graphebm.py, and sample_graphs.py is in ggraph/
 from GraphEBM.graphebm import GraphEBM  # Corrected import path assuming graphebm.py contains GraphEBM class
 
-from aig_config import base_conf  # Assuming aig_config.py is in the same directory or accessible
+from aig_config import base_conf, NUM_NODE_FEATURES, NUM_EXPLICIT_EDGE_TYPES  # Assuming aig_config.py is in the same directory or accessible
 from evaluate_aigs import run_standalone_evaluation
 
 
@@ -74,9 +75,9 @@ def main(args):
 
         runner = GraphEBM(
             n_atom=model_config.get("max_node_count", args.max_size),  # MAX_NODE_COUNT
-            n_atom_type_actual=model_config.get("num_node_features"),  # NUM_NODE_FEATURES
-            n_edge_type_actual=model_config.get("num_explicit_edge_types"),  # NUM_EXPLICIT_EDGE_TYPES
-            hidden=model_config.get("hidden_dim", args.nhid),  # Hidden dim for EnergyFunc
+            n_atom_type_actual=NUM_NODE_FEATURES,  # NUM_NODE_FEATURES
+            n_edge_type_actual=NUM_EXPLICIT_EDGE_TYPES,  # NUM_EXPLICIT_EDGE_TYPES
+            hidden=model_config.get("hidden", args.nhid),  # Hidden dim for EnergyFunc
             device=device
         )
         # generation_args for GraphEBM's run_rand_gen:

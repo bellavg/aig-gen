@@ -208,8 +208,6 @@ class GraphFlowModel(nn.Module):
                 final_graph_to_return = None
                 num_nodes = 0
 
-
-
             pure_valid = 1.0 if total_resample == 0 else 0.0
 
             return final_graph_to_return, pure_valid, num_nodes
