@@ -197,12 +197,8 @@ class GraphFlowModel(nn.Module):
             # Fallback: if the loop completed fully (is_continue still true) and `aig` is valid
             elif is_continue and aig.number_of_nodes() >= min_atoms and check_aig_component_minimums(aig):
                 final_graph_to_return = aig
-
-            if final_graph_to_return.number_of_nodes() == 0 and min_atoms > 0:
-                # This can happen if no graph met all criteria (size, connectivity, components)
-                print(
-                    f"Warning: Generated AIG is empty or did not meet all criteria "
-                    f"(nodes: {final_graph_to_return.number_of_nodes()}), but min_nodes was {min_atoms}.")
+            else:
+                final_graph_to_return = None
 
             num_nodes_generated = final_graph_to_return.number_of_nodes()
 
