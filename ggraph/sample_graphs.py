@@ -142,7 +142,7 @@ if __name__ == "__main__":
                         help='Directory to save the generated AIGs (Pickle file). Empty means current directory.')
     parser.add_argument('--output_file', type=str, default="_aigs.pkl",
                         help='Filename for the generated AIGs (Pickle file). Will be prefixed by model name.')
-    parser.add_argument('--num_samples', type=int, default=1000,  # Reduced default for quicker testing
+    parser.add_argument('--num_samples', type=int, default=10,  # Reduced default for quicker testing
                         help='Number of AIG samples to generate.')
 
     # Saving and Evaluating
