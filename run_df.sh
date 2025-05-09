@@ -134,7 +134,7 @@ echo "Conda environment activated."
 # Execute the generation script
 # *** Use --temperature_df for GraphDF ***
 srun python -u sample_df.py \
-    --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/ graphdf_rand_gen_ckpt_epoch_20.pth" \
+    --checkpoint "./GraphDF/rand_gen_aig_ckpts_tuned_v1/graphdf_rand_gen_ckpt_epoch_20.pth" \
     --output_file "./GraphDF/generated_graphs.pkl"
 
 
