@@ -8,8 +8,8 @@
 
 cd ..
 # --- Configuration ---
-CONDA_ENV_NAME="digress_gpu" # CHANGE THIS to your Conda environment name
-PROJECT_ROOT="./Digress" # IMPORTANT: SET THIS!
+CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
+PROJECT_ROOT="./DiGress" # IMPORTANT: SET THIS!
 
 
 echo "Loading modules..."
