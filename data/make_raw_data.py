@@ -11,14 +11,15 @@ from tqdm import tqdm
 import gc
 
 # Attempt to import configuration constants
-
-from aig_config import NUM_NODE_FEATURES,NUM_EDGE_FEATURES
+# User has directly imported, assuming aig_config.py is correct
+from aig_config import NUM_NODE_FEATURES, NUM_EDGE_FEATURES
 
 
 def convert_nx_to_pyg_with_edge_index(
         nx_graph: nx.DiGraph,
         num_node_features: int,
-       NUM_EDGE_FEATURES: int
+        # User changed this parameter name, preserving it
+        NUM_EDGE_FEATURES: int
 ) -> Data | None:
     """
     Converts a NetworkX DiGraph to a PyTorch Geometric Data object.
@@ -26,7 +27,7 @@ def convert_nx_to_pyg_with_edge_index(
     - x: Node features (unpadded).
     - adj: Custom adjacency tensor (N_src, N_tgt, N_edge_types + no_edge_channel).
     - edge_index: Standard PyG edge index (2, Num_edges).
-    - edge_attr: Edge attributes for edge_index (Num_edges,NUM_EDGE_FEATURES).
+    - edge_attr: Edge attributes for edge_index (Num_edges, NUM_EDGE_FEATURES).
     Nodes are ordered topologically.
     Returns None if the graph cannot be processed or has validation issues.
     Will raise an error if topological sort fails (e.g., graph has cycles).
@@ -68,10 +69,10 @@ def convert_nx_to_pyg_with_edge_index(
 
     # --- Custom Adjacency Tensor (adj) ---
     adj_tensor = torch.zeros(
-        (num_nodes_in_graph, num_nodes_in_graph,NUM_EDGE_FEATURES + 1),
+        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES + 1),  # Using user's NUM_EDGE_FEATURES
         dtype=torch.float
     )
-    no_edge_channel_idx =NUM_EDGE_FEATURES
+    no_edge_channel_idx = NUM_EDGE_FEATURES  # Using user's NUM_EDGE_FEATURES
     adj_tensor[:, :, no_edge_channel_idx] = 1.0  # Initialize all as "no edge"
 
     # --- Edge Index and Edge Attributes ---
@@ -83,7 +84,7 @@ def convert_nx_to_pyg_with_edge_index(
         edge_type_vec_raw = edge_attrs.get('type')
         if edge_type_vec_raw is None or \
                 not isinstance(edge_type_vec_raw, (list, np.ndarray)) or \
-                len(edge_type_vec_raw) !=NUM_EDGE_FEATURES:
+                len(edge_type_vec_raw) != NUM_EDGE_FEATURES:  # Using user's NUM_EDGE_FEATURES
             warnings.warn(
                 f"Edge ({u_old}-{v_old}) invalid 'type' attribute. Expected {NUM_EDGE_FEATURES}-len. Skipping graph.")
             return None
@@ -91,14 +92,13 @@ def convert_nx_to_pyg_with_edge_index(
         u_new, v_new = node_id_map.get(u_old), node_id_map.get(v_old)
 
         edge_type_vec = np.asarray(edge_type_vec_raw, dtype=np.float32)
-        if not (np.isclose(np.sum(edge_type_vec), 1.0) and \
-                np.all((np.isclose(edge_type_vec, 0.0)) | (np.isclose(edge_type_vec, 1.0)))):
+        if not (np.isclose(np.sum(edge_type_vec), 1.0) and np.all((np.isclose(edge_type_vec, 0.0)) | (np.isclose(edge_type_vec, 1.0)))):
             warnings.warn(
                 f"Edge ({u_old}-{v_old}) 'type' vector not one-hot. Sum: {np.sum(edge_type_vec)}. Values: {edge_type_vec}. Skipping graph.")
             return None
 
         edge_channel_index = np.argmax(edge_type_vec).item()
-        if not (0 <= edge_channel_index <NUM_EDGE_FEATURES):
+        if not (0 <= edge_channel_index < NUM_EDGE_FEATURES):  # Using user's NUM_EDGE_FEATURES
             warnings.warn(
                 f"Edge ({u_old}-{v_old}) 'type' vector resulted in invalid channel index: {edge_channel_index}. Max is {NUM_EDGE_FEATURES - 1}. Skipping graph.")
             return None
@@ -115,10 +115,10 @@ def convert_nx_to_pyg_with_edge_index(
     edge_index_tensor = torch.tensor([edge_index_sources, edge_index_targets], dtype=torch.long)
 
     if edge_attributes_list:
-        edge_attr_tensor = torch.stack(edge_attributes_list)  # Shape: (Num_edges,NUM_EDGE_FEATURES)
+        edge_attr_tensor = torch.stack(edge_attributes_list)  # Shape: (Num_edges, NUM_EDGE_FEATURES)
     else:
         # If there are no edges, create an empty tensor with the correct feature dimension
-        edge_attr_tensor = torch.empty((0,NUM_EDGE_FEATURES), dtype=torch.float)
+        edge_attr_tensor = torch.empty((0, NUM_EDGE_FEATURES), dtype=torch.float)  # Using user's NUM_EDGE_FEATURES
 
     # Create PyG Data object
     pyg_data = Data(
@@ -129,6 +129,10 @@ def convert_nx_to_pyg_with_edge_index(
         num_nodes=torch.tensor(num_nodes_in_graph, dtype=torch.long)
     )
 
+    # Add optional graph-level attributes
+    if 'inputs' in nx_graph.graph: pyg_data.num_inputs = torch.tensor(nx_graph.graph['inputs'], dtype=torch.long)
+    if 'outputs' in nx_graph.graph: pyg_data.num_outputs = torch.tensor(nx_graph.graph['outputs'], dtype=torch.long)
+    if 'gates' in nx_graph.graph: pyg_data.num_gates = torch.tensor(nx_graph.graph['gates'], dtype=torch.long)
 
     return pyg_data
 
@@ -146,16 +150,17 @@ if __name__ == "__main__":
     ]
 
     # Define the output directory for the processed .pt files
-    output_pyg_dir = "./data/pyg_full"  # Changed directory name
-    intermediate_file_suffix = "_pyg_full.pt"  # Changed suffix
-    combined_output_filename = "all_graphs_combined_pyg_full.pt"  # Changed combined name
+    output_pyg_dir = "./data/pyg_full"
+    intermediate_file_suffix = "_pyg_full.pt"
+    combined_output_filename = "all_graphs_pyg.pt"  # User's changed combined name
     # --- End Configuration ---
 
     os.makedirs(output_pyg_dir, exist_ok=True)
 
     print(f"--- AIG to Full PyG Conversion (adj, edge_index, edge_attr) ---")
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
-    print(f"UsingNUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
+    # Using user's NUM_EDGE_FEATURES in print statement
+    print(f"Using NUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
 
     total_files_processed = 0
@@ -191,7 +196,7 @@ if __name__ == "__main__":
             pyg_data_item = convert_nx_to_pyg_with_edge_index(
                 nx_graph,
                 NUM_NODE_FEATURES,
-               NUM_EDGE_FEATURES
+                NUM_EDGE_FEATURES  # Using user's NUM_EDGE_FEATURES
             )
 
             if pyg_data_item is not None:
@@ -233,7 +238,10 @@ if __name__ == "__main__":
 
         for pt_file_path in tqdm(successfully_saved_intermediate_pt_files, desc="Loading intermediate .pt files",
                                  unit="file"):
-            intermediate_list = torch.load(pt_file_path)
+            # **FIX APPLIED HERE**
+            intermediate_list = torch.load(pt_file_path, weights_only=False)
+            # Set weights_only=False to allow unpickling of arbitrary objects like PyG Data
+
             all_pyg_data_objects_combined.extend(intermediate_list)
 
             for data_obj in intermediate_list:
