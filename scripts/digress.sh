@@ -8,7 +8,7 @@
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
 
-
+export HYDRA_FULL_ERROR=1
 cd ..
 # --- Configuration ---
 CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
@@ -39,7 +39,7 @@ echo "----------------------------------------"
 srun python -u DiGress/src/main.py \
     +experiment=aig.yaml \
     dataset=aig \
-    +general.abs_path_to_project_root="${PROJECT_ROOT}" \
+    +general.abs_path_to_project_root=. \
     # Add any other specific Hydra overrides here if needed, e.g.:
     # general.resume=outputs/YYYY-MM-DD/HH-MM-SS-aig_resume/checkpoints/last-epoch=XXXX.ckpt
     # train.n_epochs=6000 # To override the config file value
