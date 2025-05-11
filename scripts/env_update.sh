@@ -22,5 +22,7 @@ source activate "${CONDA_ENV_NAME}"
 
 conda install conda-forge::graph-tool
 
+pip install -r DiGress/requirements.txt
+
 # Deactivate conda environment
 conda deactivate
