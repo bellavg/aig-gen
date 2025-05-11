@@ -486,6 +486,26 @@ def main(args):
     set_seed(args.seed)
 
     config = load_yaml(args.config_file)
+    # --- DEBUGGING PRINTS START ---
+    print("--- Debugging Config ---")
+    if config is None:
+        print("ERROR: Config is None. YAML file might not have been loaded correctly.")
+        exit(1) # Exit if config is None
+    print(f"Full config object type: {type(config)}")
+    print(f"Full config content: {config}")
+    if 'general' in config:
+        print(f"config['general'] type: {type(config['general'])}")
+        print(f"config['general'] content: {config['general']}")
+        print(f"Keys in config['general']: {config['general'].keys()}")
+    else:
+        print("ERROR: 'general' key not found in config.")
+        print("This is likely the cause of the KeyError.")
+        # You might want to exit or handle this case,
+        # but for now, let it proceed to hit the original error
+        # if 'general' is truly missing, to keep the error consistent.
+    print("--- End Debugging Config ---")
+    # --- DEBUGGING PRINTS END ---
+
     dataset_name = config['general']['dataset']
     config_df = pd.json_normalize(config, sep='/')  # For wandb logging
 
@@ -504,6 +524,7 @@ def main(args):
     # Prepare arguments for load_dataset
     load_dataset_kwargs = {'conditional': is_conditional}
     if dataset_name == 'aig':
+        # This is where the error occurs if 'path_to_pt_file' is not in config['general']
         load_dataset_kwargs['path'] = config['general']['path_to_pt_file']
         load_dataset_kwargs['num_node_categories'] = config['general']['num_node_categories']
     elif dataset_name == 'tpu_tile':
