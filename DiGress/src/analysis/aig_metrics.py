@@ -4,6 +4,7 @@ import networkx as nx
 from tqdm import tqdm
 import wandb # If you use wandb
 import numpy as np # For the conversion functions
+from typing import Union
 
 # DiGress existing utilities
 from src.analysis.spectre_utils import SpectreSamplingMetrics, degree_stats, \
@@ -28,7 +29,7 @@ from src.datasets.aig_custom_dataset import convert_pyg_to_nx_for_aig_validation
 def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
                                        edge_index_tensor: torch.Tensor,
                                        edge_features_tensor: torch.Tensor,
-                                       num_nodes_int: int) -> nx.DiGraph | None:
+                                       num_nodes_int: int) -> Union[nx.DiGraph, None]:
     """
     Converts raw model output tensors (node features, edge index, edge features, num_nodes)
     to a NetworkX DiGraph, applying AIG-specific type decoding.

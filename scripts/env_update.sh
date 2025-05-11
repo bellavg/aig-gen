@@ -19,6 +19,7 @@ echo "Modules loaded."
 source activate digress
 pip install torch_geometric
 pip install pytorch_lightning
+
 #echo "Installing other dependencies into 'digress' environment..."
 #echo "Installing other dependencies into 'digress' environment (attempt 2)..."
 #conda install \
