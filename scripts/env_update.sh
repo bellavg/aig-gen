@@ -19,7 +19,7 @@ module load Anaconda3/2024.06-1 # Or your Anaconda module
 echo "Modules loaded."
 
 
-conda create -c conda-forge -n digress rdkit=2023.03.2 python=3.9
+#conda create -c conda-forge -n digress rdkit=2023.03.2 python=3.9
 
 conda activate digress
 
@@ -27,7 +27,9 @@ conda install -c conda-forge graph-tool=2.45
 
 conda install -c "nvidia/label/cuda-11.8.0" cuda
 
-pip3 install torch==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch==2.2.1 --index-url https://download.pytorch.org/whl/cu118
+
+cd Digress
 
 pip install -r requirements.txt
 
