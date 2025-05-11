@@ -31,6 +31,17 @@ if [ $? -ne 0 ]; then
 fi
 echo "Conda environment activated."
 
+# Install torchdata if missing
+echo "Checking and installing torchdata if necessary..."
+pip install torchdata
+if [ $? -ne 0 ]; then
+    echo "Failed to install torchdata."
+    # Optionally, you might want to exit here if torchdata is critical and fails to install
+    # exit 1
+fi
+echo "torchdata check/install complete."
+
+
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
 
