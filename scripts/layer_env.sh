@@ -13,6 +13,7 @@ module load 2024 # Or your specific Anaconda3/XXXX module that might include Pyt
 # module load cuda/12.1     # We are now assuming 'module load 2024' handles this.
                            # Commented out based on your observation.
 echo "Modules loaded."
+cd ..
 
 # --- Project and uv Setup ---
 # (Ensure uv is accessible in your PATH as discussed before)
