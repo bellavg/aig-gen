@@ -9,7 +9,7 @@
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
 
 export HYDRA_FULL_ERROR=1
-cd ..
+
 # --- Configuration ---
 CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
 PROJECT_ROOT="./DiGress" # IMPORTANT: SET THIS!
@@ -31,7 +31,6 @@ echo "========================================"
 echo "Starting DiGress AIG Training"
 echo "========================================"
 echo "Running command:"
-echo "srun python -u src/main.py experiment=aig dataset=aig general.abs_path_to_project_root=${PROJECT_ROOT}"
 echo "----------------------------------------"
 
 # Execute the training script
