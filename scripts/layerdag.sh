@@ -19,7 +19,6 @@ module purge
 echo "Loading modules..."
 module load 2024 # Or your specific module environment
 module load Anaconda3/2024.06-1 # Or your Anaconda module
-module load CUDA/11.6.0
 echo "Modules loaded."
 
 # --- Activate Existing Conda Environment ---
