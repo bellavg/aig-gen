@@ -338,26 +338,4 @@ class AIGCustomDatasetInfos(AbstractDatasetInfos):
         print(f"  Edge type distribution size: {self.edge_types.size(0) if self.edge_types is not None else 'N/A'}")
 
 
-# --- Example Hydra Configuration (configs/dataset/aig_custom_ordered.yaml) ---
-# name: my_aig_dataset_ordered_split
-# datadir: data_cache/aig_processed
 #
-# datadir_for_all_raw: data/pyg_full
-# all_raw_graphs_filename: all_graphs_combined_pyg_full.pt
-#
-# force_resplit_raw: False
-#
-# _target_: src.datasets.aig_custom_dataset.AIGCustomDataModule
-#
-# dataset_infos_target_class: src.datasets.aig_custom_dataset.AIGCustomDatasetInfos
-#
-# extra_features: null
-# domain_features: null
-#
-# batch_size: 32
-# num_workers: 0
-# pin_memory: False
-#
-# # general: (This should be in your main experiment config e.g., configs/experiment/my_aig_exp.yaml)
-# #   abs_path_to_project_root: /path/to/your/DiGress_project
-
