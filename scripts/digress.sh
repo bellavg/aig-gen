@@ -32,7 +32,7 @@ echo "----------------------------------------"
 
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
-srun python -u Digress/src/main.py \
+srun python -u DiGress/src/main.py \
     experiment=aig \
     dataset=aig \
     general.abs_path_to_project_root="${PROJECT_ROOT}" \
