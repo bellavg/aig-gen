@@ -243,6 +243,23 @@ class AIGCustomDataModule(AbstractDataModule):
         path_to_combined_raw_dir = base_path / cfg.dataset.datadir_for_all_raw
         combined_raw_filename = cfg.dataset.all_raw_graphs_filename
         path_to_combined_raw_file = path_to_combined_raw_dir / combined_raw_filename
+        import os
+        # This is the path string that your error message says it's looking for
+        relative_path_in_error = "data/pyg_full/all_graphs_pyg.pt"
+
+        # Let's see what the CWD is
+        script_cwd = os.getcwd()
+        print(f"DEBUG: Script's Current Working Directory is: {script_cwd}")
+
+        # Let's see what the absolute path being tried is
+        # The variable path_to_combined_raw_file holds the relative path.
+        # Let's assume its value is exactly what the error shows.
+        # When open() or similar functions get a relative path, they resolve it against CWD.
+        absolute_path_being_attempted = os.path.abspath(
+            relative_path_in_error)  # or os.path.abspath(path_to_combined_raw_file)
+        print(f"DEBUG: Absolute path being attempted by script: {absolute_path_being_attempted}")
+        print(f"DEBUG: Does this absolute path exist? {os.path.exists(absolute_path_being_attempted)}")
+        print(f"DEBUG: Is it a file? {os.path.isfile(absolute_path_being_attempted)}")
 
         intermediate_splits_raw_dir = dataset_instance_root / "raw"
         final_processed_dir = dataset_instance_root / "processed"
