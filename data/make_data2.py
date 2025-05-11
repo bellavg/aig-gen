@@ -12,13 +12,13 @@ import gc
 
 # Attempt to import config, though not strictly needed by the main combiner logic
 # It's good practice if convert_nx_to_custom_pyg is kept as a utility
-from aig_config import NUM_NODE_FEATURES, NUM_EXPLICIT_EDGE_TYPES
+from aig_config import NUM_NODE_FEATURES, NUM_EDGE_FEATURES
 
 
 def convert_nx_to_custom_pyg(
         nx_graph: nx.DiGraph,
         num_node_features: int,
-        num_explicit_edge_types: int
+        NUM_EDGE_FEATURES: int
 ) -> Data | None:
     """
     Converts a NetworkX DiGraph to a PyTorch Geometric Data object with
@@ -61,18 +61,18 @@ def convert_nx_to_custom_pyg(
     x_tensor = torch.stack(node_features_list)
 
     adj_tensor = torch.zeros(
-        (num_nodes_in_graph, num_nodes_in_graph, num_explicit_edge_types + 1),
+        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES + 1),
         dtype=torch.float
     )
-    no_edge_channel_idx = num_explicit_edge_types
+    no_edge_channel_idx = NUM_EDGE_FEATURES
     adj_tensor[:, :, no_edge_channel_idx] = 1.0
 
     for u_old, v_old, edge_attrs in nx_graph.edges(data=True):
         edge_type_vec_raw = edge_attrs.get('type')
         if edge_type_vec_raw is None or \
                 not isinstance(edge_type_vec_raw, (list, np.ndarray)) or \
-                len(edge_type_vec_raw) != num_explicit_edge_types:
-            warnings.warn(f"Edge ({u_old}-{v_old}) invalid 'type'. Expected {num_explicit_edge_types}-len. Skipping.")
+                len(edge_type_vec_raw) != NUM_EDGE_FEATURES:
+            warnings.warn(f"Edge ({u_old}-{v_old}) invalid 'type'. Expected {NUM_EDGE_FEATURES}-len. Skipping.")
             return None
         u_new, v_new = node_id_map.get(u_old), node_id_map.get(v_old)
         edge_type_vec = np.asarray(edge_type_vec_raw, dtype=np.float32)
@@ -81,7 +81,7 @@ def convert_nx_to_custom_pyg(
             warnings.warn(f"Edge ({u_old}-{v_old}) 'type' not one-hot. Skipping.")
             return None
         edge_channel_index = np.argmax(edge_type_vec).item()
-        if not (0 <= edge_channel_index < num_explicit_edge_types):
+        if not (0 <= edge_channel_index < NUM_EDGE_FEATURES):
             warnings.warn(f"Edge ({u_old}-{v_old}) invalid channel index. Skipping.")
             return None
         adj_tensor[u_new, v_new, edge_channel_index] = 1.0
