@@ -1,0 +1,58 @@
+general:
+  dataset: aig  # Changed from tpu_tile
+  path_to_pt_file: "./data/pyg_full/all_graphs_pyg.pt" # Path to your combined AIG .pt file
+  num_node_categories: 4 # From your aig_config.py (NUM_NODE_FEATURES)
+  conditional: false # Set to false for unconditional random generation
+  patience: 10
+
+node_count:
+  loader:
+    batch_size: 128
+    num_workers: 4
+  model:
+    x_n_emb_size: 64
+    y_emb_size: 256  # May be unused if conditional is false
+    num_mpnn_layers: 3
+    pool: 'sum'
+  num_epochs: 500
+  optimizer:
+    lr: 0.0003
+    amsgrad: true
+
+node_pred:
+  T: 64 # Number of diffusion timesteps for node attributes
+  loader:
+    batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
+    num_workers: 4
+  num_epochs: 700
+  graph_encoder:
+    x_n_emb_size: 512
+    y_emb_size: 512  # May be unused if conditional is false
+    num_mpnn_layers: 2
+    pool: 'sum'
+  predictor:
+    t_emb_size: 256  # Embedding size for diffusion timestep t
+    out_hidden_size: 512
+    num_transformer_layers: 1
+    num_heads: 4
+    dropout: 0
+  optimizer:
+    lr: 0.0003
+    amsgrad: true
+
+edge_pred:
+  T: 16 # Number of diffusion timesteps for edges
+  loader:
+    batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
+    num_workers: 4
+  num_epochs: 1000
+  graph_encoder:
+    x_n_emb_size: 256
+    y_emb_size: 64   # May be unused if conditional is false
+    num_mpnn_layers: 4
+  predictor:
+    t_emb_size: 256  # Embedding size for diffusion timestep t
+    out_hidden_size: 320
+  optimizer:
+    lr: 0.0003
+    amsgrad: true
