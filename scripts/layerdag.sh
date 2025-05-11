@@ -38,7 +38,7 @@ echo "Loading modules..."
 module load 2024
 module load Anaconda3/2024.06-1
 # ** VERIFY AND CHANGE 'cuda/12.1' TO THE EXACT MODULE NAME ON YOUR CLUSTER **
-module load cuda/12.1
+
 echo "Modules loaded."
 echo "LD_LIBRARY_PATH after module loads: ${LD_LIBRARY_PATH}"
 
