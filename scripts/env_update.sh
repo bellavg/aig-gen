@@ -17,12 +17,13 @@ module load 2024 # Or your specific module environment
 module load Anaconda3/2024.06-1 # Or your Anaconda module
 echo "Modules loaded."
 
-echo "Activating conda environment: ${CONDA_ENV_NAME}..."
-source activate "${CONDA_ENV_NAME}"
 
-conda install conda-forge::graph-tool
-
-pip install -r DiGress/requirements.txt
+conda activate g2pt-aig
+conda uninstall graph-tool pytorch # Or just one at a time to see
+conda install -c conda-forge graph-tool
+# Then install PyTorch, specifying your CUDA version if needed
+# Check the PyTorch website for the latest recommended command
+conda install pytorch torchvision torchaudio pytorch-cuda=11.X -c pytorch -c nvidia
 
 # Deactivate conda environment
 conda deactivate
