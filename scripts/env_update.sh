@@ -18,7 +18,9 @@ module load Anaconda3/2024.06-1 # Or your Anaconda module
 echo "Modules loaded."
 
 
-conda activate g2pt-aig
+source activate g2pt-aig
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 conda uninstall graph-tool pytorch # Or just one at a time to see
 conda install -c conda-forge graph-tool
 # Then install PyTorch, specifying your CUDA version if needed
