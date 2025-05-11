@@ -82,7 +82,7 @@ echo "----------------------------------------"
 # Execute the LayerDAG training script
 # The -u flag is for unbuffered Python output, good for logs
 srun python -u LayerDAG/train.py \
-    --config_file LayerDAG/configs/LayerDAG/aig.yaml \
+    --config_file LayerDAG/configs/LayerDAG/aig.yaml
     # You can add other arguments for train.py here if needed, e.g.:
     # --num_threads 16 \
     # --seed 42
