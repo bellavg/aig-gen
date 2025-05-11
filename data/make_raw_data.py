@@ -12,7 +12,7 @@ import gc
 
 # Directly import from aig_config.py.
 # If this file is missing or variables are not defined, the script will raise an error.
-from aig_config import NUM_NODE_FEATURES, NUM_EXPLICIT_EDGE_TYPES
+from aig_config import NUM_NODE_FEATURES, NUM_EDGE_FEATURES
 
 
 def convert_nx_to_custom_pyg(
