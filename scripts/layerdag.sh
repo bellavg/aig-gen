@@ -15,10 +15,11 @@ cd ..
 CONDA_ENV_NAME="LayerDAG" # Name of your existing Conda environment
 
 echo "Current working directory: $(pwd)"
-
+module purge
 echo "Loading modules..."
 module load 2024 # Or your specific module environment
 module load Anaconda3/2024.06-1 # Or your Anaconda module
+module load CUDA/11.6.0
 echo "Modules loaded."
 
 # --- Activate Existing Conda Environment ---
@@ -32,7 +33,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 echo "Conda environment ${CONDA_ENV_NAME} activated."
-
+export LD_LIBRARY_PATH=/home/igardner1/.conda/envs/LayerDAG/lib:$LD_LIBRARY_PATH
 ## --- Set LD_LIBRARY_PATH ---
 ## Get the absolute path to the Conda environment
 ## CONDA_PREFIX is set when an environment is activated
