@@ -33,7 +33,7 @@ echo "----------------------------------------"
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 srun python -u DiGress/src/main.py \
-    experiment=aig \
+    +experiment=aig.yaml \
     dataset=aig \
     general.abs_path_to_project_root="${PROJECT_ROOT}" \
     # Add any other specific Hydra overrides here if needed, e.g.:
