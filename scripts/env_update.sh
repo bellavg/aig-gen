@@ -19,15 +19,33 @@ echo "Modules loaded."
 source activate digress
 
 echo "Installing other dependencies into 'digress' environment..."
-conda install hydra-core imageio matplotlib networkx numpy omegaconf overrides pandas pyemd pygsp pytorch_lightning scipy setuptools torch_geometric torchmetrics tqdm wandb -c conda-forge -y
+echo "Installing other dependencies into 'digress' environment (attempt 2)..."
+conda install \
+    hydra-core \
+    imageio \
+    matplotlib \
+    networkx \
+    numpy \
+    omegaconf \
+    overrides \
+    pandas \
+    pyemd \
+    pygsp \
+    pytorch_lightning \
+    scipy \
+    setuptools \
+    pytorch-geometric \
+    torchmetrics \
+    tqdm \
+    wandb \
+    -c conda-forge -y
 
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to install one or more of the 'other dependencies'. Please check the output above."
-    # Optionally, you can exit if this is part of a script:
-    # exit 1
+    echo "ERROR: Failed to install one or more of the 'other dependencies' with corrected names. Please check the output above."
 else
-    echo "Successfully installed 'other dependencies'."
+    echo "Successfully installed 'other dependencies' (or updated existing ones)."
 fi
+
 # 5. Configure channel priorities
 # Order of addition matters: conda-forge -> pytorch -> nvidia will result in
 # nvidia (top), pytorch, conda-forge in the list.
