@@ -21,7 +21,7 @@ echo "Modules loaded."
 
 #conda create -c conda-forge -n digress rdkit=2023.03.2 python=3.9
 
-conda activate digress
+source activate digress
 
 conda install -c conda-forge graph-tool=2.45
 
