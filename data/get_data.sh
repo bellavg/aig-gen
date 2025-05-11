@@ -23,7 +23,7 @@ echo "Conda environment activated."
 
 
 # Execute the processing script
-srun python -u make_data2.py
+srun python -u make_raw_data.py
 
 # Deactivate environment (optional)
 # conda deactivate
