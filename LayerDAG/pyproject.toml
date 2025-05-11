@@ -1,0 +1,57 @@
+[build-system]
+requires = ["uv >= 0.1.0"]
+build-backend = "uv"
+backend-path = ["."]
+
+[project]
+name = "LayerDAG"
+version = "0.1.0"
+description = "LayerDAG: A Layerwise Autoregressive Diffusion Model for Directed Acyclic Graph Generation"
+authors = [
+    { name = "Mufei Li" },
+    { name = "Viraj Shitole" },
+    { name = "Eli Chien" },
+    { name = "Changhai Man" },
+    { name = "Zhaodong Wang" },
+    { name = "Srinivas Sridharan" },
+    { name = "Ying Zhang" },
+    { name = "Tushar Krishna" },
+    { name = "Pan Li" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" } # Or specify an open-source license if applicable
+
+dependencies = [
+    "torch>=1.12.0",        # Standard PyPI version (CPU or uses existing CUDA)
+    "dgl>=1.1.0",           # Standard PyPI version (CPU or uses existing CUDA)
+    "tqdm>=4.0.0",
+    "einops>=0.3.0",
+    "wandb",
+    "pydantic>=1.8.0,<3.0.0", # Compatible with Pydantic v1/v2 logic in setup_utils.py
+    "pandas>=1.0.0",
+    "numpy~=1.26.3",        # From README
+    "PyYAML>=5.0.0",
+    "scipy>=1.0.0",
+    "dglsparse",            # dgl.sparse is used
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+"Homepage" = "https://arxiv.org/abs/2411.02322"
+"Repository" = "https://github.com/example/LayerDAG" # Placeholder, replace with actual repo URL if available
+
+[project.scripts]
+layerdag-train = "train:main"
+layerdag-sample = "sample:main"
+
+# UV specific tool configuration (optional)
+# [tool.uv]
+# ...

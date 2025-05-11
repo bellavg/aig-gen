@@ -17,28 +17,29 @@ module load Anaconda3/2024.06-1 # Or your Anaconda module
 echo "Modules loaded."
 
 source activate digress
-
-echo "Installing other dependencies into 'digress' environment..."
-echo "Installing other dependencies into 'digress' environment (attempt 2)..."
-conda install \
-    hydra-core \
-    imageio \
-    matplotlib \
-    networkx \
-    numpy \
-    omegaconf \
-    overrides \
-    pandas \
-    pyemd \
-    pygsp \
-    pytorch_lightning \
-    scipy \
-    setuptools \
-    pytorch-geometric \
-    torchmetrics \
-    tqdm \
-    wandb \
-    -c conda-forge -y
+pip install torch_geometric
+pip install pytorch_lightning
+#echo "Installing other dependencies into 'digress' environment..."
+#echo "Installing other dependencies into 'digress' environment (attempt 2)..."
+#conda install \
+#    hydra-core \
+#    imageio \
+#    matplotlib \
+#    networkx \
+#    numpy \
+#    omegaconf \
+#    overrides \
+#    pandas \
+#    pyemd \
+#    pygsp \
+#    pytorch_lightning \
+#    scipy \
+#    setuptools \
+#    pytorch-geometric \
+#    torchmetrics \
+#    tqdm \
+#    wandb \
+#    -c conda-forge -y
 
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install one or more of the 'other dependencies' with corrected names. Please check the output above."
