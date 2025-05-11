@@ -108,7 +108,7 @@ if __name__ == "__main__":
     ]
 
     # Directory where intermediate .pt files are expected to be, and where the combined file will be saved.
-    processed_data_dir = "./data/raw_pyg"  # Make sure this matches where your .pt files are
+    processed_data_dir = "./raw_pyg"  # Make sure this matches where your .pt files are
 
     # Suffix used for the intermediate processed files
     intermediate_file_suffix = "_raw_pyg_topo.pt"
