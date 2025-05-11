@@ -23,7 +23,7 @@ from src.aig_config import (
     check_validity  # Your AIG validity function
 )
 
-
+from typing import Union
 
 
 
@@ -32,7 +32,7 @@ from src.aig_config import (
 # It's included here for completeness if this script is run standalone,
 # or it could be imported if it's in a separate utility file.
 
-def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> nx.DiGraph | None:
+def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, None]:
     """
     Converts a PyTorch Geometric Data object back to a NetworkX DiGraph,
     setting node and edge 'type' attributes as strings based on NODE_TYPE_KEYS
