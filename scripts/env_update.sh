@@ -6,7 +6,7 @@
 #SBATCH --output=../slurm_logs/digress_env_%j.out
 
 cd ..
-cd Digress
+cd DiGress
 
 # --- Configuration ---
 CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
@@ -29,7 +29,6 @@ conda install -c "nvidia/label/cuda-11.8.0" cuda
 
 pip3 install torch==2.2.1 --index-url https://download.pytorch.org/whl/cu118
 
-cd Digress
 
 pip install -r requirements.txt
 
