@@ -85,7 +85,7 @@ def convert_nx_to_pyg_with_edge_index(
                 not isinstance(edge_type_vec_raw, (list, np.ndarray)) or \
                 len(edge_type_vec_raw) !=NUM_EDGE_FEATURES:
             warnings.warn(
-                f"Edge ({u_old}-{v_old}) invalid 'type' attribute. Expected {num_explicit_edge_types}-len. Skipping graph.")
+                f"Edge ({u_old}-{v_old}) invalid 'type' attribute. Expected {NUM_EDGE_FEATURES}-len. Skipping graph.")
             return None
 
         u_new, v_new = node_id_map.get(u_old), node_id_map.get(v_old)
@@ -100,7 +100,7 @@ def convert_nx_to_pyg_with_edge_index(
         edge_channel_index = np.argmax(edge_type_vec).item()
         if not (0 <= edge_channel_index <NUM_EDGE_FEATURES):
             warnings.warn(
-                f"Edge ({u_old}-{v_old}) 'type' vector resulted in invalid channel index: {edge_channel_index}. Max is {num_explicit_edge_types - 1}. Skipping graph.")
+                f"Edge ({u_old}-{v_old}) 'type' vector resulted in invalid channel index: {edge_channel_index}. Max is {NUM_EDGE_FEATURES - 1}. Skipping graph.")
             return None
 
         # Populate custom adj tensor
@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
     print(f"--- AIG to Full PyG Conversion (adj, edge_index, edge_attr) ---")
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
-    print(f"UsingNUM_EDGE_FEATURES = {NUM_EXPLICIT_EDGE_TYPES} (for edge_attr and adj channels)")
+    print(f"UsingNUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
 
     total_files_processed = 0
