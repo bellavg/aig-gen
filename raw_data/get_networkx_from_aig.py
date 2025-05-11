@@ -84,7 +84,7 @@ logger = logging.getLogger("aig_dataset_generator")
 
 # --- Path configuration ---
 # !! IMPORTANT !! Using the absolute path provided by the user.
-INPUT_PATH = "/Users/bellavg/aig-gen/data/raw_aigs/"
+INPUT_PATH = "/raw_data/raw_aigs/"
 # Define base output file name and directory
 OUTPUT_FILENAME_BASE = "real_aigs" # Base name for chunked files and stats file
 # Save output files and stats file in the same directory as the input AIGs
