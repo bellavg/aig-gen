@@ -9,7 +9,7 @@ cd ..
 cd DiGress
 
 # --- Configuration ---
-CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
+ENV_NAME="digress" # CHANGE THIS to your Conda environment name
 
 
 
@@ -46,6 +46,15 @@ echo "Installing PyTorch and CUDA toolkit..."
 conda install pytorch torchvision torchaudio pytorch-cuda -y
 # The -c pytorch and -c nvidia flags should not be needed here if channels are configured as above.
 # Conda will use the channel priority.
+
+# 5. Configure Conda to use the classic solver for this environment
+echo -e "\n[Step 5/9] Setting Conda solver to 'classic' for '$ENV_NAME'..."
+conda config --env --set solver classic
+if [ $? -ne 0 ]; then
+    echo "WARNING: Failed to set solver to classic. Proceeding with default solver."
+fi
+echo "Solver configuration complete."
+conda config --show solver # Display solver for verification
 
 # 5. Install other dependencies from your requirements.txt
 # Preferably using Conda from conda-forge where possible.
