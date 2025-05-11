@@ -1,0 +1,82 @@
+# configs/experiment/aig.yaml
+# This configuration is for your AIG experiment.
+# It will be combined by Hydra with:
+# - configs/general/general_default.yaml
+# - configs/train/train_default.yaml
+# - configs/model/discrete.yaml
+# - configs/dataset/aig.yaml (as specified by dataset=aig)
+#
+# Command to run:
+# python src/main.py experiment=aig dataset=aig general.abs_path_to_project_root=/path/to/your/DiGress_project
+
+general:
+  name: 'aig' # Override default 'graph-tf-model' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
+  # wandb: 'online' # Default is 'online' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
+  # gpus: 1 # Default is 1 from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
+
+  # --- USER MUST SET THIS ---
+  abs_path_to_project_root: "./Digress" # Or provide via command line.
+
+  # resume: null # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
+  # test_only: null # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
+
+  # --- Settings for intermediate validation and sampling ---
+  check_val_every_n_epochs: 25      # Override default 5 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. For 5000 epochs, this is 200 validations.
+  # sample_every_val: 4              # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
+  # samples_to_generate: 512         # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. (For intermediate validation)
+  # samples_to_save: 20              # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. (Visualized from intermediate validation)
+  # chains_to_save: 1                # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. (Visualized from intermediate validation)
+
+  # --- Settings for final model sampling (after training) ---
+  final_model_samples_to_generate: 1000 # User requirement. Overrides default 10000 from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml].
+  final_model_samples_to_save: 50       # Number of the 1000 to visualize directly by framework. Default is 30 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. All 1000 are typically saved programmatically.
+  # final_model_chains_to_save: 20      # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml].
+
+train:
+  # n_epochs: 1000 # Default from train_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/train/train_default.yaml].
+  n_epochs: 5000 # Practical override: Default 1000 epochs is often too short for good graph generation.
+
+  batch_size: 64 # User preference. Overrides default 512 from train_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/train/train_default.yaml].
+
+  save_model: True # Explicitly stated, though it's the default from train_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/train/train_default.yaml].
+
+  # lr: 0.0002 # Default from train_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/train/train_default.yaml], no override needed.
+  # All other train parameters like weight_decay, optimizer, seed, etc.,
+  # will be taken from configs/train/train_default.yaml.
+
+model:
+  # type: 'discrete' # Default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+  # model: 'graph_tf' # Default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+  # diffusion_noise_schedule: 'cosine' # Default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+
+  diffusion_steps: 1000 # Override default 500 from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+                        # 1000 steps is more common in diffusion literature and the DiGress paper for better results.
+
+  n_layers: 8 # Override default 5 from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+              # For graphs up to 64 nodes, 5 layers might be shallow. 8 is a modest, common increase.
+
+  extra_features: null # Override default 'all' from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+                       # Your AIG dataset processing does not produce these specific "extra features".
+
+  # hidden_mlp_dims: Default is {'X': 256, 'E': 128, 'y': 128} from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+  # Only 'y' is overridden due to AIG data having y_dim=0. X and E take defaults.
+  hidden_mlp_dims:
+    'y': 0   # Essential override. Default is 128 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+    # 'X': 256 # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+    # 'E': 128 # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+
+  # hidden_dims: Default is {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128} from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+  # Only 'dy' and 'dim_ffy' are overridden due to y_dim=0. Others take defaults.
+  hidden_dims:
+    'dy': 0         # Essential override. Default is 64 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+    'dim_ffy': 0    # Essential override. Default is 128 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
+    # 'dx': 256       # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+    # 'de': 64        # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+    # 'n_head': 8     # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+    # 'dim_ffX': 256  # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+    # 'dim_ffE': 128  # Takes default from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]
+
+  # The default lambda_train: [5, 0] in model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml] is ill-suited for the
+  # (loss_X, loss_E, loss_y) components the model calculates.
+  # This override provides weights for X, E, and y (y_loss will be 0 anyway due to y_dim=0).
+  lambda_train: [1.0, 1.0, 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
