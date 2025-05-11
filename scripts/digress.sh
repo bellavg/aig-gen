@@ -5,6 +5,7 @@
 #SBATCH --time=16:00:00              # Initial requested time, adjust as needed
 #SBATCH --output=../slurm_logs/digress_aig_train_%j.out
 
+cd ..
 
 # --- Configuration ---
 CONDA_ENV_NAME="g2pt-aig" # CHANGE THIS to your Conda environment name
