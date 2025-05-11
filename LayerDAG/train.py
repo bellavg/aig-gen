@@ -7,7 +7,7 @@ import torch.nn as nn
 import wandb  # For logging
 
 from copy import deepcopy
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader  # Ensure DataLoader is imported
 from tqdm import tqdm
 
 from setup_utils import set_seed, load_yaml
@@ -213,16 +213,12 @@ def eval_node_pred(device, val_loader, model, is_conditional):
                                   batch_rel_level, batch_A_n2g, batch_z_t, batch_t,
                                   query2g, num_query_cumsum, batch_y)
 
-        # batch_z is expected to be [num_total_query_nodes, num_features_per_node]
-        # batch_logits_list is a list of tensors, one for each feature dimension.
-        # Each tensor in batch_logits_list is [num_total_query_nodes, num_categories_for_that_feature]
-
         num_feature_dims = len(batch_logits_list)
-        current_batch_num_queries = batch_logits_list[0].shape[0]  # Number of nodes whose attributes are predicted
+        current_batch_num_queries = batch_logits_list[0].shape[0]
 
         for d in range(num_feature_dims):
-            batch_logits_d = batch_logits_list[d]  # Logits for d-th feature
-            ground_truth_d = batch_z[:, d]  # Ground truth for d-th feature
+            batch_logits_d = batch_logits_list[d]
+            ground_truth_d = batch_z[:, d]
 
             batch_nll_d = -batch_logits_d.log_softmax(dim=-1)
             batch_nll_d = batch_nll_d[torch.arange(current_batch_num_queries, device=device), ground_truth_d]
@@ -276,11 +272,11 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
             batch_rel_level = batch_rel_level.to(device)
             batch_A_n2g = dglsp.spmatrix(
                 batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
-            batch_z_t = batch_z_t.to(device)  # Noisy node attributes
-            batch_t = batch_t.to(device)  # Timesteps
+            batch_z_t = batch_z_t.to(device)
+            batch_t = batch_t.to(device)
             query2g = query2g.to(device)
             num_query_cumsum = num_query_cumsum.to(device)
-            batch_z = batch_z.to(device)  # Ground truth node attributes
+            batch_z = batch_z.to(device)
 
             batch_pred_logits_list = model(batch_A, batch_x_n, batch_abs_level,
                                            batch_rel_level, batch_A_n2g, batch_z_t,
@@ -299,7 +295,6 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
 
             wandb.log({'node_pred/loss': loss.item()})
 
-        # Validation step
         val_nll = eval_node_pred(device, val_loader, model, is_conditional)
         wandb.log({
             'node_pred/epoch': epoch,
@@ -355,11 +350,7 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
             batch_y = None
 
         num_nodes = len(batch_x_n)
-        # Combine existing and noisy edges for the adjacency matrix input
-        # Note: Ensure no duplicate edges if that's not intended by the model design
         combined_edge_index = torch.cat([batch_edge_index, batch_noisy_edge_index], dim=1)
-        # Remove duplicates just in case, though model might handle it
-        # combined_edge_index = torch.unique(combined_edge_index, dim=1)
         batch_A = dglsp.spmatrix(
             combined_edge_index,
             shape=(num_nodes, num_nodes)).to(device)
@@ -370,14 +361,12 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
         batch_t = batch_t.to(device)
         batch_query_src = batch_query_src.to(device)
         batch_query_dst = batch_query_dst.to(device)
-        batch_label = batch_label.to(device)  # Ground truth for edge existence
+        batch_label = batch_label.to(device)
 
         batch_logits = model(batch_A, batch_x_n, batch_abs_level,
                              batch_rel_level, batch_t, batch_query_src,
-                             batch_query_dst, batch_y)  # Output logits for edge existence (binary)
+                             batch_query_dst, batch_y)
 
-        # Assuming binary cross-entropy with logits or similar for NLL
-        # LayerDAG uses CrossEntropyLoss for a binary case (predicts 0 or 1)
         batch_nll = -batch_logits.log_softmax(dim=-1)
         current_batch_num_queries = batch_logits.shape[0]
         batch_nll = batch_nll[
@@ -402,7 +391,7 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
     Returns:
         The state dictionary of the best performing model.
     """
-    criterion = nn.CrossEntropyLoss()  # For predicting edge existence (0 or 1)
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
 
     best_val_nll = float('inf')
@@ -425,7 +414,6 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
 
             num_nodes = len(batch_x_n)
             combined_edge_index = torch.cat([batch_edge_index, batch_noisy_edge_index], dim=1)
-            # combined_edge_index = torch.unique(combined_edge_index, dim=1)
             batch_A = dglsp.spmatrix(
                 combined_edge_index,
                 shape=(num_nodes, num_nodes)).to(device)
@@ -433,10 +421,10 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
             batch_x_n = batch_x_n.to(device)
             batch_abs_level = batch_abs_level.to(device)
             batch_rel_level = batch_rel_level.to(device)
-            batch_t = batch_t.to(device)  # Timesteps
+            batch_t = batch_t.to(device)
             batch_query_src = batch_query_src.to(device)
             batch_query_dst = batch_query_dst.to(device)
-            batch_label = batch_label.to(device)  # Ground truth for edge existence
+            batch_label = batch_label.to(device)
 
             batch_pred_logits = model(batch_A, batch_x_n, batch_abs_level,
                                       batch_rel_level, batch_t, batch_query_src,
@@ -448,7 +436,6 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
 
             wandb.log({'edge_pred/loss': loss.item()})
 
-        # Validation step
         val_nll = eval_edge_pred(device, val_loader, model, is_conditional)
         wandb.log({
             'edge_pred/epoch': epoch,
@@ -486,50 +473,40 @@ def main(args):
     set_seed(args.seed)
 
     config = load_yaml(args.config_file)
-    # --- DEBUGGING PRINTS START ---
     print("--- Debugging Config ---")
     if config is None:
         print("ERROR: Config is None. YAML file might not have been loaded correctly.")
-        exit(1) # Exit if config is None
+        exit(1)
     print(f"Full config object type: {type(config)}")
-    print(f"Full config content: {config}")
+    # print(f"Full config content: {config}") # Can be very verbose
     if 'general' in config:
         print(f"config['general'] type: {type(config['general'])}")
         print(f"config['general'] content: {config['general']}")
         print(f"Keys in config['general']: {config['general'].keys()}")
     else:
         print("ERROR: 'general' key not found in config.")
-        print("This is likely the cause of the KeyError.")
-        # You might want to exit or handle this case,
-        # but for now, let it proceed to hit the original error
-        # if 'general' is truly missing, to keep the error consistent.
+        exit(1)  # Exit if 'general' key is missing
     print("--- End Debugging Config ---")
-    # --- DEBUGGING PRINTS END ---
 
     dataset_name = config['general']['dataset']
-    config_df = pd.json_normalize(config, sep='/')  # For wandb logging
+    config_df = pd.json_normalize(config, sep='/')
 
-    ts = time.strftime('%b%d-%H%M%S', time.gmtime())  # Timestamp for model saving
+    ts = time.strftime('%b%d-%H%M%S', time.gmtime())
 
-    # Initialize WandB
     wandb.init(
         project=f'LayerDAG_{dataset_name}',
-        name=f'{ts}_{dataset_name}',  # More descriptive name
+        name=f'{ts}_{dataset_name}',
         config=config_df.to_dict(orient='records')[0]
     )
 
-    # Load dataset based on configuration
     is_conditional = config['general']['conditional']
 
-    # Prepare arguments for load_dataset
     load_dataset_kwargs = {'conditional': is_conditional}
     if dataset_name == 'aig':
-        # This is where the error occurs if 'path_to_pt_file' is not in config['general']
         load_dataset_kwargs['path'] = config['general']['path_to_pt_file']
         load_dataset_kwargs['num_node_categories'] = config['general']['num_node_categories']
     elif dataset_name == 'tpu_tile':
-        # tpu_tile loader might not need extra args, or they are handled internally
-        pass
+        pass  # tpu_tile specific args if any
     else:
         raise ValueError(f"Unsupported dataset name in config: {dataset_name}")
 
@@ -543,7 +520,6 @@ def main(args):
     val_node_count_dataset = LayerDAGNodeCountDataset(val_set, conditional=is_conditional)
     print(f"Node count dataset: Max layer size from train_set: {train_node_count_dataset.max_layer_size}")
 
-    # For node prediction, get_marginal=True for training set to compute marginal distribution of node types
     train_node_pred_dataset = LayerDAGNodePredDataset(train_set, conditional=is_conditional, get_marginal=True)
     val_node_pred_dataset = LayerDAGNodePredDataset(val_set, conditional=is_conditional, get_marginal=False)
 
@@ -552,32 +528,80 @@ def main(args):
     print(
         f"Node prediction dataset: Marginal distribution computed. Max level from train: {train_node_pred_dataset.input_level.max().item()}")
 
-    # Node diffusion setup
     node_diffusion_config = {
-        'marginal_list': train_node_pred_dataset.x_n_marginal,  # Crucial for discrete diffusion
-        'T': config['node_pred']['T']  # Number of diffusion steps for nodes
+        'marginal_list': train_node_pred_dataset.x_n_marginal,
+        'T': config['node_pred']['T']
     }
     node_diffusion = DiscreteDiffusion(**node_diffusion_config)
-    train_node_pred_dataset.node_diffusion = node_diffusion  # Assign to dataset for noise application
+    train_node_pred_dataset.node_diffusion = node_diffusion
     val_node_pred_dataset.node_diffusion = node_diffusion
 
-    # Edge prediction dataset setup
     train_edge_pred_dataset = LayerDAGEdgePredDataset(train_set, conditional=is_conditional)
     val_edge_pred_dataset = LayerDAGEdgePredDataset(val_set, conditional=is_conditional)
     print(f"Edge prediction dataset: Avg in-degree from train: {train_edge_pred_dataset.avg_in_deg:.4f}")
 
-    # Edge diffusion setup
     edge_diffusion_config = {
-        'avg_in_deg': train_edge_pred_dataset.avg_in_deg,  # Used for edge diffusion schedule
-        'T': config['edge_pred']['T']  # Number of diffusion steps for edges
+        'avg_in_deg': train_edge_pred_dataset.avg_in_deg,
+        'T': config['edge_pred']['T']
     }
     edge_diffusion = EdgeDiscreteDiffusion(**edge_diffusion_config)
-    train_edge_pred_dataset.edge_diffusion = edge_diffusion  # Assign to dataset
+    train_edge_pred_dataset.edge_diffusion = edge_diffusion
     val_edge_pred_dataset.edge_diffusion = edge_diffusion
 
-    # Model configuration
-    # train_set.num_categories should be (actual_node_types + 1 for dummy node type)
-    # This is set by DAGDataset: self.num_categories = num_categories_from_config + 1
+    # --- Create DataLoaders ---
+    print("Creating DataLoaders...")
+    node_count_train_loader = DataLoader(
+        train_node_count_dataset,
+        batch_size=config['node_count']['loader']['batch_size'],
+        shuffle=True,
+        num_workers=config['node_count']['loader']['num_workers'],
+        collate_fn=collate_node_count,
+        pin_memory=True if device_str == "cuda:0" else False  # Optional: for faster data transfer to GPU
+    )
+    node_count_val_loader = DataLoader(
+        val_node_count_dataset,
+        batch_size=config['node_count']['loader']['batch_size'],
+        shuffle=False,
+        num_workers=config['node_count']['loader']['num_workers'],
+        collate_fn=collate_node_count,
+        pin_memory=True if device_str == "cuda:0" else False
+    )
+
+    node_pred_train_loader = DataLoader(
+        train_node_pred_dataset,
+        batch_size=config['node_pred']['loader']['batch_size'],
+        shuffle=True,
+        num_workers=config['node_pred']['loader']['num_workers'],
+        collate_fn=collate_node_pred,
+        pin_memory=True if device_str == "cuda:0" else False
+    )
+    node_pred_val_loader = DataLoader(
+        val_node_pred_dataset,
+        batch_size=config['node_pred']['loader']['batch_size'],
+        shuffle=False,
+        num_workers=config['node_pred']['loader']['num_workers'],
+        collate_fn=collate_node_pred,
+        pin_memory=True if device_str == "cuda:0" else False
+    )
+
+    edge_pred_train_loader = DataLoader(
+        train_edge_pred_dataset,
+        batch_size=config['edge_pred']['loader']['batch_size'],
+        shuffle=True,
+        num_workers=config['edge_pred']['loader']['num_workers'],
+        collate_fn=collate_edge_pred,
+        pin_memory=True if device_str == "cuda:0" else False
+    )
+    edge_pred_val_loader = DataLoader(
+        val_edge_pred_dataset,
+        batch_size=config['edge_pred']['loader']['batch_size'],
+        shuffle=False,
+        num_workers=config['edge_pred']['loader']['num_workers'],
+        collate_fn=collate_edge_pred,
+        pin_memory=True if device_str == "cuda:0" else False
+    )
+    print("DataLoaders created.")
+
     model_num_x_n_cat = train_set.num_categories
     print(f"Model config: num_x_n_cat (node types including dummy) = {model_num_x_n_cat}")
 
@@ -594,51 +618,55 @@ def main(args):
     }
 
     print("Initializing LayerDAG model...")
-    model = LayerDAG(device=device,  # Pass device to model for internal tensor placement
+    model = LayerDAG(device=device,
                      node_diffusion=node_diffusion,
                      edge_diffusion=edge_diffusion,
-                     is_conditional=is_conditional,  # Pass conditional flag to the main model
+                     is_conditional=is_conditional,
                      **model_config)
-    model.to(device)  # Move the entire model to the specified device
+    model.to(device)
     print("LayerDAG model initialized and moved to device.")
 
-    # --- Train the sub-models ---
-    patience_val = config['general'].get('patience', 10)  # Get patience from config, default 10
+    patience_val = config['general'].get('patience', 10)
 
     print("\n--- Training Node Count Model ---")
     node_count_state_dict = main_node_count(
-        device, train_node_count_dataset, val_node_count_dataset,
+        device,
+        node_count_train_loader,  # Pass DataLoader
+        node_count_val_loader,  # Pass DataLoader
         model.node_count_model, config['node_count'], patience_val, is_conditional)
     model.node_count_model.load_state_dict(node_count_state_dict)
     print("--- Finished Training Node Count Model ---\n")
 
     print("--- Training Node Prediction Model ---")
     node_pred_state_dict = main_node_pred(
-        device, train_node_pred_dataset, val_node_pred_dataset,
+        device,
+        node_pred_train_loader,  # Pass DataLoader
+        node_pred_val_loader,  # Pass DataLoader
         model.node_pred_model, config['node_pred'], patience_val, is_conditional)
     model.node_pred_model.load_state_dict(node_pred_state_dict)
     print("--- Finished Training Node Prediction Model ---\n")
 
     print("--- Training Edge Prediction Model ---")
     edge_pred_state_dict = main_edge_pred(
-        device, train_edge_pred_dataset, val_edge_pred_dataset,
+        device,
+        edge_pred_train_loader,  # Pass DataLoader
+        edge_pred_val_loader,  # Pass DataLoader
         model.edge_pred_model, config['edge_pred'], patience_val, is_conditional)
     model.edge_pred_model.load_state_dict(edge_pred_state_dict)
     print("--- Finished Training Edge Prediction Model ---\n")
 
-    # Save the final trained model
     save_path = f'model_{dataset_name}_{ts}.pth'
     torch.save({
         'dataset': dataset_name,
         'node_diffusion_config': node_diffusion_config,
         'edge_diffusion_config': edge_diffusion_config,
-        'model_config': model_config,  # Save the model's structural configuration
-        'is_conditional': is_conditional,  # Save the conditional flag
-        'model_state_dict': model.state_dict()  # Save the learned parameters
+        'model_config': model_config,
+        'is_conditional': is_conditional,
+        'model_state_dict': model.state_dict()
     }, save_path)
     print(f"Model saved to {save_path}")
-    wandb.save(save_path)  # Save model to wandb artifacts
-    wandb.finish()  # End WandB run
+    wandb.save(save_path)
+    wandb.finish()
 
 
 if __name__ == '__main__':
