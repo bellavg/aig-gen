@@ -8,7 +8,7 @@
 cd ..
 
 # --- Configuration ---
-CONDA_ENV_NAME="g2pt-aig" # CHANGE THIS to your Conda environment name
+CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
 PROJECT_ROOT="./Digress" # IMPORTANT: SET THIS!
 
 
