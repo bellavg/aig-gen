@@ -23,18 +23,54 @@ echo "Modules loaded."
 
 source activate digress
 
-conda install -c conda-forge graph-tool=2.45
+conda remove --all --keep-env
 
-conda install -c "nvidia/label/cuda-11.8.0" cuda
+# 2. IMPORTANT: Configure channel priorities for this environment
+# This tells conda to prefer conda-forge for general packages, then pytorch.
+echo "Setting Conda channel priorities..."
+conda config --env --add channels conda-forge
+conda config --env --add channels pytorch
+conda config --env --add channels nvidia # For CUDA parts needed by PyTorch from conda
+conda config --env --set channel_priority strict
 
-pip3 install torch==2.2.1 --index-url https://download.pytorch.org/whl/cu118
+# 3. Install graph-tool from conda-forge
+# (Using a specific version like 2.45 if you are sure, otherwise let conda pick a compatible one)
+echo "Installing graph-tool..."
+conda install graph-tool=2.45 -c conda-forge -y
+# Or for a generally compatible version: conda install graph-tool -c conda-forge -y
 
+# 4. Install PyTorch, torchvision, torchaudio, AND the CUDA toolkit using Conda
+# This command is for PyTorch 2.2.1 and CUDA 11.8.
+# **** ADJUST THIS COMMAND BASED ON PYTORCH.ORG FOR YOUR NEEDS ****
+echo "Installing PyTorch and CUDA toolkit..."
+conda install pytorch torchvision torchaudio pytorch-cuda -y
+# The -c pytorch and -c nvidia flags should not be needed here if channels are configured as above.
+# Conda will use the channel priority.
 
-pip install -r requirements.txt
+# 5. Install other dependencies from your requirements.txt
+# Preferably using Conda from conda-forge where possible.
+echo "Installing other dependencies from requirements.txt..."
+conda install hydra-core imageio matplotlib networkx numpy omegaconf overrides pandas pyemd pygsp pytorch_lightning scipy setuptools torch_geometric torchmetrics tqdm wandb -c conda-forge -y
 
+# 6. If there are any packages from requirements.txt not found on conda-forge or
+#    if you need very specific versions available only on pip:
+#    pip install <package_name>
+#    For now, let's assume most are covered by the conda install above.
+
+# 7. Install your DiGress project in editable mode
+# Navigate to your DiGress project root directory first if you're not already there.
+# Assuming your DiGress project has a setup.py file.
+echo "Installing DiGress project in editable mode..."
+cd DiGress # Change this to the actual path of your DiGress project
 pip install -e .
 
-
+echo "Conda environment 'digress' has been recreated and packages installed."
+echo "PYTHON VERSION in this environment:"
+python --version
+echo "TORCH VERSION and CUDA status:"
+python -c "import torch; print(f'Torch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}')"
+echo "GRAPH-TOOL check (this might fail if libgomp is still an issue, but we hope not):"
+python -c "try: import graph_tool.all as gt; print('graph-tool imported successfully!') except Exception as e: print(f'Error importing graph-tool: {e}')"
 
 
 
