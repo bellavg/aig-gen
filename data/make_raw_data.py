@@ -155,8 +155,8 @@ if __name__ == "__main__":
 
     print(f"--- AIG to Raw PyG Conversion (Topological Sort) ---")
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
-    print(f"Using NUM_EXPLICIT_EDGE_TYPES = {NUM_EXPLICIT_EDGE_TYPES}")
-    print(f"Total edge channels in 'adj' tensor will be: {NUM_EXPLICIT_EDGE_TYPES + 1}")
+    print(f"Using NUM_EXPLICIT_EDGE_TYPES = {NUM_EDGE_FEATURES}")
+    print(f"Total edge channels in 'adj' tensor will be: {NUM_EDGE_FEATURES + 1}")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
 
     total_files_processed = 0
@@ -198,7 +198,7 @@ if __name__ == "__main__":
             pyg_data_item = convert_nx_to_custom_pyg(
                 nx_graph,
                 NUM_NODE_FEATURES,
-                NUM_EXPLICIT_EDGE_TYPES
+                NUM_EDGE_FEATURES
             )
 
             if pyg_data_item is not None:
