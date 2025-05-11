@@ -1,4 +1,3 @@
-import graph_tool as gt
 import os
 import pathlib
 import warnings
@@ -69,7 +68,7 @@ def get_resume_adaptive(cfg, model_kwargs):
 def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
 
-    if dataset_config["name"] in ['sbm', 'comm20', 'planar']:
+    if dataset_config["name"] in ['sbm', 'comm20', 'planar', 'aig']:
         from datasets.spectre_dataset import SpectreGraphDataModule, SpectreDatasetInfos
         from analysis.spectre_utils import PlanarSamplingMetrics, SBMSamplingMetrics, Comm20SamplingMetrics
         from analysis.visualization import NonMolecularVisualization

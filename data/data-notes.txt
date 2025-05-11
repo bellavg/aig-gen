@@ -1,0 +1,6 @@
+
+Node attributes one-hot - NxA where A is one hot encoded attribute.
+Edge attributes one-hot - NxNxB where b is number of edge attributes - absence of edge is attribute
+- For undirected graphs, noise is applied only to the upper-triangular part of the edge attribute tensor E, and the matrix is then symmetric.
+Adjacency matrix with virtual edge.
+
