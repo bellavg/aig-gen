@@ -97,10 +97,17 @@ def main(cfg: DictConfig):
     visualization_tools = None  # Will be set per dataset type
     extra_features = DummyExtraFeatures()
     domain_features = DummyExtraFeatures()
+    sampling_metrics = None # Initialize sampling_metrics
 
     if dataset_config["name"] in ['sbm', 'comm20', 'planar']:
         from src.datasets.spectre_dataset import SpectreGraphDataModule, SpectreDatasetInfos
         from src.analysis.spectre_utils import PlanarSamplingMetrics, SBMSamplingMetrics, Comm20SamplingMetrics
+        # >>> CHANGE 1: Import AIGSamplingMetrics if it's in spectre_utils.py
+        # If AIGSamplingMetrics is in a different file, adjust the import path.
+        # For example, if it's in src/analysis/aig_metrics.py:
+        # from src.analysis.aig_metrics import AIGSamplingMetrics
+        # For this example, assuming it was added to spectre_utils.py:
+        from src.analysis.spectre_utils import AIGSamplingMetrics # Ensure this is the correct path
         from src.analysis.visualization import NonMolecularVisualization
 
         datamodule = SpectreGraphDataModule(cfg)
@@ -119,18 +126,22 @@ def main(cfg: DictConfig):
 
     elif dataset_config["name"] == 'aig':
         from src.datasets.aig_custom_dataset import AIGCustomDataModule, AIGCustomDatasetInfos
-        # Using PlanarSamplingMetrics as a placeholder.
-        # TODO: Implement AIGSamplingMetrics for comprehensive AIG evaluation.
-        from src.analysis.spectre_utils import PlanarSamplingMetrics  # Placeholder
+        # >>> CHANGE 2: Import your AIGSamplingMetrics class
+        # Ensure this path is correct based on where you defined AIGSamplingMetrics.
+        # If it's in spectre_utils.py and already imported above, you don't need a separate import here.
+        # If it's in its own file, e.g., src/analysis/aig_metrics.py:
+        # from src.analysis.aig_metrics import AIGSamplingMetrics
+        # Assuming it's in spectre_utils.py and imported with other spectre_utils metrics:
+        from src.analysis.aig_metrics import AIGSamplingMetrics # Or from src.analysis.aig_metrics if separate
         from src.analysis.visualization import NonMolecularVisualization
 
         datamodule = AIGCustomDataModule(cfg)
-        dataset_infos = AIGCustomDatasetInfos(datamodule, dataset_config)  # Your custom infos
-        visualization_tools = NonMolecularVisualization()  # Generic graph visualization
+        dataset_infos = AIGCustomDatasetInfos(datamodule, dataset_config)
+        visualization_tools = NonMolecularVisualization()
 
-        # For a baseline, PlanarSamplingMetrics can compute generic graph statistics.
-        # It will NOT perform AIG-specific validity checks.
-        sampling_metrics = PlanarSamplingMetrics(datamodule)  # Placeholder
+        # >>> CHANGE 3: Instantiate AIGSamplingMetrics instead of the placeholder
+        print(f"INFO: Instantiating AIGSamplingMetrics for dataset: {dataset_config['name']}")
+        sampling_metrics = AIGSamplingMetrics(datamodule)
 
         # Extra features are not used for AIGs as per your config (model.extra_features: null)
         # extra_features and domain_features remain DummyExtraFeatures
@@ -140,6 +151,8 @@ def main(cfg: DictConfig):
         from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
         from src.diffusion.extra_features_molecular import ExtraMolecularFeatures
         from src.analysis.visualization import MolecularVisualization
+        # >>> Also ensure AIGSamplingMetrics is imported if it wasn't handled in the first block
+        # from src.analysis.spectre_utils import AIGSamplingMetrics # Or from src.analysis.aig_metrics
 
         if dataset_config["name"] == 'qm9':
             from src.datasets import qm9_dataset
@@ -171,6 +184,8 @@ def main(cfg: DictConfig):
             extra_features = ExtraFeatures(model_cfg.extra_features, dataset_info=dataset_infos)
             domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
     else:
+        # Ensure AIGSamplingMetrics is imported if no other block handled it
+        # from src.analysis.spectre_utils import AIGSamplingMetrics # Or from src.analysis.aig_metrics
         raise NotImplementedError(f"Dataset {dataset_config.name} not implemented.")
 
     # This call is usually done inside the DatasetInfos constructor or a dedicated method.
@@ -238,7 +253,7 @@ def main(cfg: DictConfig):
 
     trainer_strategy = None
     if use_gpu and cfg.general.gpus > 1:
-        trainer_strategy = "ddp_find_unused_parameters_true"
+        trainer_strategy = "ddp_find_unused_parameters_true" # Changed from "ddp" to "ddp_find_unused_parameters_true" for potentially better compatibility
 
     trainer = Trainer(
         gradient_clip_val=cfg.train.clip_grad,
@@ -248,7 +263,7 @@ def main(cfg: DictConfig):
         max_epochs=cfg.train.n_epochs,
         check_val_every_n_epoch=cfg.general.check_val_every_n_epochs,
         fast_dev_run=cfg.general.name == 'debug',
-        enable_progress_bar=cfg.train.get('progress_bar', False),
+        enable_progress_bar=cfg.train.get('progress_bar', False), # Default to False if not specified
         callbacks=callbacks,
         log_every_n_steps=cfg.general.get('log_every_steps', 50) if name != 'debug' else 1,
         logger=[]  # DiGress handles WandB logging internally if cfg.general.wandb is 'online' or 'offline'
@@ -259,7 +274,8 @@ def main(cfg: DictConfig):
                     ckpt_path=cfg.general.resume if cfg.general.resume is not None else None)
         if cfg.general.name not in ['debug', 'test'] and not cfg.general.get('skip_final_test', False):
             print("Training finished. Starting final testing...")
-            best_ckpt_path = checkpoint_callback.best_model_path if hasattr(checkpoint_callback,
+            # Ensure checkpoint_callback was added and has best_model_path
+            best_ckpt_path = checkpoint_callback.best_model_path if 'checkpoint_callback' in locals() and hasattr(checkpoint_callback,
                                                                             'best_model_path') and checkpoint_callback.best_model_path else None
             if best_ckpt_path and os.path.exists(best_ckpt_path):
                 print(f"Loading best model for final test: {best_ckpt_path}")

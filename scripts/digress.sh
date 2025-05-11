@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
 #SBATCH --time=16:00:00              # Initial requested time, adjust as needed
-#SBATCH --output=../slurm_logs/digress_aig_train_%j.out
+#SBATCH --output=../slurm_logs/digress_%j.out
 
 cd ..
 
@@ -20,7 +20,7 @@ echo "Modules loaded."
 echo "Activating conda environment: ${CONDA_ENV_NAME}..."
 source activate "${CONDA_ENV_NAME}"
 
-
+# Weights and bias key: 725d958326cb39d0ba89d73b557c294f85ecbf83
 # --- Training Command ---
 echo ""
 echo "========================================"
