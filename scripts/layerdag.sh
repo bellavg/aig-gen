@@ -47,52 +47,6 @@ module load Anaconda3/2024.06-1 # Or the specific Anaconda version available
 echo "Modules loaded."
 echo "Initial LD_LIBRARY_PATH (after module loads): ${LD_LIBRARY_PATH}"
 
-# --- Conda Environment Setup ---
-if [ ! -f "${SETUP_DONE_FLAG}" ]; then
-    echo "Performing first-time setup for Conda environment: ${CONDA_ENV_NAME}"
-    echo "IMPORTANT: If this setup fails, delete the flag file '${SETUP_DONE_FLAG}' and the Conda environment '${CONDA_ENV_NAME}' before retrying."
-
-    # Check if environment already exists from a partial previous run
-    if conda env list | grep -q "${CONDA_ENV_NAME}"; then
-        echo "Warning: Conda environment '${CONDA_ENV_NAME}' already exists. Removing it for a clean setup."
-        conda env remove -n "${CONDA_ENV_NAME}" -y
-    fi
-
-    conda create -n "${CONDA_ENV_NAME}" python=${PYTHON_VERSION} -y
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to create Conda environment. Exiting."; exit 1; fi
-
-    # Activate the environment for installation
-    # Using 'conda activate' is preferred over 'source activate' for newer Conda versions
-    eval "$(conda shell.bash hook)" # Ensures 'conda activate' is available
-    conda activate "${CONDA_ENV_NAME}"
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to activate Conda environment for installation. Exiting."; exit 1; fi
-    echo "Conda environment activated for setup. CONDA_PREFIX: ${CONDA_PREFIX}"
-
-    echo "Installing PyTorch CUDA toolkit (pytorch-cuda=12.1) from Conda..."
-    # This package provides the CUDA runtime libraries like libnvrtc.so.12
-    conda install pytorch-cuda=12.1 -c pytorch -c nvidia -y
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to install pytorch-cuda=12.1. Exiting."; conda deactivate; exit 1; fi
-
-    echo "Installing PyTorch ${PYTORCH_VERSION} (for CUDA 12.1) via pip..."
-    # Using pip for PyTorch to get the exact version compiled for cu121
-    pip install torch==${PYTORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} --index-url https://download.pytorch.org/whl/cu121
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to install PyTorch. Exiting."; conda deactivate; exit 1; fi
-
-    echo "Installing DGL (for PyTorch ${DGL_TORCH_URL_SUFFIX} and CUDA 12.1) via pip..."
-    pip install dgl -f https://data.dgl.ai/wheels/${DGL_TORCH_URL_SUFFIX}/cu121/repo.html
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to install DGL. Exiting."; conda deactivate; exit 1; fi
-
-    echo "Installing other dependencies..."
-    pip install numpy==1.26.3 tqdm einops wandb pydantic pandas
-    if [ $? -ne 0 ]; then echo "ERROR: Failed to install other dependencies. Exiting."; conda deactivate; exit 1; fi
-
-    echo "Conda environment setup and package installation complete."
-    touch "${SETUP_DONE_FLAG}"
-    conda deactivate
-    echo "Deactivated environment after setup."
-else
-    echo "Conda environment '${CONDA_ENV_NAME}' setup previously done. Skipping setup."
-fi
 
 # --- Activate Conda Environment for the Job ---
 echo "Activating Conda environment: ${CONDA_ENV_NAME} for the job..."
@@ -123,7 +77,7 @@ if [ -n "$CONDA_NVRTC_LIB_DIR" ] && [[ ":$LD_LIBRARY_PATH:" != *":${CONDA_NVRTC_
 elif [ -z "$CONDA_NVRTC_LIB_DIR" ]; then
      echo "WARNING: libnvrtc.so.12 not found in ${CONDA_PREFIX}/lib. This is likely the cause of the error."
 fi
-
+export CUDA_LAUNCH_BLOCKING=1
 echo "LD_LIBRARY_PATH after conda activation and manual update: ${LD_LIBRARY_PATH}"
 echo "Which nvcc: $(which nvcc || echo 'nvcc not in PATH')"
 echo "Which python: $(which python)"

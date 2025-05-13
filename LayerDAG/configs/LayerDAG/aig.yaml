@@ -45,7 +45,7 @@ edge_pred:
   loader:
     batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
     num_workers: 4
-  num_epochs: 1000
+  num_epochs: 2000
   graph_encoder:
     x_n_emb_size: 256
     y_emb_size: 64   # May be unused if conditional is false

@@ -71,6 +71,10 @@ class DiscreteDiffusion(nn.Module):
         return alpha * self.I_list[d] + (1 - alpha) * self.m_list[d]
 
     def apply_noise(self, z, t=None):
+        target_device = self.alpha_bars.device
+
+        z = z.to(target_device)
+
         if t is None:
             # Sample a timestep t uniformly from 0 to self.T.
             # Note that the notation is slightly inconsistent with the paper.
