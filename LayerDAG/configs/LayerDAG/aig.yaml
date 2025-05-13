@@ -8,7 +8,7 @@ general:
 node_count:
   loader:
     batch_size: 128
-    num_workers: 4
+    num_workers: 0
   model:
     x_n_emb_size: 64
     y_emb_size: 256  # May be unused if conditional is false
@@ -23,7 +23,7 @@ node_pred:
   T: 64 # Number of diffusion timesteps for node attributes
   loader:
     batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
-    num_workers: 4
+    num_workers: 0
   num_epochs: 700
   graph_encoder:
     x_n_emb_size: 512
@@ -44,7 +44,7 @@ edge_pred:
   T: 16 # Number of diffusion timesteps for edges
   loader:
     batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
-    num_workers: 4
+    num_workers: 0
   num_epochs: 2000
   graph_encoder:
     x_n_emb_size: 256

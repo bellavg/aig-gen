@@ -1,0 +1,45 @@
+# configs/dataset/aig.yaml
+
+# Name of the dataset configuration. Hydra uses this to identify the dataset.
+name: aig
+remove_h: null
+
+# Directory where AIGCustomDataset will store intermediate raw splits
+# (e.g., train_split_intermediate.pt) and final processed PyG files
+# (e.g., train.pt, val.pt, test.pt).
+# Relative to general.abs_path_to_project_root.
+datadir: data_cache/aig_datasets # Example: project_root/data_cache/aig_datasets/aig/
+
+# Directory where AIGCustomDataModule looks for the single, large, combined raw PyG file.
+# Relative to general.abs_path_to_project_root.
+# Matches output_pyg_dir from your create_dataset.py script.
+datadir_for_all_raw: data/pyg_full
+
+# Filename of the combined raw PyTorch Geometric Data objects list.
+# Matches combined_output_filename from your create_dataset.py script.
+all_raw_graphs_filename: aig.pt
+
+# If True, AIGCustomDataModule re-splits all_raw_graphs_filename into train/val/test
+# intermediate files, even if they already exist.
+force_resplit_raw: False
+
+# Target class for the DataModule
+_target_: src.datasets.aig_custom_dataset.AIGCustomDataModule
+
+# Target class for DatasetInfos
+dataset_infos_target_class: src.datasets.aig_custom_dataset.AIGCustomDatasetInfos
+
+# Configuration for extra features. 'null' for AIGs as they are processed by your scripts.
+extra_features: null
+
+# Configuration for domain-specific features. 'null' for AIGs.
+domain_features: null
+
+# Batch size for DataLoader. Can be overridden by experiment config for training.
+batch_size: 64 # This is for the dataset module itself (e.g., for validation/test loaders if not overridden)
+
+# Number of workers for DataLoader
+num_workers: 0 # Default is 0 in train_default.yaml
+
+# Pin memory for DataLoader
+pin_memory: False
