@@ -2,274 +2,276 @@ import torch
 import torch.nn as nn
 import networkx as nx
 from tqdm import tqdm
-import wandb # If you use wandb
-import numpy as np # For the conversion functions
-from typing import Union
-
+import wandb  # If you use wandb
+import numpy as np  # For the conversion functions
+from typing import Union, List
+import warnings
 # DiGress existing utilities
+# Ensure these are correctly imported from your DiGress project structure
+
 from src.analysis.spectre_utils import SpectreSamplingMetrics, degree_stats, \
     eval_fraction_isomorphic, eval_fraction_unique_non_isomorphic_valid
 
 # --- AIG-specific imports - YOU NEED TO ENSURE THESE PATHS ARE CORRECT ---
-# From your aig_config.py (ensure this file is accessible in your Python path)
-# Example: if aig_config.py is in src/
-
-from src.aig_config import check_validity as aig_check_validity # Renamed to avoid potential conflicts
+from src.aig_config import check_validity as aig_check_validity
 from src.aig_config import NODE_TYPE_KEYS, EDGE_TYPE_KEYS, \
-                           NUM_NODE_FEATURES, NUM_EDGE_FEATURES
+    NUM_NODE_FEATURES, NUM_EDGE_FEATURES  # NUM_EDGE_FEATURES = number of *actual* AIG types
 
-
-# From your aig_custom_dataset.py or a shared utility file where it's defined
-# This function converts PyG Data objects to NetworkX DiGraph for AIGs
-# Example: if aig_custom_dataset.py is in src/datasets/
+# This should be the updated function from your aig_dataset_aligned_v2 artifact
 from src.datasets.aig_custom_dataset import convert_pyg_to_nx_for_aig_validation
-
 
 
 def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
                                        edge_index_tensor: torch.Tensor,
                                        edge_features_tensor: torch.Tensor,
+                                       # Model output, shape (num_edges, NUM_EDGE_FEATURES + 1)
                                        num_nodes_int: int) -> Union[nx.DiGraph, None]:
     """
-    Converts raw model output tensors (node features, edge index, edge features, num_nodes)
-    to a NetworkX DiGraph, applying AIG-specific type decoding.
+    Converts raw model output tensors to a NetworkX DiGraph for AIGs.
+    The model's edge_features_tensor is expected to have NUM_EDGE_FEATURES + 1 channels,
+    where channel 0 is for "no specific AIG type" and channels 1 to NUM_EDGE_FEATURES
+    (after shifting) correspond to actual AIG edge types.
 
     Args:
         node_features_tensor: Tensor of shape (max_nodes_in_batch, NUM_NODE_FEATURES)
-        edge_index_tensor: Tensor of shape (2, num_edges)
-        edge_features_tensor: Tensor of shape (num_edges, NUM_EDGE_FEATURES)
+        edge_index_tensor: Tensor of shape (2, num_edges_in_prediction)
+        edge_features_tensor: Tensor of shape (num_edges_in_prediction, NUM_EDGE_FEATURES + 1)
         num_nodes_int: The actual number of nodes for this graph.
 
     Returns:
-        A NetworkX DiGraph with 'type' attributes on nodes and edges, or None if conversion fails.
+        A NetworkX DiGraph with 'type' attributes, or None if conversion fails.
     """
     nx_graph = nx.DiGraph()
 
-    # Validate inputs carefully
+    # Validate inputs
     if not (0 <= num_nodes_int <= node_features_tensor.shape[0]):
-        # print(f"Error converting Model Output: num_nodes_int ({num_nodes_int}) is out of bounds "
-        #       f"for node_features_tensor shape ({node_features_tensor.shape[0]}).")
+        # warnings.warn(f"Convert Model Output: num_nodes_int ({num_nodes_int}) out of bounds for node_features ({node_features_tensor.shape[0]}).")
         return None
     if node_features_tensor.shape[1] != NUM_NODE_FEATURES:
-        # print(f"Error converting Model Output: Node features tensor has incorrect feature dimension "
-        #       f"({node_features_tensor.shape[1]} vs expected {NUM_NODE_FEATURES}).")
+        # warnings.warn(f"Convert Model Output: Node features tensor has incorrect feature dim ({node_features_tensor.shape[1]} vs {NUM_NODE_FEATURES}).")
         return None
 
     # Process nodes up to num_nodes_int
     for i in range(num_nodes_int):
         node_feature_vector = node_features_tensor[i].cpu().numpy()
-        # Robust one-hot check and decoding (ensure this matches your aig_config logic)
         if not (np.isclose(np.sum(node_feature_vector), 1.0) and
                 np.all((np.isclose(node_feature_vector, 0.0)) | (np.isclose(node_feature_vector, 1.0)))):
-            node_type_str = "UNKNOWN_TYPE_ATTRIBUTE" # Consistent with your validation
+            node_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
         else:
             type_index = np.argmax(node_feature_vector)
-            if not (0 <= type_index < len(NODE_TYPE_KEYS)): # Check bounds for NODE_TYPE_KEYS
+            if not (0 <= type_index < len(NODE_TYPE_KEYS)):
                 node_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
             else:
                 node_type_str = NODE_TYPE_KEYS[type_index]
         nx_graph.add_node(i, type=node_type_str)
 
     # Process edges
-    num_edges = edge_index_tensor.shape[1]
-    if num_edges > 0:
-        if edge_features_tensor.shape[0] != num_edges or edge_features_tensor.shape[1] != NUM_EDGE_FEATURES:
-            # print(f"Error converting Model Output: Edge features tensor has incorrect shape.")
+    num_edges_in_prediction = edge_index_tensor.shape[1]
+
+    # The model's edge_features_tensor has NUM_EDGE_FEATURES + 1 channels
+    expected_edge_feature_dim = NUM_EDGE_FEATURES + 1
+
+    if num_edges_in_prediction > 0:
+        if edge_features_tensor.shape[0] != num_edges_in_prediction or \
+                edge_features_tensor.shape[1] != expected_edge_feature_dim:
+            # warnings.warn(f"Convert Model Output: Edge features tensor shape mismatch. "
+            #               f"Got {edge_features_tensor.shape}, expected ({num_edges_in_prediction}, {expected_edge_feature_dim}).")
             return None
 
-        for i in range(num_edges):
+        for i in range(num_edges_in_prediction):
             src_node = edge_index_tensor[0, i].item()
             tgt_node = edge_index_tensor[1, i].item()
 
-            # Ensure edge indices are valid for the current graph size
             if not (0 <= src_node < num_nodes_int and 0 <= tgt_node < num_nodes_int):
-                # print(f"Warning: Model generated edge ({src_node}, {tgt_node}) with out-of-bounds node index "
-                #       f"for num_nodes {num_nodes_int}. Skipping edge.")
+                # warnings.warn(f"Convert Model Output: Edge ({src_node}, {tgt_node}) out of bounds for num_nodes {num_nodes_int}. Skipping edge.")
                 continue
 
-            edge_feature_vector = edge_features_tensor[i].cpu().numpy()
-            if not (np.isclose(np.sum(edge_feature_vector), 1.0) and
-                    np.all((np.isclose(edge_feature_vector, 0.0)) | (np.isclose(edge_feature_vector, 1.0)))):
-                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
-            else:
-                type_index = np.argmax(edge_feature_vector)
-                if not (0 <= type_index < len(EDGE_TYPE_KEYS)): # Check bounds for EDGE_TYPE_KEYS
-                    edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
-                else:
-                    edge_type_str = EDGE_TYPE_KEYS[type_index]
-            nx_graph.add_edge(src_node, tgt_node, type=edge_type_str)
+            edge_feature_vector_model = edge_features_tensor[i].cpu().numpy()  # Length NUM_EDGE_FEATURES + 1
 
-    # Optionally, add graph-level attributes if your model predicts them
-    # e.g., nx_graph.graph['name'] = "generated_aig_" + str(np.random.randint(10000))
+            # Check if one-hot (model output might be logits/probabilities before argmax in sampling)
+            # For simplicity, we assume it's been made one-hot or take argmax directly.
+            # If it's already one-hot from the model's final layer:
+            if not (np.isclose(np.sum(edge_feature_vector_model), 1.0) and
+                    np.all(
+                        (np.isclose(edge_feature_vector_model, 0.0)) | (np.isclose(edge_feature_vector_model, 1.0)))):
+                # If not one-hot, but should be (e.g. after softmax), this indicates an issue or need for argmax.
+                # For robust decoding, let's assume we always take argmax if not perfectly one-hot.
+                # However, if the model is *supposed* to output one-hot, this is a problem.
+                # For now, we'll proceed as if it's one-hot or argmax has been applied.
+                # If it's truly just probabilities, the argmax below is the correct interpretation.
+                pass  # Allow non-perfect one-hot if it's probabilities
+
+            shifted_type_index = np.argmax(edge_feature_vector_model)
+
+            if shifted_type_index == 0:
+                # Model predicted "no specific AIG type" for this existing edge.
+                # This could mean the edge itself is low probability or it's a generic edge.
+                # For AIG validation, we need a specific type.
+                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+                # warnings.warn(f"Convert Model Output: Edge ({src_node}-{tgt_node}) was predicted as 'no specific AIG type' (index 0). Marked UNKNOWN.")
+            else:
+                actual_aig_type_index = shifted_type_index - 1  # Convert back to 0-indexed for actual AIG types
+                if not (0 <= actual_aig_type_index < len(EDGE_TYPE_KEYS)):
+                    edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+                    # warnings.warn(f"Convert Model Output: Edge ({src_node}-{tgt_node}) decoded to invalid actual_aig_type_index {actual_aig_type_index}.")
+                else:
+                    edge_type_str = EDGE_TYPE_KEYS[actual_aig_type_index]
+            nx_graph.add_edge(src_node, tgt_node, type=edge_type_str)
     return nx_graph
 
 
 class AIGSamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, datamodule):
-        # metrics_list: Defines which metrics from the forward pass will be computed and logged.
-        # Add 'aig_structural_validity', 'aig_acyclicity'.
-        # You can also include 'degree' if you adapt it for in/out degrees,
-        # or other DiGress metrics if they are relevant and adapted for directed graphs.
         super().__init__(datamodule=datamodule,
-                         compute_emd=False, # Typically False unless using MMD with EMD kernel for some metric
+                         compute_emd=False,
                          metrics_list=['aig_structural_validity', 'aig_acyclicity', 'degree'])
-        self.local_rank = datamodule.cfg.general.local_rank # Store local_rank
+        self.local_rank = datamodule.cfg.general.local_rank  # Store local_rank
 
-    # Override loader_to_nx to use your AIG-specific PyG to NX conversion for reference graphs
-    def loader_to_nx(self, loader):
+        # Ensure reference graphs are loaded using the correct conversion
+        # The super().__init__ might call loader_to_nx if SpectreSamplingMetrics does.
+        # If not, or to be explicit:
+        if not self.train_graphs and hasattr(datamodule, 'train_dataloader'):
+            self.train_graphs = self.loader_to_nx(datamodule.train_dataloader())
+        if not self.val_graphs and hasattr(datamodule, 'val_dataloader'):
+            self.val_graphs = self.loader_to_nx(datamodule.val_dataloader())
+        if not self.test_graphs and hasattr(datamodule, 'test_dataloader'):
+            self.test_graphs = self.loader_to_nx(datamodule.test_dataloader())
+
+    def loader_to_nx(self, loader) -> List[nx.DiGraph]:  # Added return type hint
+        """ Converts a PyG DataLoader's batches into a list of NetworkX DiGraphs
+            using the AIG-specific conversion function for reference/dataset graphs.
+        """
         networkx_graphs = []
-        if self.local_rank == 0:
-            print(f"AIGSamplingMetrics: Loading reference graphs using 'convert_pyg_to_nx_for_aig_validation'...")
-        for i, batch in enumerate(tqdm(loader, desc="Loading Ref Graphs")):
+        # if self.local_rank == 0: # Check if local_rank is available
+        #     print(f"AIGSamplingMetrics: Loading reference graphs using 'convert_pyg_to_nx_for_aig_validation'...")
+
+        if loader is None or loader.dataset is None or len(loader.dataset) == 0:
+            # if self.local_rank == 0:
+            #     print("AIGSamplingMetrics: Loader or its dataset is empty. Cannot load reference graphs.")
+            return networkx_graphs
+
+        for i, batch in enumerate(tqdm(loader, desc="Loading Ref Graphs",
+                                       disable=(self.local_rank != 0 and hasattr(self, 'local_rank')))):
             data_list = batch.to_data_list()
             for j, pyg_data in enumerate(data_list):
-                # Use your existing function from aig_custom_dataset.py
+                # pyg_data.edge_attr here is already (NumEdges, NUM_EDGE_FEATURES + 1)
+                # from AIGCustomDataset.process()
                 nx_graph = convert_pyg_to_nx_for_aig_validation(pyg_data)
                 if nx_graph is not None:
                     networkx_graphs.append(nx_graph)
                 # else:
                 #     if self.local_rank == 0:
                 #         print(f"Warning: Reference graph (batch {i}, item {j}) failed PyG to NX conversion.")
-        if self.local_rank == 0:
-            print(f"AIGSamplingMetrics: Loaded {len(networkx_graphs)} reference graphs for this split.")
+        # if self.local_rank == 0:
+        #     print(f"AIGSamplingMetrics: Loaded {len(networkx_graphs)} reference graphs for this split.")
         return networkx_graphs
 
-    def forward(self, generated_graphs_raw: list, name: str, current_epoch: int, val_counter: int, local_rank: int, test: bool = False):
+    def forward(self, generated_graphs_raw: list, name: str, current_epoch: int, val_counter: int, local_rank: int,
+                test: bool = False):
         """
         Calculates metrics for generated AIGs.
-        `generated_graphs_raw`: A list of tuples from the sampling process, typically:
+        `generated_graphs_raw`: A list of tuples from the sampling process:
                                 (node_features, edge_index, edge_features, num_nodes_tensor)
-                                where node_features are (max_n_nodes, n_node_feat),
-                                edge_index is (2, n_edges),
-                                edge_features are (n_edges, n_edge_feat).
+                                - node_features: (max_n_nodes, NUM_NODE_FEATURES)
+                                - edge_index: (2, n_edges)
+                                - edge_features: (n_edges, NUM_EDGE_FEATURES + 1) <--- IMPORTANT: Model output
         """
-        # self.test_graphs and self.val_graphs are loaded by the overridden loader_to_nx
         reference_graphs_nx = self.test_graphs if test else self.val_graphs
 
-        if local_rank == 0: # Use the passed local_rank for printing
-            print(f"AIGSamplingMetrics (Rank {local_rank}): Computing metrics for {len(generated_graphs_raw)} generated AIGs "
-                  f"against {len(reference_graphs_nx)} reference AIGs (Split: {'test' if test else 'val'}).")
+        # if local_rank == 0:
+        #     print(f"AIGMetrics (Rank {local_rank}): Evaluating {len(generated_graphs_raw)} generated AIGs "
+        #           f"vs {len(reference_graphs_nx)} refs (Split: {'test' if test else 'val'}).")
 
         generated_graphs_nx = []
-        if local_rank == 0:
-            print("AIGSamplingMetrics: Converting raw model outputs to NetworkX DiGraphs...")
+        # if local_rank == 0:
+        #     print("AIGMetrics: Converting raw model outputs to NetworkX DiGraphs...")
 
-        for i, graph_raw_data in enumerate(tqdm(generated_graphs_raw, desc="Converting Generated Graphs", disable=(local_rank!=0))):
-            node_features, edge_index, edge_features, num_nodes_tensor = graph_raw_data
-            num_nodes_int = num_nodes_tensor.item() # Actual number of nodes for this graph
+        for i, graph_raw_data in enumerate(
+                tqdm(generated_graphs_raw, desc="Converting Generated Graphs", disable=(local_rank != 0))):
+            node_features, edge_index, edge_features_model, num_nodes_tensor = graph_raw_data
+            num_nodes_int = num_nodes_tensor.item()
 
-            # Important: Ensure tensors are sliced to actual num_nodes_int BEFORE conversion
-            # This assumes node_features is padded up to max_nodes in batch.
-            current_node_features = node_features[:num_nodes_int]
+            # node_features from model is (max_nodes_in_batch, NUM_NODE_FEATURES)
+            # edge_features_model from model is (num_edges_pred, NUM_EDGE_FEATURES + 1)
 
-            # Edge index and features might also need filtering if nodes were removed
-            # or if edges refer to nodes beyond num_nodes_int.
-            # convert_raw_model_output_to_nx_aig should handle this internally.
+            # Slicing node_features to actual num_nodes_int is not needed here,
+            # as convert_raw_model_output_to_nx_aig handles num_nodes_int internally.
+            # However, it's good practice if the conversion function didn't.
+            # current_node_features = node_features[:num_nodes_int] # This is fine
 
             nx_graph = convert_raw_model_output_to_nx_aig(
-                current_node_features, edge_index, edge_features, num_nodes_int
-            )
+                node_features, edge_index, edge_features_model, num_nodes_int
+            )  # Pass full node_features, function will use num_nodes_int
             if nx_graph is not None:
                 generated_graphs_nx.append(nx_graph)
-            # else:
-            #     if local_rank == 0:
-            #         print(f"Warning: Generated graph {i} (num_nodes: {num_nodes_int}) failed raw to NX conversion.")
-
 
         if not generated_graphs_nx:
             if local_rank == 0:
-                print("AIGSamplingMetrics: No generated graphs were successfully converted to NetworkX. Skipping further metrics.")
-            return # Nothing to evaluate
+                print("AIGMetrics: No generated graphs successfully converted. Skipping metrics.")
+            return {}  # Return empty dict if no graphs
 
         to_log = {}
-
-        # 1. AIG Structural Validity (using your aig_check_validity function)
+        # 1. AIG Structural Validity
         if 'aig_structural_validity' in self.metrics_list:
-            if local_rank == 0:
-                print("AIGSamplingMetrics: Computing AIG structural validity...")
-            num_structurally_valid = 0
-            for g_idx, g in enumerate(generated_graphs_nx):
-                if aig_check_validity(g): # Your function from aig_config.py
-                    num_structurally_valid += 1
-                # else:
-                #     if local_rank == 0 and num_structurally_valid < 5: # Log first few failures
-                #         print(f"Generated graph {g_idx} failed structural validity.")
-            structural_validity_fraction = num_structurally_valid / len(generated_graphs_nx) if generated_graphs_nx else 0.0
+            # if local_rank == 0: print("AIGMetrics: Computing AIG structural validity...")
+            num_structurally_valid = sum(1 for g in generated_graphs_nx if aig_check_validity(g))
+            structural_validity_fraction = num_structurally_valid / len(
+                generated_graphs_nx) if generated_graphs_nx else 0.0
             to_log['aig_metrics/structural_validity_fraction'] = structural_validity_fraction
-            if wandb.run and local_rank == 0: # Log only from rank 0
+            if wandb.run and local_rank == 0:
                 wandb.summary[f'{name}_aig_structural_validity_fraction'] = structural_validity_fraction
 
         # 2. Acyclicity
         if 'aig_acyclicity' in self.metrics_list:
-            if local_rank == 0:
-                print("AIGSamplingMetrics: Computing AIG acyclicity...")
-            num_acyclic = 0
-            for g in generated_graphs_nx:
-                if nx.is_directed_acyclic_graph(g):
-                    num_acyclic += 1
+            # if local_rank == 0: print("AIGMetrics: Computing AIG acyclicity...")
+            num_acyclic = sum(1 for g in generated_graphs_nx if nx.is_directed_acyclic_graph(g))
             acyclicity_fraction = num_acyclic / len(generated_graphs_nx) if generated_graphs_nx else 0.0
             to_log['aig_metrics/acyclicity_fraction'] = acyclicity_fraction
             if wandb.run and local_rank == 0:
                 wandb.summary[f'{name}_aig_acyclicity_fraction'] = acyclicity_fraction
 
-        # 3. Standard DiGress Metrics (e.g., degree)
-        if 'degree' in self.metrics_list:
-            if local_rank == 0:
-                print("AIGSamplingMetrics: Computing degree stats...")
-            # IMPORTANT: The standard 'degree_stats' is for undirected graphs and sums degrees.
-            # For AIGs, you'll want separate in-degree and out-degree distributions.
-            # You would need to create a 'directed_degree_stats' function.
-            # As a placeholder, using the existing one:
-            degree_mmd = degree_stats(reference_graphs_nx, generated_graphs_nx, is_parallel=True,
-                                      compute_emd=self.compute_emd)
-            to_log['graph_stats/degree_mmd_placeholder'] = degree_mmd # Mark as placeholder
-            if wandb.run and local_rank == 0:
-                wandb.summary[f'{name}_degree_mmd_placeholder'] = degree_mmd
+        # # 3. Degree Stats (Placeholder - needs directed version)
+        # if 'degree' in self.metrics_list:
+        #     # if local_rank == 0: print("AIGMetrics: Computing degree stats (placeholder)...")
+        #     # TODO: Implement or use a directed_degree_stats function for AIGs
+        #     # (separate in-degree and out-degree MMD/EMD)
+        #     if reference_graphs_nx and generated_graphs_nx:  # Ensure lists are not empty
+        #         degree_mmd = degree_stats(reference_graphs_nx, generated_graphs_nx, is_parallel=True,
+        #                                   compute_emd=self.compute_emd)
+        #         to_log['graph_stats/degree_mmd_placeholder'] = degree_mmd
+        #         if wandb.run and local_rank == 0:
+        #             wandb.summary[f'{name}_degree_mmd_placeholder'] = degree_mmd
+        #     else:
+                to_log['graph_stats/degree_mmd_placeholder'] = -1.0  # Indicate not computed
 
-        # 4. Uniqueness, Isomorphism, and Novelty using DiGress functions
-        if local_rank == 0:
-            print("AIGSamplingMetrics: Computing uniqueness, novelty, and combined validity fractions...")
+        # 4. Uniqueness, Isomorphism, Novelty
+        # if local_rank == 0: print("AIGMetrics: Computing uniqueness, novelty...")
 
-        # This is the validity function that eval_fraction_unique_non_isomorphic_valid will use.
         def combined_aig_validity_for_eval_fractions(g_nx_eval):
-            return aig_check_validity(g_nx_eval) # Your function
+            return aig_check_validity(g_nx_eval)
 
-        # self.train_graphs are loaded by the overridden loader_to_nx
-        train_graphs_nx = self.train_graphs # Should be list of AIG nx.DiGraphs
+        train_graphs_nx = self.train_graphs
 
-        # These functions require graphs to be non-empty for some internal checks.
-        # Filter out any potentially empty graphs from generated_graphs_nx if necessary,
-        # though your conversion and validity checks should ideally handle this.
         eval_generated_graphs_nx = [g for g in generated_graphs_nx if g.number_of_nodes() > 0]
         eval_train_graphs_nx = [g for g in train_graphs_nx if g.number_of_nodes() > 0]
 
+        frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = 0.0, 0.0, 0.0
+        frac_non_iso_to_train = 0.0
 
         if not eval_generated_graphs_nx:
-            if local_rank == 0:
-                print("AIGSamplingMetrics: No non-empty generated graphs to evaluate for uniqueness/novelty.")
-            frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = 0.0, 0.0, 0.0
-            frac_non_iso_to_train = 0.0
+            # if local_rank == 0: print("AIGMetrics: No non-empty generated graphs for uniqueness/novelty.")
+            pass  # Defaults are 0.0
         elif not eval_train_graphs_nx:
-            if local_rank == 0:
-                 print("AIGSamplingMetrics: No non-empty training graphs for novelty comparison. Novelty might be skewed.")
-            # Calculate uniqueness based on generated graphs only
-            # Validity for frac_unique_non_iso_valid will still be checked against generated.
+            # if local_rank == 0: print("AIGMetrics: No non-empty training graphs for novelty. Novelty will be 1.0.")
             frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
-                eval_fraction_unique_non_isomorphic_valid(
-                    eval_generated_graphs_nx,
-                    [], # Pass empty list for train_graphs if none are suitable
-                    validity_func=combined_aig_validity_for_eval_fractions
-                )
-            frac_non_iso_to_train = 1.0 # All are non-isomorphic to an empty training set
+                eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, [],
+                                                          validity_func=combined_aig_validity_for_eval_fractions)
+            frac_non_iso_to_train = 1.0
         else:
             frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
-                eval_fraction_unique_non_isomorphic_valid(
-                    eval_generated_graphs_nx,
-                    eval_train_graphs_nx,
-                    validity_func=combined_aig_validity_for_eval_fractions
-                )
+                eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, eval_train_graphs_nx,
+                                                          validity_func=combined_aig_validity_for_eval_fractions)
             frac_non_iso_to_train = 1.0 - eval_fraction_isomorphic(eval_generated_graphs_nx, eval_train_graphs_nx)
-
 
         to_log.update({
             'sampling_quality/frac_unique_aigs': frac_unique,
@@ -278,14 +280,14 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
             'sampling_quality/frac_non_iso_to_train_aigs': frac_non_iso_to_train
         })
 
-        if local_rank == 0:
-            print(f"AIGSamplingMetrics (Rank {local_rank}): Final metrics to log for {name}: {to_log}")
-        if wandb.run and local_rank == 0: # Log only from rank 0
-            # Prefix with 'name' (e.g., 'val_sampling_quality/frac_unique_aigs') for clarity in wandb
+        # if local_rank == 0:
+        #     print(f"AIGMetrics (Rank {local_rank}): Final metrics for {name}: {to_log}")
+        if wandb.run and local_rank == 0:
             wandb.log({f"{name}_{k.replace('/', '_')}": v for k, v in to_log.items()}, commit=True)
 
+        return to_log  # Return the metrics dictionary
+
     def reset(self):
-        # This method is called by PyTorch Lightning.
-        # If your metrics have internal states that need resetting between epochs/phases, do it here.
-        # For the current implementation, most calculations are stateless per call to forward.
-        pass
+        super().reset() if hasattr(super(), 'reset') else None
+        # If you added any stateful attributes, reset them here.
+        # For this version, it seems mostly stateless per forward call.

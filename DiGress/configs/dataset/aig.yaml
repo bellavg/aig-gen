@@ -2,6 +2,7 @@
 
 # Name of the dataset configuration. Hydra uses this to identify the dataset.
 name: aig
+remove_h: null
 
 # Directory where AIGCustomDataset will store intermediate raw splits
 # (e.g., train_split_intermediate.pt) and final processed PyG files
