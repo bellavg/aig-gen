@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100         # Or a CPU partition if preferred/available
 #SBATCH --gpus=1                     # Processing might not need GPU, but keeps env consistent
 #SBATCH --time=03:00:99              # Adjust time as needed (processing can take time)
-#SBATCH --output=../slurm_logs/to_pyg_%j.out # Log file
+#SBATCH --output=../slurm_logs/to_pyg2_%j.out # Log file
 
 
 # --- Configuration ---

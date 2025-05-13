@@ -25,7 +25,7 @@ def convert_nx_to_pyg_with_edge_index(
     Converts a NetworkX DiGraph to a PyTorch Geometric Data object.
     Includes:
     - x: Node features (unpadded).
-    - adj: Custom adjacency tensor (N_src, N_tgt, N_edge_types + no_edge_channel).
+    - adj: Custom adjacency tensor (N_src, N_tgt, NUM_EDGE_FEATURES).
     - edge_index: Standard PyG edge index (2, Num_edges).
     - edge_attr: Edge attributes for edge_index (Num_edges, NUM_EDGE_FEATURES).
     Nodes are ordered topologically.
@@ -68,12 +68,12 @@ def convert_nx_to_pyg_with_edge_index(
     x_tensor = torch.stack(node_features_list)
 
     # --- Custom Adjacency Tensor (adj) ---
+    # Modified: Removed the +1 for no_edge_channel
     adj_tensor = torch.zeros(
-        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES + 1),  # Using user's NUM_EDGE_FEATURES
+        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES),  # Using user's NUM_EDGE_FEATURES
         dtype=torch.float
     )
-    no_edge_channel_idx = NUM_EDGE_FEATURES  # Using user's NUM_EDGE_FEATURES
-    adj_tensor[:, :, no_edge_channel_idx] = 1.0  # Initialize all as "no edge"
+    # Removed: no_edge_channel_idx and its initialization for adj_tensor
 
     # --- Edge Index and Edge Attributes ---
     edge_index_sources = []
@@ -105,7 +105,7 @@ def convert_nx_to_pyg_with_edge_index(
 
         # Populate custom adj tensor
         adj_tensor[u_new, v_new, edge_channel_index] = 1.0
-        adj_tensor[u_new, v_new, no_edge_channel_idx] = 0.0
+        # Removed: adj_tensor[u_new, v_new, no_edge_channel_idx] = 0.0
 
         # Populate edge_index and edge_attr lists
         edge_index_sources.append(u_new)
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     # Define the output directory for the processed .pt files
     output_pyg_dir = "./data/pyg_full"
     intermediate_file_suffix = "_pyg_full.pt"
-    combined_output_filename = "all_graphs_pyg.pt"  # User's changed combined name
+    combined_output_filename = "aig.pt"  # User's changed combined name
     # --- End Configuration ---
 
     os.makedirs(output_pyg_dir, exist_ok=True)
@@ -160,6 +160,7 @@ if __name__ == "__main__":
     print(f"--- AIG to Full PyG Conversion (adj, edge_index, edge_attr) ---")
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
     # Using user's NUM_EDGE_FEATURES in print statement
+    # This print statement is now more direct as adj channels == NUM_EDGE_FEATURES
     print(f"Using NUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
 
