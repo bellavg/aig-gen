@@ -2,91 +2,68 @@
 import os
 import os.path as osp
 import pathlib
-import math  # For precise splitting
 import warnings  # For explicit warnings
-import shutil  # For copying files in download()
 
 import torch
+import torch.nn.functional as F
 import networkx as nx
+import math
 from torch_geometric.data import InMemoryDataset, Data
-from torch_geometric.loader import DataLoader  # Used by AbstractDataModule
-import pytorch_lightning as pl  # Used by AbstractDataModule
-# Ensure torch_geometric.utils is available for dense_to_sparse if needed by AbstractDataModule's utils
-import torch_geometric.utils
+import torch_geometric.utils # Keep this for potential future use, though not directly used in snippet
 
 from tqdm import tqdm
 import numpy as np
 
-# DiGress imports (ensure these paths are correct for your project structure)
-# Assuming AbstractDataModule and AbstractDatasetInfos are correctly defined
-# For this example, I'll include the AbstractDataModule and AbstractDatasetInfos
-# definitions directly if they are not complex, or assume they are importable.
-# If src.datasets.abstract_dataset is not found, these placeholders will be used.
+# DiGress imports
 from src.datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
-from src.diffusion.distributions import DistributionNodes
-import src.utils as utils  # For to_dense
+# from src.diffusion.distributions import DistributionNodes # Not directly used in this file
 
 # Your AIG specific imports
 from src.aig_config import (
-    NUM_NODE_FEATURES, NUM_EDGE_FEATURES,  # NUM_EDGE_FEATURES is num *actual* AIG types
-    NODE_TYPE_KEYS, EDGE_TYPE_KEYS,  # EDGE_TYPE_KEYS length is NUM_EDGE_FEATURES
-    check_validity
+    NUM_NODE_FEATURES, NUM_EDGE_FEATURES,
+    NODE_TYPE_KEYS, EDGE_TYPE_KEYS,
+    check_validity  # AIG-specific structural validation
 )
 from typing import Union, List
 
 
-# --- Helper Function: PyG Data to NetworkX DiGraph (MODIFIED) ---
+# --- Helper Function: PyG Data to NetworkX DiGraph for AIG Validation ---
 def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, None]:
     """
-    Converts a PyTorch Geometric Data object back to a NetworkX DiGraph
-    for AIG-specific validation.
-    Assumes pyg_data.edge_attr has NUM_EDGE_FEATURES + 1 columns,
-    where index 0 is for "no edge" (and should not be set for actual edges)
-    and indices 1 to NUM_EDGE_FEATURES+1 map to actual AIG edge types.
+    Converts a PyTorch Geometric Data object, specifically formatted for AIGs
+    (with edge_attr having NUM_EDGE_FEATURES + 1 dimensions), to a NetworkX DiGraph
+    for validation purposes.
     """
-    if not all(hasattr(pyg_data, attr) for attr in ['x', 'edge_index', 'edge_attr', 'num_nodes']):
-        warnings.warn(
-            "PyG to NX: pyg_data object is missing required attributes (x, edge_index, edge_attr, num_nodes).")
+    # Basic attribute checks
+    if not all(hasattr(pyg_data, attr) for attr in ['x', 'edge_index', 'edge_attr']):
+        warnings.warn("convert_pyg_to_nx: pyg_data object missing one or more core attributes (x, edge_index, edge_attr).")
+        return None
+    if pyg_data.num_nodes is None: # num_nodes can be explicitly set or inferred by PyG
+        warnings.warn("convert_pyg_to_nx: pyg_data.num_nodes is None.")
+        return None
+
+    num_nodes = pyg_data.num_nodes # This should be an int after .item() if it was a tensor
+
+    if pyg_data.x is None or pyg_data.x.shape[0] != num_nodes or pyg_data.x.shape[1] != NUM_NODE_FEATURES:
+        warnings.warn(f"convert_pyg_to_nx: Node feature tensor 'x' mismatch. Shape: {pyg_data.x.shape if pyg_data.x is not None else 'None'}, Expected nodes: {num_nodes}, Expected features: {NUM_NODE_FEATURES}")
         return None
 
     nx_graph = nx.DiGraph()
 
-    if pyg_data.num_nodes is None:
-        warnings.warn("PyG to NX: pyg_data.num_nodes is None.")
-        return None
-    num_nodes = pyg_data.num_nodes.item()
-
-    if pyg_data.x is None:
-        warnings.warn("PyG to NX: pyg_data.x is None.")
-        return None
-
-    # Validate NODE_TYPE_KEYS and NUM_NODE_FEATURES consistency
-    if len(NODE_TYPE_KEYS) != NUM_NODE_FEATURES:
-        warnings.warn(f"PyG to NX: NODE_TYPE_KEYS length ({len(NODE_TYPE_KEYS)}) "
-                      f"mismatches NUM_NODE_FEATURES ({NUM_NODE_FEATURES}).")
-        return None
-    # Validate EDGE_TYPE_KEYS and NUM_EDGE_FEATURES consistency
-    if len(EDGE_TYPE_KEYS) != NUM_EDGE_FEATURES:  # NUM_EDGE_FEATURES is num *actual* types
-        warnings.warn(f"PyG to NX: EDGE_TYPE_KEYS length ({len(EDGE_TYPE_KEYS)}) "
-                      f"mismatches NUM_EDGE_FEATURES ({NUM_EDGE_FEATURES}).")
-        return None
-
-    # Validate node features shape
-    if pyg_data.x.shape[0] != num_nodes or pyg_data.x.shape[1] != NUM_NODE_FEATURES:
-        warnings.warn(
-            f"PyG to NX: Node feature tensor x has incorrect shape (got {pyg_data.x.shape}, expected ({num_nodes}, {NUM_NODE_FEATURES})).")
-        return None
-
     # Process nodes
     for i in range(num_nodes):
         node_feature_vector = pyg_data.x[i].cpu().numpy()
+        # Check if one-hot encoded
         if not (np.isclose(np.sum(node_feature_vector), 1.0) and
                 np.all((np.isclose(node_feature_vector, 0.0)) | (np.isclose(node_feature_vector, 1.0)))):
-            node_type_str = "UNKNOWN_TYPE_ATTRIBUTE"  # As per aig_config.check_validity
+            node_type_str = "UNKNOWN_TYPE_ATTRIBUTE_NON_ONE_HOT"
+            warnings.warn(f"Node {i} features not one-hot: {node_feature_vector}")
         else:
             type_index = np.argmax(node_feature_vector)
-            if not (0 <= type_index < len(NODE_TYPE_KEYS)):  # type_index is for actual node types
-                node_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+            if not (0 <= type_index < len(NODE_TYPE_KEYS)):
+                node_type_str = "UNKNOWN_TYPE_ATTRIBUTE_BAD_INDEX"
+                warnings.warn(f"Node {i} type index {type_index} out of bounds for NODE_TYPE_KEYS (len {len(NODE_TYPE_KEYS)}).")
+
             else:
                 node_type_str = NODE_TYPE_KEYS[type_index]
         nx_graph.add_node(i, type=node_type_str)
@@ -94,214 +71,274 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, No
     # Process edges
     if pyg_data.edge_index is not None and pyg_data.edge_index.shape[1] > 0:
         if pyg_data.edge_attr is None:
-            warnings.warn("PyG to NX: pyg_data.edge_attr is None but there are edges.")
+            warnings.warn("convert_pyg_to_nx: Graph has edges but 'edge_attr' is None.")
             return None
-        # MODIFIED: Validate edge_attr shape (now NUM_EDGE_FEATURES + 1 columns)
-        expected_edge_attr_cols = NUM_EDGE_FEATURES + 1
+
+        # This is the crucial part: edge_attr is expected to be NUM_EDGE_FEATURES + 1 dimensional here
+        # because it comes from AIGDataset.process() which already did the transformation.
+        expected_edge_attr_dim = NUM_EDGE_FEATURES + 1
         if pyg_data.edge_attr.shape[0] != pyg_data.edge_index.shape[1] or \
-                pyg_data.edge_attr.shape[1] != expected_edge_attr_cols:
-            warnings.warn(f"PyG to NX: Edge attribute tensor edge_attr has incorrect shape "
-                          f"(got {pyg_data.edge_attr.shape}, expected ({pyg_data.edge_index.shape[1]}, {expected_edge_attr_cols})).")
+           pyg_data.edge_attr.shape[1] != expected_edge_attr_dim:
+            warnings.warn(f"convert_pyg_to_nx: Edge attribute tensor 'edge_attr' has incorrect shape. "
+                          f"Got {pyg_data.edge_attr.shape}, expected ({pyg_data.edge_index.shape[1]}, {expected_edge_attr_dim}). "
+                          "This implies the input pyg_data might not have been processed by AIGDataset.process correctly.")
             return None
 
         for i in range(pyg_data.edge_index.shape[1]):
-            src_node = pyg_data.edge_index[0, i].item()
-            tgt_node = pyg_data.edge_index[1, i].item()
-            edge_feature_vector = pyg_data.edge_attr[i].cpu().numpy()  # Length NUM_EDGE_FEATURES + 1
+            src, tgt = pyg_data.edge_index[0, i].item(), pyg_data.edge_index[1, i].item()
+            edge_feature_vector_processed = pyg_data.edge_attr[i].cpu().numpy() # Already NUM_EDGE_FEATURES + 1
 
-            # Check if one-hot
-            if not (np.isclose(np.sum(edge_feature_vector), 1.0) and
-                    np.all((np.isclose(edge_feature_vector, 0.0)) | (np.isclose(edge_feature_vector, 1.0)))):
-                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+            if not (np.isclose(np.sum(edge_feature_vector_processed), 1.0) and
+                    np.all((np.isclose(edge_feature_vector_processed, 0.0)) | (np.isclose(edge_feature_vector_processed, 1.0)))):
+                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE_NON_ONE_HOT" # Should be one-hot
+                warnings.warn(f"Edge ({src}-{tgt}) processed features not one-hot: {edge_feature_vector_processed}")
+
             else:
-                shifted_type_index = np.argmax(edge_feature_vector)
-                if shifted_type_index == 0:  # Index 0 is for "no edge", should not be set for an existing edge's attr
-                    warnings.warn(
-                        f"PyG to NX: Edge ({src_node}-{tgt_node}) attribute implies 'no edge' (index 0 is 1). Treating as UNKNOWN.")
-                    edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+                shifted_type_index = np.argmax(edge_feature_vector_processed)
+                if shifted_type_index == 0: # Index 0 means "no specific AIG type" or "generic edge"
+                    edge_type_str = "NO_SPECIFIC_AIG_TYPE_OR_ABSENT_EDGE"
+                    warnings.warn(f"Edge ({src}-{tgt}) has type index 0 in its {expected_edge_attr_dim}-dim 'edge_attr'. This implies no specific AIG type.")
                 else:
-                    actual_aig_type_index = shifted_type_index - 1  # Convert back to 0-indexed actual AIG type
-                    if not (0 <= actual_aig_type_index < len(EDGE_TYPE_KEYS)):  # Check against actual AIG types
-                        edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE"
+                    actual_aig_type_index = shifted_type_index - 1 # Convert back to 0-indexed for actual AIG types
+                    if not (0 <= actual_aig_type_index < len(EDGE_TYPE_KEYS)):
+                        edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE_BAD_INDEX"
+                        warnings.warn(f"Edge ({src}-{tgt}) decoded to invalid actual_aig_type_index {actual_aig_type_index} from shifted index {shifted_type_index}.")
                     else:
                         edge_type_str = EDGE_TYPE_KEYS[actual_aig_type_index]
-            nx_graph.add_edge(src_node, tgt_node, type=edge_type_str)
+            nx_graph.add_edge(src, tgt, type=edge_type_str)
 
-    # Add graph-level attributes if they exist
-    for attr_name in ['inputs', 'outputs', 'gates']:
-        if hasattr(pyg_data, f'num_{attr_name}') and getattr(pyg_data, f'num_{attr_name}') is not None:
-            nx_graph.graph[attr_name] = getattr(pyg_data, f'num_{attr_name}').item()
+    # Add graph-level attributes if they exist (e.g., from original AIG processing)
+    for attr_name in ['inputs', 'outputs', 'gates', 'name', 'filename']: # Added common graph attributes
+        if hasattr(pyg_data, attr_name):
+            attr_val = getattr(pyg_data, attr_name)
+            # Ensure graph attributes are basic types for NetworkX
+            if isinstance(attr_val, torch.Tensor) and attr_val.numel() == 1:
+                nx_graph.graph[attr_name] = attr_val.item()
+            elif isinstance(attr_val, (str, int, float, list, dict)): # Allow common serializable types
+                 nx_graph.graph[attr_name] = attr_val
+
+
     return nx_graph
 
 
-# --- End Helper Function ---
-
-
-class AIGCustomDataset(InMemoryDataset):
-    def __init__(self, root: str, split: str, cfg, transform=None, pre_transform=None, pre_filter=None):
+class AIGDataset(InMemoryDataset):
+    def __init__(self, split: str, root: str, cfg, dataset_name: str = 'aig', transform=None, pre_transform=None,
+                 pre_filter=None):
+        self.dataset_name = cfg.dataset.name
         self.split = split
-        self.cfg = cfg
+        self.cfg = cfg # Hydra config
         if self.cfg is None:
-            raise ValueError("cfg must be provided to AIGCustomDataset.")
+            raise ValueError("cfg (Hydra config) must be provided to AIGDataset.")
 
-        base_path = pathlib.Path(self.cfg.general.abs_path_to_project_root)
-        self.path_to_source_combined_raw_file = base_path / self.cfg.dataset.datadir_for_all_raw / self.cfg.dataset.all_raw_graphs_filename
+        # Determine file_idx based on split, used for accessing raw_paths
+        if self.split == 'train':
+            self.file_idx = 0
+        elif self.split == 'val':
+            self.file_idx = 1
+        elif self.split == 'test':
+            self.file_idx = 2
+        else:
+            raise ValueError(f"Invalid split: {self.split}. Must be 'train', 'val', or 'test'.")
 
         super().__init__(root, transform, pre_transform, pre_filter)
+        # Load processed data for the current split
         try:
             self.data, self.slices = torch.load(self.processed_paths[0])
-            print(f"Loaded AIGCustomDataset '{split}' with {len(self)} graphs from {self.processed_paths[0]}")
+            print(f"Successfully loaded processed AIGDataset for split '{split}' with {len(self)} graphs from {self.processed_paths[0]}")
         except FileNotFoundError:
             warnings.warn(
-                f"Processed file not found for {split} at {self.processed_paths[0]}. Will be created by process().")
+                f"Processed file for AIGDataset split '{split}' not found at {self.processed_paths[0]}. "
+                f"It will be created if `process()` is called (e.g., on first instantiation if raw files exist).")
         except Exception as e:
-            warnings.warn(f"Error loading processed file for {split} at {self.processed_paths[0]}: {e}")
+            warnings.warn(f"Error loading processed file for AIGDataset split '{split}' at {self.processed_paths[0]}: {e}")
 
     @property
     def raw_file_names(self) -> List[str]:
-        return [osp.basename(self.path_to_source_combined_raw_file)]
+        """Names of raw files specific to each split, expected in self.raw_dir."""
+        return [f'{s}_split_raw.pt' for s in ['train', 'val', 'test']]
 
     @property
     def processed_file_names(self) -> List[str]:
-        return [f'{self.split}.pt']
+        """Name of the processed file for the *current* split, saved in self.processed_dir."""
+        return [f'{self.split}_processed.pt']
 
     def download(self):
-        dest_raw_file_path = osp.join(self.raw_dir, self.raw_file_names[0])
-        if osp.exists(dest_raw_file_path): return
+        """
+        Ensures that the raw data for each split (train_split_raw.pt, etc.) exists.
+        If not, it loads a single source AIG file (specified in cfg) and splits it.
+        This method is called by InMemoryDataset if raw files are not found.
+        """
+        all_individual_raw_splits_exist = all(osp.exists(p) for p in self.raw_paths)
 
-        if not osp.exists(self.path_to_source_combined_raw_file):
-            raise FileNotFoundError(f"Source raw AIG data not found: {self.path_to_source_combined_raw_file}")
-
-        os.makedirs(self.raw_dir, exist_ok=True)
-        shutil.copy(self.path_to_source_combined_raw_file, dest_raw_file_path)
-        print(f"Copied source AIG raw data to {dest_raw_file_path}")
-
-    def process(self):
-        path_to_combined_raw_in_raw_dir = osp.join(self.raw_dir, self.raw_file_names[0])
-        print(f"AIGCustomDataset ({self.split}): Processing raw data from: {path_to_combined_raw_in_raw_dir}")
-
-        all_graphs_list_from_raw_file = torch.load(path_to_combined_raw_in_raw_dir)
-        num_total_graphs = len(all_graphs_list_from_raw_file)
-
-        if num_total_graphs == 0:
-            warnings.warn(f"Raw AIG data file {path_to_combined_raw_in_raw_dir} is empty.")
-            torch.save(self.collate([]), self.processed_paths[0])
+        if all_individual_raw_splits_exist and not self.cfg.dataset.get('force_resplit_raw', False):
+            print(f"All per-split raw files found in {self.raw_dir}. Skipping source file splitting.")
             return
 
-        # Splitting logic
-        idx_train_end = math.floor(num_total_graphs * 4 / 6)
-        idx_val_end = math.floor(num_total_graphs * 5 / 6)
-        if num_total_graphs >= 3:
-            if idx_train_end == num_total_graphs:
-                idx_train_end = max(0, num_total_graphs - 2)
-                idx_val_end = max(idx_train_end, num_total_graphs - 1)
-            elif idx_val_end == num_total_graphs:
-                if idx_train_end < num_total_graphs - 1:
-                    idx_val_end = max(idx_train_end, num_total_graphs - 1)
-        elif num_total_graphs == 2:
-            idx_train_end, idx_val_end = 1, 1
-        elif num_total_graphs == 1:
-            idx_train_end, idx_val_end = 1, 1
+        print(f"One or more per-split raw files missing or force_resplit_raw=True. "
+              f"Attempting to split from source AIG file specified in config...")
 
-        current_split_graphs_raw = []
-        if self.split == 'train':
-            current_split_graphs_raw = all_graphs_list_from_raw_file[:idx_train_end]
-        elif self.split == 'val':
-            current_split_graphs_raw = all_graphs_list_from_raw_file[idx_train_end:idx_val_end]
-        elif self.split == 'test':
-            current_split_graphs_raw = all_graphs_list_from_raw_file[idx_val_end:]
+        source_file_path = pathlib.Path(
+            self.cfg.general.abs_path_to_project_root
+        ) / self.cfg.dataset.datadir_for_all_raw / self.cfg.dataset.all_raw_graphs_filename
 
-        print(
-            f"AIGDataset ({self.split}): Num graphs for this split (before processing): {len(current_split_graphs_raw)}")
+        if not osp.exists(source_file_path):
+            raise FileNotFoundError(
+                f"Source raw AIG data file not found: {source_file_path}. "
+                "This file is expected to be a .pt file containing a list of PyG Data objects, "
+                "created by your AIG processing scripts (e.g., create_dataset.py)."
+            )
+
+        print(f"Loading all graphs from source file: {source_file_path}")
+        all_graphs_list_from_source = torch.load(source_file_path)
+        num_total_graphs = len(all_graphs_list_from_source)
+
+        if num_total_graphs == 0:
+            warnings.warn(f"Source raw AIG data file {source_file_path} is empty. Creating empty raw split files.")
+            os.makedirs(self.raw_dir, exist_ok=True)
+            for raw_path in self.raw_paths:
+                torch.save([], raw_path)
+            return
+
+        num_train_default = math.floor(num_total_graphs * (4 / 6))
+        num_val_default = math.floor(num_total_graphs * (1 / 6))
+        train_len_cfg = self.cfg.dataset.get('num_train_graphs', num_train_default)
+        val_len_cfg = self.cfg.dataset.get('num_val_graphs', num_val_default)
+        train_len = min(train_len_cfg, num_total_graphs)
+        val_len = min(val_len_cfg, num_total_graphs - train_len)
+        test_len = num_total_graphs - train_len - val_len
+
+        if test_len < 0:
+            warnings.warn(f"Specified train/val lengths ({train_len}, {val_len}) exceed total graphs ({num_total_graphs}). Adjusting test_len.")
+            test_len = 0
+            val_len = num_total_graphs - train_len
+            if val_len < 0:
+                train_len = num_total_graphs
+                val_len = 0
+
+        print(f"Total graphs from source: {num_total_graphs}. "
+              f"Splitting into: Train={train_len}, Val={val_len}, Test={test_len}")
+
+        train_data = all_graphs_list_from_source[:train_len]
+        val_data = all_graphs_list_from_source[train_len : train_len + val_len]
+        test_data = all_graphs_list_from_source[train_len + val_len:]
+
+        os.makedirs(self.raw_dir, exist_ok=True)
+        torch.save(train_data, self.raw_paths[0])
+        torch.save(val_data, self.raw_paths[1])
+        torch.save(test_data, self.raw_paths[2])
+        print(f"Saved raw splits to {self.raw_dir}: "
+              f"Train ({len(train_data)} to {self.raw_paths[0]}), "
+              f"Val ({len(val_data)} to {self.raw_paths[1]}), "
+              f"Test ({len(test_data)} to {self.raw_paths[2]})")
+
+    def process(self):
+        current_split_raw_data_path = self.raw_paths[self.file_idx]
+        print(f"AIGDataset (split: '{self.split}'): Processing raw data from: {current_split_raw_data_path}")
+
+        if not osp.exists(current_split_raw_data_path):
+            raise FileNotFoundError(
+                f"Raw data file for split '{self.split}' not found at {current_split_raw_data_path}. "
+                "Ensure `download()` method has run successfully or the file exists."
+            )
+
+        current_split_graphs_raw = torch.load(current_split_raw_data_path)
+        if not isinstance(current_split_graphs_raw, list):
+            raise TypeError(f"Raw data file {current_split_raw_data_path} did not contain a list of graphs.")
 
         processed_pyg_data_list = []
-        valid_count, invalid_count = 0, 0
-
-        # NUM_EDGE_FEATURES from aig_config is the number of *actual* AIG edge types
-        # The new edge_attr dimension will be NUM_EDGE_FEATURES + 1
+        valid_graph_count, invalid_graph_count = 0, 0
         new_edge_attr_dim = NUM_EDGE_FEATURES + 1
 
         for i, data_item_raw in enumerate(
-                tqdm(current_split_graphs_raw, desc=f"Processing/Validating for {self.split}", unit="graph")):
-            # Create a new Data object to avoid modifying the one in all_graphs_list_from_raw_file if it's referenced elsewhere
-            data_item = data_item_raw.clone()  # Ensure we work on a copy
+                tqdm(current_split_graphs_raw, desc=f"Processing and Validating '{self.split}' split", unit="graph")):
+            data_item = data_item_raw.clone()
 
-            # --- Standardize and Validate Basic Attributes ---
-            if not all(hasattr(data_item, attr) for attr in ['x', 'edge_index', 'num_nodes']):
-                warnings.warn(
-                    f"Graph {i} in {self.split} missing basic attributes (x, edge_index, num_nodes). Skipping.")
-                invalid_count += 1
+            if not all(hasattr(data_item, attr) for attr in ['x', 'edge_index']):
+                warnings.warn(f"Graph {i} in '{self.split}' split is missing basic attributes (x, edge_index). Skipping.")
+                invalid_graph_count += 1
                 continue
 
-            if not hasattr(data_item, 'adj'):  # adj was part of the raw data
-                warnings.warn(
-                    f"Graph {i} in {self.split} missing 'adj' attribute. Skipping if critical, or proceeding without.")
-                # Depending on whether 'adj' is strictly needed later, you might skip or create a dummy one.
-                # For now, we assume 'adj' from raw data is carried over as is.
-
-            if not hasattr(data_item, 'y'):
+            if not hasattr(data_item, 'y') or data_item.y is None:
                 data_item.y = torch.zeros([1, 0], dtype=data_item.x.dtype if data_item.x is not None else torch.float)
 
-            if not torch.is_tensor(data_item.num_nodes) or data_item.num_nodes.numel() != 1:
-                try:
-                    data_item.num_nodes = torch.tensor(int(data_item.num_nodes), dtype=torch.long)
-                except:
-                    warnings.warn(f"Graph {i} num_nodes invalid. Skipping.")
-                    invalid_count += 1;
+            if not hasattr(data_item, 'num_nodes') or data_item.num_nodes is None:
+                if data_item.x is not None:
+                    data_item.num_nodes = data_item.x.shape[0]
+                else:
+                    warnings.warn(f"Graph {i} in '{self.split}' missing 'num_nodes' and 'x'. Skipping.")
+                    invalid_graph_count += 1
                     continue
+            elif torch.is_tensor(data_item.num_nodes):
+                 if data_item.num_nodes.numel() != 1:
+                    warnings.warn(f"Graph {i} 'num_nodes' tensor has multiple elements. Skipping.")
+                    invalid_graph_count += 1; continue
+                 data_item.num_nodes = data_item.num_nodes.item()
+            elif not isinstance(data_item.num_nodes, int):
+                try:
+                    data_item.num_nodes = int(data_item.num_nodes)
+                except ValueError:
+                    warnings.warn(f"Graph {i} 'num_nodes' is not a convertible integer. Skipping.")
+                    invalid_graph_count += 1; continue
 
-            if data_item.x is None or data_item.x.shape[0] != data_item.num_nodes.item():
-                warnings.warn(f"Graph {i} num_nodes vs x.shape[0] mismatch. Skipping.")
-                invalid_count += 1;
+            if data_item.x is None or data_item.x.shape[0] != data_item.num_nodes:
+                warnings.warn(
+                    f"Graph {i} num_nodes ({data_item.num_nodes}) vs x.shape[0] "
+                    f"({data_item.x.shape[0] if data_item.x is not None else 'None'}) mismatch. Skipping."
+                )
+                invalid_graph_count += 1
                 continue
+            if data_item.x.shape[1] != NUM_NODE_FEATURES:
+                warnings.warn(
+                    f"Graph {i} node features dim is {data_item.x.shape[1]}, expected {NUM_NODE_FEATURES}. Skipping."
+                )
+                invalid_graph_count +=1; continue
 
-            # --- Transform edge_attr ---
-            # The raw data_item.edge_attr is (NumEdges, NUM_EDGE_FEATURES)
-            # We need to convert it to (NumEdges, NUM_EDGE_FEATURES + 1)
-            if data_item.edge_index.shape[1] > 0:  # If there are edges
+            if data_item.edge_index.shape[1] > 0:
                 if not hasattr(data_item, 'edge_attr') or data_item.edge_attr is None:
-                    warnings.warn(f"Graph {i} has edges but no edge_attr. Skipping.")
-                    invalid_count += 1;
+                    warnings.warn(f"Graph {i} in '{self.split}' has edges but no 'edge_attr'. Skipping.")
+                    invalid_graph_count += 1
                     continue
 
                 original_edge_attr = data_item.edge_attr
                 if original_edge_attr.shape[1] != NUM_EDGE_FEATURES:
                     warnings.warn(
-                        f"Graph {i} original edge_attr dim is {original_edge_attr.shape[1]}, expected {NUM_EDGE_FEATURES}. Skipping.")
-                    invalid_count += 1;
+                        f"Graph {i} in '{self.split}' has original edge_attr dim {original_edge_attr.shape[1]}, "
+                        f"but expected {NUM_EDGE_FEATURES}. Skipping."
+                    )
+                    invalid_graph_count += 1
                     continue
 
                 num_edges = original_edge_attr.shape[0]
-                new_ea = torch.zeros((num_edges, new_edge_attr_dim), dtype=original_edge_attr.dtype,
-                                     device=original_edge_attr.device)
-
-                # Find indices of actual types (0 to NUM_EDGE_FEATURES-1)
-                actual_type_indices = torch.argmax(original_edge_attr, dim=1)
-                # Shift these indices by +1 for the new_ea
-                shifted_indices = (actual_type_indices + 1).unsqueeze(1)
-                new_ea.scatter_(1, shifted_indices, 1.0)
+                # Create a column of zeros for the "no specific AIG type" channel
+                zeros_column = torch.zeros((num_edges, 1),
+                                           dtype=original_edge_attr.dtype,
+                                          )
+                # Concatenate the zeros column with the original edge attributes
+                # original_edge_attr has actual AIG types (e.g., REG, INV)
+                # new_ea will have shape (num_edges, NUM_EDGE_FEATURES + 1)
+                # where index 0 is for "no specific type", and indices 1..NUM_EDGE_FEATURES are for actual types
+                new_ea = torch.cat((zeros_column, original_edge_attr), dim=1)
                 data_item.edge_attr = new_ea
-            else:  # No edges
+            else:
                 data_item.edge_attr = torch.empty((0, new_edge_attr_dim),
-                                                  dtype=data_item.x.dtype if data_item.x is not None else torch.float,
-                                                  device=data_item.x.device if data_item.x is not None else 'cpu')
+                                                  dtype=data_item.x.dtype,
+                                                  )
 
-            # --- AIG-specific validation using the (now modified) data_item ---
             nx_graph_for_validation = convert_pyg_to_nx_for_aig_validation(data_item)
             if nx_graph_for_validation is None:
-                # convert_pyg_to_nx_for_aig_validation already prints warnings
-                invalid_count += 1
+                invalid_graph_count += 1
                 continue
 
             if check_validity(nx_graph_for_validation):
-                processed_pyg_data_list.append(data_item)  # Add the modified data_item
-                valid_count += 1
+                if hasattr(data_item, 'adj'):
+                    delattr(data_item, 'adj')
+                processed_pyg_data_list.append(data_item)
+                valid_graph_count += 1
             else:
-                # Optionally log which graph failed or specific reasons if check_validity provides them
-                # warnings.warn(f"Graph {i} in {self.split} failed AIG check_validity. Skipping.")
-                invalid_count += 1
+                invalid_graph_count += 1
 
-        print(f"AIGDataset ({self.split}): Validation done. Valid: {valid_count}, Invalid/Skipped: {invalid_count}")
+        print(f"AIGDataset (split: '{self.split}'): Processing complete. "
+              f"Valid AIGs kept: {valid_graph_count}, Invalid/Skipped: {invalid_graph_count}")
 
         if self.pre_filter is not None:
             processed_pyg_data_list = [d for d in processed_pyg_data_list if self.pre_filter(d)]
@@ -309,53 +346,82 @@ class AIGCustomDataset(InMemoryDataset):
             processed_pyg_data_list = [self.pre_transform(d) for d in processed_pyg_data_list]
 
         if not processed_pyg_data_list:
-            warnings.warn(f"AIGDataset ({self.split}): No data to save after processing and validation.")
+            warnings.warn(f"AIGDataset (split: '{self.split}'): No data to save after processing and validation. "
+                          f"The file {self.processed_paths[0]} will contain an empty list.")
 
-        print(f"AIGDataset ({self.split}): Saving {len(processed_pyg_data_list)} graphs to {self.processed_paths[0]}")
         torch.save(self.collate(processed_pyg_data_list), self.processed_paths[0])
+        print(f"AIGDataset (split: '{self.split}'): Saved {len(processed_pyg_data_list)} processed graphs to {self.processed_paths[0]}")
 
 
-class AIGCustomDataModule(AbstractDataModule):
+class AIGDataModule(AbstractDataModule):
     def __init__(self, cfg):
+        self.cfg = cfg
+        self.datadir = cfg.dataset.datadir
         base_path = pathlib.Path(cfg.general.abs_path_to_project_root)
-        dataset_instance_root = base_path / cfg.dataset.datadir / cfg.dataset.name
+        dataset_instance_root = base_path / self.datadir / cfg.dataset.name
 
-        train_dataset = AIGCustomDataset(root=str(dataset_instance_root), split='train', cfg=cfg)
-        val_dataset = AIGCustomDataset(root=str(dataset_instance_root), split='val', cfg=cfg)
-        test_dataset = AIGCustomDataset(root=str(dataset_instance_root), split='test', cfg=cfg)
+        print(f"AIGDataModule: Root directory for AIGDataset instance '{cfg.dataset.name}' will be: {dataset_instance_root}")
 
-        super().__init__(cfg, train_dataset=train_dataset, val_dataset=val_dataset, test_dataset=test_dataset)
-        print(f"AIGCustomDataModule initialized for '{cfg.dataset.name}'. Root: {dataset_instance_root}")
-        print(f"  Train graphs: {len(self.train_dataset)}")
-        print(f"  Val graphs  : {len(self.val_dataset)}")
-        print(f"  Test graphs : {len(self.test_dataset)}")
+        datasets = {
+            'train': AIGDataset(split='train', root=str(dataset_instance_root), cfg=cfg),
+            'val': AIGDataset(split='val', root=str(dataset_instance_root), cfg=cfg),
+            'test': AIGDataset(split='test', root=str(dataset_instance_root), cfg=cfg)
+        }
+        super().__init__(cfg, datasets)
 
 
-class AIGCustomDatasetInfos(AbstractDatasetInfos):
-    def __init__(self, datamodule: AIGCustomDataModule, dataset_config):
-        super().__init__(datamodule, dataset_config)
+class AIGDatasetInfos(AbstractDatasetInfos):
+    def __init__(self, datamodule: AIGDataModule, dataset_config: dict):
+        self.name = datamodule.cfg.dataset.name
+        self.n_nodes = datamodule.node_counts()
+        self.node_types = datamodule.node_types()
+        self.edge_types = datamodule.edge_counts()
 
-        self.n_nodes_dist_stats = self.datamodule.node_counts()
-        self.node_type_dist_stats = self.datamodule.node_types()
-        # This will now return a distribution of length NUM_EDGE_FEATURES + 1
-        self.edge_type_dist_stats = self.datamodule.edge_counts()
+        super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
 
-        self.complete_infos(n_nodes=self.n_nodes_dist_stats, node_types=self.node_type_dist_stats)
+        from src.diffusion.extra_features import DummyExtraFeatures
 
-        # Assuming extra_features_fn and domain_features_fn are None or defined in cfg
-        extra_features_fn = getattr(datamodule.cfg.dataset, "extra_features_method", None)
-        domain_features_fn = getattr(datamodule.cfg.dataset, "domain_features_method", None)
+        extra_features_name = getattr(datamodule.cfg.model, "extra_features", None)
+        domain_features_name = getattr(datamodule.cfg.model, "domain_features", None)
+
+        if extra_features_name is None:
+            extra_features_fn = DummyExtraFeatures()
+        else:
+            warnings.warn(f"AIG model has extra_features '{extra_features_name}' specified, but only DummyExtraFeatures is used by default here. Ensure this is intended.")
+            extra_features_fn = DummyExtraFeatures()
+
+        if domain_features_name is None:
+            domain_features_fn = DummyExtraFeatures()
+        else:
+            warnings.warn(f"AIG model has domain_features '{domain_features_name}' specified, but only DummyExtraFeatures is used by default here. Ensure this is intended.")
+            domain_features_fn = DummyExtraFeatures()
 
         self.compute_input_output_dims(datamodule, extra_features_fn, domain_features_fn)
 
-        print(f"AIGCustomDatasetInfos for '{self.name}':")
-        print(f"  Max nodes: {self.max_n_nodes}")
-        print(f"  Node classes (num_node_features): {self.num_classes}")
-        print(
-            f"  Node type dist len: {self.node_type_dist_stats.size(0) if self.node_type_dist_stats is not None else 'N/A'}")
-        # The edge_type_dist_stats will now have NUM_EDGE_FEATURES + 1 elements
-        print(
-            f"  Edge type dist len (NUM_ACTUAL_EDGE_FEATURES + 1 for no-edge): {self.edge_type_dist_stats.size(0) if self.edge_type_dist_stats is not None else 'N/A'}")
-        print(f"  Input Dims: {self.input_dims}")
-        print(f"  Output Dims: {self.output_dims}")
+        print(f"Initialized AIGDatasetInfos for dataset: '{self.name}'")
+        print(f"  Max nodes in dataset: {self.max_n_nodes}")
+        print(f"  Number of node types (classes for prediction): {self.num_classes} (should be {NUM_NODE_FEATURES})")
+        if self.node_types is not None:
+            print(f"  Node type distribution tensor length: {self.node_types.size(0)}")
+        else:
+            print("  Node type distribution not available.")
+        if self.edge_types is not None:
+            print(f"  Edge type distribution tensor length: {self.edge_types.size(0)} (should be {NUM_EDGE_FEATURES + 1})")
+        else:
+            print("  Edge type distribution not available.")
+        print(f"  Input Dims for model: {self.input_dims}")
+        print(f"  Output Dims for model: {self.output_dims}")
 
+        # Sanity checks for AIG
+        # Note: extra_features_fn.X.size(-1) will be 0 for DummyExtraFeatures
+        expected_x_in_dim = NUM_NODE_FEATURES + extra_features_fn.X.size(-1) + domain_features_fn.X.size(-1)
+        if self.input_dims['X'] != expected_x_in_dim:
+             warnings.warn(f"Input X dim ({self.input_dims['X']}) mismatch. Expected: {expected_x_in_dim} (NUM_NODE_FEATURES={NUM_NODE_FEATURES} + extras).")
+        if self.output_dims['X'] != NUM_NODE_FEATURES:
+             warnings.warn(f"Output X dim ({self.output_dims['X']}) mismatch with NUM_NODE_FEATURES ({NUM_NODE_FEATURES}).")
+
+        expected_e_in_dim = (NUM_EDGE_FEATURES + 1) + extra_features_fn.E.size(-1) + domain_features_fn.E.size(-1)
+        if self.input_dims['E'] != expected_e_in_dim:
+             warnings.warn(f"Input E dim ({self.input_dims['E']}) mismatch. Expected: {expected_e_in_dim} (NUM_EDGE_FEATURES+1={NUM_EDGE_FEATURES+1} + extras).")
+        if self.output_dims['E'] != (NUM_EDGE_FEATURES + 1):
+             warnings.warn(f"Output E dim ({self.output_dims['E']}) mismatch with NUM_EDGE_FEATURES+1 ({NUM_EDGE_FEATURES+1}).")
