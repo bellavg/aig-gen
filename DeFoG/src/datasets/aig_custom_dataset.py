@@ -7,6 +7,7 @@ import warnings  # For explicit warnings
 import torch
 import torch.nn.functional as F
 import networkx as nx
+import math
 from torch_geometric.data import InMemoryDataset, Data
 import torch_geometric.utils # Keep this for potential future use, though not directly used in snippet
 
@@ -311,7 +312,7 @@ class AIGDataset(InMemoryDataset):
                 # Create a column of zeros for the "no specific AIG type" channel
                 zeros_column = torch.zeros((num_edges, 1),
                                            dtype=original_edge_attr.dtype,
-                                           device=original_edge_attr.device)
+                                          )
                 # Concatenate the zeros column with the original edge attributes
                 # original_edge_attr has actual AIG types (e.g., REG, INV)
                 # new_ea will have shape (num_edges, NUM_EDGE_FEATURES + 1)
@@ -320,8 +321,8 @@ class AIGDataset(InMemoryDataset):
                 data_item.edge_attr = new_ea
             else:
                 data_item.edge_attr = torch.empty((0, new_edge_attr_dim),
-                                                  dtype=data_item.x.dtype if data_item.x is not None else torch.float, # Match node feature dtype if x exists
-                                                  device=data_item.x.device if data_item.x is not None else torch.device('cpu')) # Match node feature device or default to cpu
+                                                  dtype=data_item.x.dtype,
+                                                  )
 
             nx_graph_for_validation = convert_pyg_to_nx_for_aig_validation(data_item)
             if nx_graph_for_validation is None:
@@ -411,33 +412,16 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         print(f"  Input Dims for model: {self.input_dims}")
         print(f"  Output Dims for model: {self.output_dims}")
 
-        # --- Corrected Sanity Checks for AIG ---
-        # self.input_dims has been computed by the superclass method,
-        # incorporating NUM_NODE_FEATURES and any extra feature dimensions.
-        # For AIG with DummyExtraFeatures, extra feature dimensions are 0.
-
-        # Check for X input dimension
-        # Base input dim for X is NUM_NODE_FEATURES. Dummy features add 0.
-        expected_x_input_dim_base = NUM_NODE_FEATURES
-        if self.input_dims['X'] != expected_x_input_dim_base:
-             warnings.warn(
-                 f"Input X dim ({self.input_dims['X']}) mismatch. Expected base: {expected_x_input_dim_base} (NUM_NODE_FEATURES). "
-                 f"This implies extra_features might not be dummy or there's an issue in input_dims calculation."
-             )
-
-        # Check for X output dimension
+        # Sanity checks for AIG
+        # Note: extra_features_fn.X.size(-1) will be 0 for DummyExtraFeatures
+        expected_x_in_dim = NUM_NODE_FEATURES + extra_features_fn.X.size(-1) + domain_features_fn.X.size(-1)
+        if self.input_dims['X'] != expected_x_in_dim:
+             warnings.warn(f"Input X dim ({self.input_dims['X']}) mismatch. Expected: {expected_x_in_dim} (NUM_NODE_FEATURES={NUM_NODE_FEATURES} + extras).")
         if self.output_dims['X'] != NUM_NODE_FEATURES:
              warnings.warn(f"Output X dim ({self.output_dims['X']}) mismatch with NUM_NODE_FEATURES ({NUM_NODE_FEATURES}).")
 
-        # Check for E input dimension
-        # Base input dim for E is NUM_EDGE_FEATURES + 1 (due to the added 'no specific type' channel). Dummy features add 0.
-        expected_e_input_dim_base = NUM_EDGE_FEATURES + 1
-        if self.input_dims['E'] != expected_e_input_dim_base:
-             warnings.warn(
-                 f"Input E dim ({self.input_dims['E']}) mismatch. Expected base: {expected_e_input_dim_base} (NUM_EDGE_FEATURES + 1). "
-                 f"This implies extra_features might not be dummy or there's an issue in input_dims calculation."
-             )
-
-        # Check for E output dimension
+        expected_e_in_dim = (NUM_EDGE_FEATURES + 1) + extra_features_fn.E.size(-1) + domain_features_fn.E.size(-1)
+        if self.input_dims['E'] != expected_e_in_dim:
+             warnings.warn(f"Input E dim ({self.input_dims['E']}) mismatch. Expected: {expected_e_in_dim} (NUM_EDGE_FEATURES+1={NUM_EDGE_FEATURES+1} + extras).")
         if self.output_dims['E'] != (NUM_EDGE_FEATURES + 1):
              warnings.warn(f"Output E dim ({self.output_dims['E']}) mismatch with NUM_EDGE_FEATURES+1 ({NUM_EDGE_FEATURES+1}).")
