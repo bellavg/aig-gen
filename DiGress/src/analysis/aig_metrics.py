@@ -110,18 +110,14 @@ def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
 class AIGSamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, datamodule):
         # CRITICAL FIX: Initialize local_rank *before* calling super().__init__
-        # This is because super().__init__ (from SpectreSamplingMetrics) will call
-        # self.loader_to_nx (the overridden version in this class), which uses self.local_rank.
-        self.local_rank = datamodule.cfg.general.local_rank  # Store local_rank from the datamodule's config
+        # Use .get() to provide a default value if 'local_rank' is not in the config.
+        # Default to 0 for non-distributed runs.
+        self.local_rank = datamodule.cfg.general.get('local_rank', 0)
 
         super().__init__(datamodule=datamodule,
                          compute_emd=False,  # AIGs typically don't use EMD for these structural/graph stats
                          metrics_list=['aig_structural_validity', 'aig_acyclicity', 'degree'])
 
-        # The following block ensures that train_graphs, val_graphs, and test_graphs are populated.
-        # SpectreSamplingMetrics.__init__ already calls self.loader_to_nx (which is the AIG-specific
-        # version due to method overriding). This block acts as a fallback or explicit re-assignment
-        # if needed, but ideally, the super call should suffice.
         if not self.train_graphs and hasattr(datamodule,
                                              'train_dataloader') and datamodule.train_dataloader() is not None:
             self.train_graphs = self.loader_to_nx(datamodule.train_dataloader())
@@ -130,64 +126,39 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         if not self.test_graphs and hasattr(datamodule, 'test_dataloader') and datamodule.test_dataloader() is not None:
             self.test_graphs = self.loader_to_nx(datamodule.test_dataloader())
 
-    def loader_to_nx(self, loader) -> List[nx.DiGraph]:  # Added return type hint
+    def loader_to_nx(self, loader) -> List[nx.DiGraph]:
         """ Converts a PyG DataLoader's batches into a list of NetworkX DiGraphs
             using the AIG-specific conversion function for reference/dataset graphs.
         """
         networkx_graphs = []
-        # Optional: Print only on rank 0 if in a distributed setting
-        # if self.local_rank == 0:
-        #     print(f"AIGSamplingMetrics: Loading reference graphs using 'convert_pyg_to_nx_for_aig_validation'...")
 
-        if loader is None or loader.dataset is None or len(loader.dataset) == 0:
+        if loader is None or not hasattr(loader, 'dataset') or loader.dataset is None or len(loader.dataset) == 0:
             # if self.local_rank == 0:
-            #     print("AIGSamplingMetrics: Loader or its dataset is empty. Cannot load reference graphs.")
-            return networkx_graphs  # Return empty list if loader is invalid
+            #     print("AIGSamplingMetrics.loader_to_nx: Loader or its dataset is empty/invalid. Cannot load reference graphs.")
+            return networkx_graphs
 
-        # Simplified tqdm disable condition, assuming self.local_rank is always available now
         for i, batch in enumerate(tqdm(loader, desc="Loading Ref Graphs",
-                                       disable=(self.local_rank != 0))):
+                                       disable=(self.local_rank != 0))):  # self.local_rank is now guaranteed to exist
             data_list = batch.to_data_list()
             for j, pyg_data in enumerate(data_list):
-                # pyg_data.edge_attr here is already (NumEdges, NUM_EDGE_FEATURES + 1)
-                # from AIGCustomDataset.process()
                 nx_graph = convert_pyg_to_nx_for_aig_validation(pyg_data)
                 if nx_graph is not None:
                     networkx_graphs.append(nx_graph)
-                # else:
-                #     if self.local_rank == 0: # Conditional print
-                #         print(f"Warning: Reference graph (batch {i}, item {j}) failed PyG to NX conversion.")
-
-        # if self.local_rank == 0: # Conditional print
-        #     print(f"AIGSamplingMetrics: Loaded {len(networkx_graphs)} reference graphs for this split.")
         return networkx_graphs
 
-    def forward(self, generated_graphs_raw: list, name: str, current_epoch: int, val_counter: int, local_rank: int,
+    def forward(self, generated_graphs_raw: list, name: str, current_epoch: int, val_counter: int,
+                local_rank_param: int,
                 test: bool = False):
         """
         Calculates metrics for generated AIGs.
-        `generated_graphs_raw`: A list of tuples from the sampling process:
-                                (node_features, edge_index, edge_features, num_nodes_tensor)
-                                - node_features: (max_n_nodes, NUM_NODE_FEATURES)
-                                - edge_index: (2, n_edges)
-                                - edge_features: (n_edges, NUM_EDGE_FEATURES + 1) <--- IMPORTANT: Model output
-        `local_rank`: Passed directly to this method, preferred over relying on self.local_rank if called externally.
-                      However, internal calls from sampling might still use self.local_rank if not overridden.
-                      For consistency, this method's tqdm also uses the passed `local_rank`.
+        `local_rank_param`: The local rank passed to this function, typically from the trainer.
         """
         reference_graphs_nx = self.test_graphs if test else self.val_graphs
-
-        # if local_rank == 0:
-        #     print(f"AIGMetrics (Rank {local_rank}): Evaluating {len(generated_graphs_raw)} generated AIGs "
-        #           f"vs {len(reference_graphs_nx)} refs (Split: {'test' if test else 'val'}).")
+        current_rank_for_tqdm = local_rank_param
 
         generated_graphs_nx = []
-        # if local_rank == 0:
-        #     print("AIGMetrics: Converting raw model outputs to NetworkX DiGraphs...")
-
         for i, graph_raw_data in enumerate(
-                tqdm(generated_graphs_raw, desc="Converting Generated Graphs",
-                     disable=(local_rank != 0))):  # Use passed local_rank
+                tqdm(generated_graphs_raw, desc="Converting Generated Graphs", disable=(current_rank_for_tqdm != 0))):
             node_features, edge_index, edge_features_model, num_nodes_tensor = graph_raw_data
             num_nodes_int = num_nodes_tensor.item()
 
@@ -198,7 +169,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
                 generated_graphs_nx.append(nx_graph)
 
         if not generated_graphs_nx:
-            if local_rank == 0:  # Use passed local_rank
+            if current_rank_for_tqdm == 0:
                 print("AIGMetrics: No generated graphs successfully converted. Skipping metrics.")
             return {}
 
@@ -209,7 +180,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
             structural_validity_fraction = num_structurally_valid / len(
                 generated_graphs_nx) if generated_graphs_nx else 0.0
             to_log['aig_metrics/structural_validity_fraction'] = structural_validity_fraction
-            if wandb.run and local_rank == 0:  # Use passed local_rank
+            if wandb.run and current_rank_for_tqdm == 0:
                 wandb.summary[f'{name}_aig_structural_validity_fraction'] = structural_validity_fraction
 
         # 2. Acyclicity
@@ -217,37 +188,30 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
             num_acyclic = sum(1 for g in generated_graphs_nx if nx.is_directed_acyclic_graph(g))
             acyclicity_fraction = num_acyclic / len(generated_graphs_nx) if generated_graphs_nx else 0.0
             to_log['aig_metrics/acyclicity_fraction'] = acyclicity_fraction
-            if wandb.run and local_rank == 0:  # Use passed local_rank
+            if wandb.run and current_rank_for_tqdm == 0:
                 wandb.summary[f'{name}_aig_acyclicity_fraction'] = acyclicity_fraction
 
         # 3. Degree Stats
-        # Note: degree_stats from spectre_utils is for undirected graphs.
-        # For AIGs (directed), you might want separate in/out-degree stats or a directed version.
-        # This is kept as per your current metrics_list.
-        if 'degree' in self.metrics_list:
-            if reference_graphs_nx and generated_graphs_nx:
-                # Convert DiGraphs to undirected for spectre_utils.degree_stats if that's intended
-                # Or, implement/use a directed degree statistics function.
-                # For now, assuming conversion to undirected for compatibility with existing degree_stats:
-                ref_undirected = [g.to_undirected() for g in reference_graphs_nx]
-                gen_undirected = [g.to_undirected() for g in generated_graphs_nx]
-                degree_mmd = degree_stats(ref_undirected, gen_undirected, is_parallel=True,
-                                          compute_emd=self.compute_emd)  # self.compute_emd is False
-                to_log['graph_stats/degree_mmd_undirected'] = degree_mmd  # Clarify it's undirected
-                if wandb.run and local_rank == 0:  # Use passed local_rank
-                    wandb.summary[f'{name}_degree_mmd_undirected'] = degree_mmd
-            else:
-                to_log['graph_stats/degree_mmd_undirected'] = -1.0  # Indicate not computed
+        # if 'degree' in self.metrics_list:
+        #     if reference_graphs_nx and generated_graphs_nx:
+        #         ref_undirected = [g.to_undirected(as_view=False) for g in
+        #                           reference_graphs_nx]  # Use as_view=False for safety if graphs are modified
+        #         gen_undirected = [g.to_undirected(as_view=False) for g in generated_graphs_nx]
+        #         degree_mmd = degree_stats(ref_undirected, gen_undirected, is_parallel=True,
+        #                                   compute_emd=self.compute_emd)
+        #         to_log['graph_stats/degree_mmd_undirected'] = degree_mmd
+        #         if wandb.run and current_rank_for_tqdm == 0:
+        #             wandb.summary[f'{name}_degree_mmd_undirected'] = degree_mmd
+        #     else:
+        #         to_log['graph_stats/degree_mmd_undirected'] = -1.0
 
-        # 4. Uniqueness, Isomorphism, Novelty
+                # 4. Uniqueness, Isomorphism, Novelty
+
         def combined_aig_validity_for_eval_fractions(g_nx_eval):
-            # This function is used by eval_fraction_unique_non_isomorphic_valid
-            # to determine if a *novel* graph is also *valid* by AIG standards.
             return aig_check_validity(g_nx_eval)
 
-        train_graphs_nx = self.train_graphs  # Already loaded NetworkX graphs
+        train_graphs_nx = self.train_graphs
 
-        # Filter out any graphs that might be empty before passing to eval functions
         eval_generated_graphs_nx = [g for g in generated_graphs_nx if g.number_of_nodes() > 0]
         eval_train_graphs_nx = [g for g in train_graphs_nx if g.number_of_nodes() > 0] if train_graphs_nx else []
 
@@ -256,16 +220,16 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
 
         if not eval_generated_graphs_nx:
             pass
-        elif not eval_train_graphs_nx:  # If no training graphs, all unique generated are novel
+        elif not eval_train_graphs_nx:
             frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
                 eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, [],
                                                           validity_func=combined_aig_validity_for_eval_fractions)
-            frac_non_iso_to_train = 1.0 if eval_generated_graphs_nx else 0.0  # All non-empty generated are non-isomorphic to an empty train set
+            frac_non_iso_to_train = 1.0 if eval_generated_graphs_nx else 0.0
         else:
             frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
                 eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, eval_train_graphs_nx,
                                                           validity_func=combined_aig_validity_for_eval_fractions)
-            if eval_generated_graphs_nx:  # Only calculate if there are generated graphs
+            if eval_generated_graphs_nx:
                 frac_non_iso_to_train = 1.0 - eval_fraction_isomorphic(eval_generated_graphs_nx, eval_train_graphs_nx)
             else:
                 frac_non_iso_to_train = 0.0
@@ -277,9 +241,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
             'sampling_quality/frac_non_iso_to_train_aigs': frac_non_iso_to_train
         })
 
-        # if local_rank == 0: # Use passed local_rank
-        # print(f"AIGMetrics (Rank {local_rank}): Final metrics for {name}: {to_log}")
-        if wandb.run and local_rank == 0:  # Use passed local_rank
+        if wandb.run and current_rank_for_tqdm == 0:
             wandb.log({f"{name}_{k.replace('/', '_')}": v for k, v in to_log.items()}, commit=True)
 
         return to_log
