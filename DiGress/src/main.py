@@ -107,7 +107,7 @@ def main(cfg: DictConfig):
         # For example, if it's in src/analysis/aig_metrics.py:
         # from src.analysis.aig_metrics import AIGSamplingMetrics
         # For this example, assuming it was added to spectre_utils.py:
-        from src.analysis.spectre_utils import AIGSamplingMetrics # Ensure this is the correct path
+        from src.analysis.aig_metrics import AIGSamplingMetrics # Ensure this is the correct path
         from src.analysis.visualization import NonMolecularVisualization
 
         datamodule = SpectreGraphDataModule(cfg)
@@ -125,7 +125,7 @@ def main(cfg: DictConfig):
             extra_features = ExtraFeatures(model_cfg.extra_features, dataset_info=dataset_infos)
 
     elif dataset_config["name"] == 'aig':
-        from src.datasets.aig_custom_dataset import AIGCustomDataModule, AIGCustomDatasetInfos
+        from src.datasets.aig_custom_dataset import AIGDataModule, AIGDatasetInfos
         # >>> CHANGE 2: Import your AIGSamplingMetrics class
         # Ensure this path is correct based on where you defined AIGSamplingMetrics.
         # If it's in spectre_utils.py and already imported above, you don't need a separate import here.
@@ -135,8 +135,8 @@ def main(cfg: DictConfig):
         from src.analysis.aig_metrics import AIGSamplingMetrics # Or from src.analysis.aig_metrics if separate
         from src.analysis.visualization import NonMolecularVisualization
 
-        datamodule = AIGCustomDataModule(cfg)
-        dataset_infos = AIGCustomDatasetInfos(datamodule, dataset_config)
+        datamodule = AIGDataModule(cfg)
+        dataset_infos = AIGDatasetInfos(datamodule, dataset_config)
         visualization_tools = NonMolecularVisualization()
 
         # >>> CHANGE 3: Instantiate AIGSamplingMetrics instead of the placeholder
