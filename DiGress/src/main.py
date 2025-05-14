@@ -146,43 +146,43 @@ def main(cfg: DictConfig):
         # Extra features are not used for AIGs as per your config (model.extra_features: null)
         # extra_features and domain_features remain DummyExtraFeatures
 
-    elif dataset_config["name"] in ['qm9', 'guacamol', 'moses']:
-        from src.metrics.molecular_metrics import TrainMolecularMetrics, SamplingMolecularMetrics
-        from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
-        from src.diffusion.extra_features_molecular import ExtraMolecularFeatures
-        from src.analysis.visualization import MolecularVisualization
-        # >>> Also ensure AIGSamplingMetrics is imported if it wasn't handled in the first block
-        # from src.analysis.spectre_utils import AIGSamplingMetrics # Or from src.analysis.aig_metrics
-
-        if dataset_config["name"] == 'qm9':
-            from src.datasets import qm9_dataset
-            datamodule = qm9_dataset.QM9DataModule(cfg)
-            dataset_infos = qm9_dataset.QM9infos(datamodule=datamodule, cfg=cfg)
-            train_smiles = qm9_dataset.get_train_smiles(cfg=cfg, train_dataloader=datamodule.train_dataloader(),
-                                                        dataset_infos=dataset_infos, evaluate_dataset=False)
-        elif dataset_config['name'] == 'guacamol':
-            from src.datasets import guacamol_dataset
-            datamodule = guacamol_dataset.GuacamolDataModule(cfg)
-            dataset_infos = guacamol_dataset.Guacamolinfos(datamodule, cfg)
-            train_smiles = None
-        elif dataset_config.name == 'moses':
-            from src.datasets import moses_dataset
-            datamodule = moses_dataset.MosesDataModule(cfg)
-            dataset_infos = moses_dataset.MOSESinfos(datamodule, cfg)
-            train_smiles = None
-        else:
-            raise ValueError(f"Dataset {dataset_config.name} not implemented in molecular block")
-
-        visualization_tools = MolecularVisualization(cfg.dataset.get('remove_h', False), dataset_infos=dataset_infos)
-        if model_cfg.type == 'discrete':
-            train_metrics = TrainMolecularMetricsDiscrete(dataset_infos)
-        else:
-            train_metrics = TrainMolecularMetrics(dataset_infos)
-        sampling_metrics = SamplingMolecularMetrics(dataset_infos, train_smiles)
-
-        if model_cfg.type == 'discrete' and model_cfg.get('extra_features') is not None:
-            extra_features = ExtraFeatures(model_cfg.extra_features, dataset_info=dataset_infos)
-            domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
+    # elif dataset_config["name"] in ['qm9', 'guacamol', 'moses']:
+    #     from src.metrics.molecular_metrics import TrainMolecularMetrics, SamplingMolecularMetrics
+    #     from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
+    #     from src.diffusion.extra_features_molecular import ExtraMolecularFeatures
+    #     from src.analysis.visualization import MolecularVisualization
+    #     # >>> Also ensure AIGSamplingMetrics is imported if it wasn't handled in the first block
+    #     # from src.analysis.spectre_utils import AIGSamplingMetrics # Or from src.analysis.aig_metrics
+    #
+    #     if dataset_config["name"] == 'qm9':
+    #         from src.datasets import qm9_dataset
+    #         datamodule = qm9_dataset.QM9DataModule(cfg)
+    #         dataset_infos = qm9_dataset.QM9infos(datamodule=datamodule, cfg=cfg)
+    #         train_smiles = qm9_dataset.get_train_smiles(cfg=cfg, train_dataloader=datamodule.train_dataloader(),
+    #                                                     dataset_infos=dataset_infos, evaluate_dataset=False)
+    #     elif dataset_config['name'] == 'guacamol':
+    #         from src.datasets import guacamol_dataset
+    #         datamodule = guacamol_dataset.GuacamolDataModule(cfg)
+    #         dataset_infos = guacamol_dataset.Guacamolinfos(datamodule, cfg)
+    #         train_smiles = None
+    #     elif dataset_config.name == 'moses':
+    #         from src.datasets import moses_dataset
+    #         datamodule = moses_dataset.MosesDataModule(cfg)
+    #         dataset_infos = moses_dataset.MOSESinfos(datamodule, cfg)
+    #         train_smiles = None
+    #     else:
+    #         raise ValueError(f"Dataset {dataset_config.name} not implemented in molecular block")
+    #
+    #     # visualization_tools = MolecularVisualization(cfg.dataset.get('remove_h', False), dataset_infos=dataset_infos)
+    #     # if model_cfg.type == 'discrete':
+    #     #     train_metrics = TrainMolecularMetricsDiscrete(dataset_infos)
+    #     # else:
+    #     #     train_metrics = TrainMolecularMetrics(dataset_infos)
+    #     # sampling_metrics = SamplingMolecularMetrics(dataset_infos, train_smiles)
+    #
+    #     # if model_cfg.type == 'discrete' and model_cfg.get('extra_features') is not None:
+    #     #     extra_features = ExtraFeatures(model_cfg.extra_features, dataset_info=dataset_infos)
+    #     #     domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
     else:
         # Ensure AIGSamplingMetrics is imported if no other block handled it
         # from src.analysis.spectre_utils import AIGSamplingMetrics # Or from src.analysis.aig_metrics
