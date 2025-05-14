@@ -32,7 +32,7 @@ echo "Starting DiGress AIG Training"
 echo "========================================"
 echo "Running command:"
 echo "----------------------------------------"
-
+pip install -e .
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 # Execute the training script
