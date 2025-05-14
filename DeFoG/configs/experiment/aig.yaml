@@ -24,7 +24,7 @@ general:
   # Conditional generation (set to True if your AIGs have labels you want to condition on)
   conditional: False
   # target: 'your_aig_label_key' # if conditional is True
-  # guidance_weight: 2.0          # if conditional is True (typical value from paper [cite: 1555])
+  # guidance_weight: 2.0          # if conditional is True (typical value from paper)
 
 train:
   n_epochs: 20000             # Start with a moderate number, adjust based on convergence
@@ -34,55 +34,33 @@ train:
   save_model: True            # As requested
   ema_decay: 0.999            # Exponential Moving Average decay (0 means off)
 
-  # Time distortion for training (see DeFoG paper Sec 3.2, C.2 [cite: 972, 1373])
-  # 'polydec' often works well for structured data by focusing on later refinement steps [cite: 970, 1245]
   time_distortion: 'polydec'
 
 sample:
   sample_steps: 1000          # Number of steps for the sampling process (denoising)
-
-  # Time distortion for sampling (ideally aligned with training [cite: 976])
   time_distortion: 'polydec'
-
-  # Target guidance (omega) and Stochasticity (eta) (DeFoG paper Sec 3.2, B.2, B.3 [cite: 978, 1250, 986, 1260])
-  # Start with conservative values (0) and tune if needed.
-  # For Planar (structured, constraint-heavy), omega=0.05, eta=50 were used.
-  # AIGs are structured (DAGs), so some guidance/stochasticity might help.
-  omega: 0.0                  # Target guidance strength (0.0 to start, small positive if needed)
-  eta: 0.0                    # Stochasticity factor (0.0 to start, moderate positive if needed)
-
-  # Search flags (set to True to run hyperparameter search for sampling, then set best values above)
-  search: False               # e.g., 'all', 'target_guidance', 'distortion', 'stochasticity'
-
-  # Fixed sampling parameters (generally keep these defaults from model/discrete.yaml)
+  omega: 0.0
+  eta: 0.0
+  search: False
   rdb: 'general'
   rdb_crit: 'dummy'
 
 model:
-  # transition: 'marginal' # Default from model/discrete.yaml, generally a good start [cite: 1355, 1360]
-                          # 'absorbfirst' was better for SBM[cite: 1367], but AIGs are different.
-  n_layers: 10                # Number of layers in the Graph Transformer
-
-  # Extra features (DeFoG paper Sec F.1, G.4 [cite: 1020, 1567, 1689])
-  # 'rrwp' (Relative Random Walk Probabilities) is generally beneficial for capturing structure.
-#  extra_features: 'rrwp'
-#  rrwp_steps: 16              # Number of steps for RRWP (12-20 is common)
-
-  # Hidden dimensions for MLPs and Transformer
-  # These are common defaults from other DeFoG experiments.
+  n_layers: 10
   hidden_mlp_dims: { 'X': 128, 'E': 64, 'y': 128 }
   hidden_dims: {
-    'dx': 256,               # Node feature dimension in Transformer
-    'de': 64,                # Edge feature dimension in Transformer
-    'dy': 64,                # Global feature dimension in Transformer
-    'n_head': 8,             # Number of attention heads
-    'dim_ffX': 256,          # Feed-forward dimension for nodes
-    'dim_ffE': 128,          # Feed-forward dimension for edges
-    'dim_ffy': 128           # Feed-forward dimension for global features
+    'dx': 256,
+    'de': 64,
+    'dy': 64,
+    'n_head': 8,
+    'dim_ffX': 256,
+    'dim_ffE': 128,
+    'dim_ffy': 128
   }
-  # lambda_train: [1.0, 0.0] # From model/discrete.yaml: weight for X, E, y losses. Default is [1,0] in DeFoG paper for general graphs.
-                              # For AIGs, edge structure is important, so you might consider increasing E weight if needed.
-                              # Format [weight_E, weight_y], node weight is implicitly 1.
-                              # E.g., lambda_train: [5.0, 0.0] was used in a DiGress config. Start with default.
 
-dataset: aig # This will load configs/dataset/aig.yaml
+# The following line was removed or commented out:
+# dataset: aig # This will load configs/dataset/aig.yaml
+
+# If you need the experiment to explicitly set the dataset, use the following 'defaults' structure instead:
+# defaults:
+#   - override /dataset: aig
