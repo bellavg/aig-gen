@@ -11,7 +11,7 @@ export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B
 export HYDRA_FULL_ERROR=1
 
 # --- Configuration ---
-CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
+CONDA_ENV_NAME="defog" # CHANGE THIS to your Conda environment name
 PROJECT_ROOT="./DeFoG" # IMPORTANT: SET THIS!
 
 
@@ -32,7 +32,7 @@ echo "Starting DiGress AIG Training"
 echo "========================================"
 echo "Running command:"
 echo "----------------------------------------"
-#pip install -e .
+pip install -e .
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 # Execute the training script
