@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=digress_aig_train
+#SBATCH --job-name=t-digress_aig_train
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
 #SBATCH --time=00:20:00              # Initial requested time, adjust as needed

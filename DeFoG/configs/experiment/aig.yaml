@@ -1,6 +1,4 @@
-# configs/experiment/aig.yaml
 # @package _global_
-
 general:
   name: 'aig' # Name for your experiment runs
   gpus: 1
