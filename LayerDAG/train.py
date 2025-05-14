@@ -556,7 +556,7 @@ def main(args):
         shuffle=True,
         num_workers=config['node_count']['loader']['num_workers'],
         collate_fn=collate_node_count,
-        pin_memory=True if device_str == "cuda:0" else False  # Optional: for faster data transfer to GPU
+        pin_memory=False  # Optional: for faster data transfer to GPU
     )
     node_count_val_loader = DataLoader(
         val_node_count_dataset,
@@ -564,7 +564,7 @@ def main(args):
         shuffle=False,
         num_workers=config['node_count']['loader']['num_workers'],
         collate_fn=collate_node_count,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory= False
     )
 
     node_pred_train_loader = DataLoader(
@@ -573,7 +573,7 @@ def main(args):
         shuffle=True,
         num_workers=config['node_pred']['loader']['num_workers'],
         collate_fn=collate_node_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=False
     )
     node_pred_val_loader = DataLoader(
         val_node_pred_dataset,
@@ -581,7 +581,7 @@ def main(args):
         shuffle=False,
         num_workers=config['node_pred']['loader']['num_workers'],
         collate_fn=collate_node_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory= False
     )
 
     edge_pred_train_loader = DataLoader(
@@ -590,7 +590,7 @@ def main(args):
         shuffle=True,
         num_workers=config['edge_pred']['loader']['num_workers'],
         collate_fn=collate_edge_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory= False
     )
     edge_pred_val_loader = DataLoader(
         val_edge_pred_dataset,
@@ -598,7 +598,7 @@ def main(args):
         shuffle=False,
         num_workers=config['edge_pred']['loader']['num_workers'],
         collate_fn=collate_edge_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=False
     )
     print("DataLoaders created.")
 
