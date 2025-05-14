@@ -298,7 +298,13 @@ def main(cfg: DictConfig):
     use_gpu = cfg.general.gpus > 0 and torch.cuda.is_available()
 
     trainer_strategy = "ddp_find_unused_parameters_true" if use_gpu and cfg.general.gpus > 1 else None
-
+    if use_gpu:
+        if cfg.general.gpus > 1:
+            trainer_strategy = "ddp_find_unused_parameters_true"
+        else:
+            trainer_strategy = "auto"  # Or "single_device" if you know it's always one GPU
+    else:  # CPU
+        trainer_strategy = "auto"  # Or "single_device"
     trainer = Trainer(
         gradient_clip_val=cfg.train.clip_grad,
         strategy=trainer_strategy,
