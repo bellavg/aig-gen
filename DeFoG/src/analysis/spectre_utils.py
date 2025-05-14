@@ -24,7 +24,7 @@ from string import ascii_uppercase, digits
 from datetime import datetime
 from scipy.linalg import eigvalsh
 from scipy.stats import chi2
-from analysis.dist_helper import (
+from .dist_helper import (
     compute_mmd,
     gaussian_emd,
     gaussian,
@@ -35,7 +35,7 @@ from analysis.dist_helper import (
 from torch_geometric.utils import to_networkx
 import wandb
 
-from metrics.abstract_metrics import compute_ratios
+from src.abstract_metrics import compute_ratios
 
 PRINT_TIME = False
 __all__ = [
