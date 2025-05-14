@@ -1,15 +1,5 @@
-# configs/experiment/aig.yaml
-# This configuration is for your AIG experiment.
-# It will be combined by Hydra with:
-# - configs/general/general_default.yaml
-# - configs/train/train_default.yaml
-# - configs/model/discrete.yaml
-# - configs/dataset/aig.yaml (as specified by dataset=aig)
-#
-# Command to run:
-# python src/main.py experiment=aig dataset=aig general.abs_path_to_project_root=/path/to/your/DiGress_project
-
-
+# @package _global_
+general:
   name: 'aig' # Override default 'graph-tf-model' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
   # wandb: 'online' # Default is 'online' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
   # gpus: 1 # Default is 1 from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
