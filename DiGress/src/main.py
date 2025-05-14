@@ -15,7 +15,7 @@ from pytorch_lightning.utilities.warnings import PossibleUserWarning
 
 # Assuming 'src' is the root for these imports from the DiGress structure
 from src import utils
-from src.metrics.abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
+from .abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
 from src.diffusion_model import LiftedDenoisingDiffusion
 from src.diffusion_model_discrete import DiscreteDenoisingDiffusion
 from src.diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
