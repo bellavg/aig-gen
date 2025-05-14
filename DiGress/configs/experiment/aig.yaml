@@ -9,7 +9,7 @@
 # Command to run:
 # python src/main.py experiment=aig dataset=aig general.abs_path_to_project_root=/path/to/your/DiGress_project
 
-general:
+
   name: 'aig' # Override default 'graph-tf-model' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
   # wandb: 'online' # Default is 'online' from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
   # gpus: 1 # Default is 1 from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml], no override needed.
@@ -18,7 +18,7 @@ general:
   abs_path_to_project_root: "." # Or provide via command line.
   gpus: 1
   wandb: 'online'
-
+  log_every_steps: 100
   # resume: null # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
   # test_only: null # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]
 
