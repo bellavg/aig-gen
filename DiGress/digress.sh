@@ -39,8 +39,7 @@ echo "----------------------------------------"
 # The -u flag is for unbuffered Python output, good for logs
 srun python -u src/main.py \
     +experiment=aig.yaml \
-    dataset=aig \
-    +general.abs_path_to_project_root=. \
+    dataset=aig
     # Add any other specific Hydra overrides here if needed, e.g.:
     # general.resume=outputs/YYYY-MM-DD/HH-MM-SS-aig_resume/checkpoints/last-epoch=XXXX.ckpt
     # train.n_epochs=6000 # To override the config file value
