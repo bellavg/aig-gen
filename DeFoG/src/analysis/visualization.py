@@ -12,7 +12,7 @@ import wandb
 import matplotlib.pyplot as plt
 
 
-from src.datasets.tls_dataset import CellGraph
+# from src.datasets.tls_dataset import CellGraph
 
 #
 # class MolecularVisualization:
@@ -244,12 +244,9 @@ class NonMolecularVisualization:
         for i in range(num_graphs_to_visualize):
             file_path = os.path.join(path, "graph_{}.png".format(i))
 
-            if self.is_tls:
-                cg = CellGraph.from_dense_graph(graphs[i])
-                cg.plot_graph(save_path=file_path, has_legend=True)
-            else:
-                graph = self.to_networkx(graphs[i][0].numpy(), graphs[i][1].numpy())
-                self.visualize_non_molecule(graph=graph, pos=None, path=file_path)
+
+            graph = self.to_networkx(graphs[i][0].numpy(), graphs[i][1].numpy())
+            self.visualize_non_molecule(graph=graph, pos=None, path=file_path)
 
             im = plt.imread(file_path)
             if wandb.run and log is not None:
@@ -259,12 +256,8 @@ class NonMolecularVisualization:
 
         graphs = []
         for i in range(nodes_list.shape[0]):
-            if self.is_tls:
-                graphs.append(
-                    CellGraph.from_dense_graph((nodes_list[i], adjacency_matrix[i]))
-                )
-            else:
-                graphs.append(self.to_networkx(nodes_list[i], adjacency_matrix[i]))
+
+            graphs.append(self.to_networkx(nodes_list[i], adjacency_matrix[i]))
 
         # find the coordinates of atoms in the final molecule
         final_graph = graphs[-1]
