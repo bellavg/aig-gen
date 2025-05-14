@@ -38,11 +38,3 @@ check_val_every_n_epochs: 50     # Override default 5 [cite: cvignac/DiGress/DiG
 # --- Settings for final model sampling (after training) ---
 final_model_samples_to_generate: 1000 # User requirement. Overrides default 10000 from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml].
 final_model_samples_to_save: 50       # Number of the 1000 to visualize directly by framework. Default is 30 [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml]. All 1000 are typically saved programmatically.
-      # Default from general_default.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/general/general_default.yaml].
-type: 'discrete'
-diffusion_steps: 1000 # Override default 500 from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
-
-n_layers: 8 # Override default 5 from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
-
-lambda_train: [1.0, 1.0, 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
-

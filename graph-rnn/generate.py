@@ -543,14 +543,14 @@ if __name__ == '__main__':
     # For now, it just takes the adjacency matrix and a directed flag.
     is_directed_graph = (mode_loaded != 'undirected')
 
-    # Ensure graph is not empty before drawing
-    if adj_matrix_generated.shape[0] > 0:
-        try:
-            evaluate.draw_generated_graph(adj_matrix_generated, 'generated_graph_with_node_types', directed=is_directed_graph)
-            print("Saved generated graph to generated_graph_with_node_types.png")
-        except Exception as e:
-            print(f"Error during graph drawing: {e}")
-            print("Skipping graph drawing.")
-    else:
-        print("Generated graph is empty, skipping drawing.")
-
+    # # Ensure graph is not empty before drawing
+    # if adj_matrix_generated.shape[0] > 0:
+    #     try:
+    #         evaluate.draw_generated_graph(adj_matrix_generated, 'generated_graph_with_node_types', directed=is_directed_graph)
+    #         print("Saved generated graph to generated_graph_with_node_types.png")
+    #     except Exception as e:
+    #         print(f"Error during graph drawing: {e}")
+    #         print("Skipping graph drawing.")
+    # else:
+    #     print("Generated graph is empty, skipping drawing.")
+    #
