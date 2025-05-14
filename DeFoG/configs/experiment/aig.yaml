@@ -1,6 +1,5 @@
 # @package _global_
 general:
-  name: 'aig' # Name for your experiment runs
   gpus: 1
   wandb: 'online' # Or 'disabled' or 'offline'
   abs_path_to_project_root: null # Set this if your project root is not parent of src, or let it be inferred

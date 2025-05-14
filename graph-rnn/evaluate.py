@@ -18,7 +18,7 @@ import orbit_stats
 
 
 
-def generated_graph_to_networkx(list_adj_vecs, directed=False):
+def generated_graph_to_networkx(list_adj_vecs, directed=True):
     """
     Convert output of graph generation from model to networkx graph object.
 

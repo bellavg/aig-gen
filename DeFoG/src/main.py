@@ -73,6 +73,7 @@ def main(cfg: DictConfig):
     extra_features = None  # Will be initialized based on config
     domain_features = None  # Will be initialized based on config
 
+    print("dataset config:", dataset_config)
     if dataset_config.name in ["sbm", "comm20", "planar", "tree"]:
         from src.datasets.spectre_dataset import SpectreGraphDataModule, SpectreDatasetInfos
         from src.analysis.visualization import NonMolecularVisualization
@@ -118,7 +119,7 @@ def main(cfg: DictConfig):
         visualization_tools = NonMolecularVisualization(dataset_name=cfg.dataset.name)
 
         # Instantiate your custom AIG sampling metrics
-        # Ensure AIGSamplingMetrics is defined and can be instantiated with datamodule (and cfg if needed)
+        # Ensure AIGSamplingMetrics is define and can be instantiated with datamodule (and cfg if needed)
         sampling_metrics = AIGSamplingMetrics(datamodule=datamodule)
 
         # Handle extra features based on model config, defaulting to Dummy if not specified or 'null'/'none'
