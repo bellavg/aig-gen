@@ -2,53 +2,53 @@ import os.path as osp
 import pickle
 from typing import Any, Sequence
 
-from rdkit import Chem
+# from rdkit import Chem
 import torch
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph
 
-
-def mol_to_torch_geometric(mol, atom_encoder, smiles):
-    adj = torch.from_numpy(Chem.rdmolops.GetAdjacencyMatrix(mol, useBO=True))
-    edge_index = adj.nonzero().contiguous().T
-    bond_types = adj[edge_index[0], edge_index[1]]
-    bond_types[bond_types == 1.5] = 4
-    edge_attr = bond_types.long()
-
-    node_types = []
-    all_charge = []
-    for atom in mol.GetAtoms():
-        node_types.append(atom_encoder[atom.GetSymbol()])
-        all_charge.append(atom.GetFormalCharge())
-
-    node_types = torch.Tensor(node_types).long()
-    all_charge = torch.Tensor(all_charge).long()
-
-    data = Data(
-        x=node_types,
-        edge_index=edge_index,
-        edge_attr=edge_attr,
-        charge=all_charge,
-        smiles=smiles,
-    )
-    return data
-
-
-def remove_hydrogens(data: Data):
-    to_keep = data.x > 0
-    new_edge_index, new_edge_attr = subgraph(
-        to_keep,
-        data.edge_index,
-        data.edge_attr,
-        relabel_nodes=True,
-        num_nodes=len(to_keep),
-    )
-    return Data(
-        x=data.x[to_keep] - 1,  # Shift onehot encoding to match atom decoder
-        charge=data.charge[to_keep],
-        edge_index=new_edge_index,
-        edge_attr=new_edge_attr,
-    )
+#
+# def mol_to_torch_geometric(mol, atom_encoder, smiles):
+#     adj = torch.from_numpy(Chem.rdmolops.GetAdjacencyMatrix(mol, useBO=True))
+#     edge_index = adj.nonzero().contiguous().T
+#     bond_types = adj[edge_index[0], edge_index[1]]
+#     bond_types[bond_types == 1.5] = 4
+#     edge_attr = bond_types.long()
+#
+#     node_types = []
+#     all_charge = []
+#     for atom in mol.GetAtoms():
+#         node_types.append(atom_encoder[atom.GetSymbol()])
+#         all_charge.append(atom.GetFormalCharge())
+#
+#     node_types = torch.Tensor(node_types).long()
+#     all_charge = torch.Tensor(all_charge).long()
+#
+#     data = Data(
+#         x=node_types,
+#         edge_index=edge_index,
+#         edge_attr=edge_attr,
+#         charge=all_charge,
+#         smiles=smiles,
+#     )
+#     return data
+#
+#
+# def remove_hydrogens(data: Data):
+#     to_keep = data.x > 0
+#     new_edge_index, new_edge_attr = subgraph(
+#         to_keep,
+#         data.edge_index,
+#         data.edge_attr,
+#         relabel_nodes=True,
+#         num_nodes=len(to_keep),
+#     )
+#     return Data(
+#         x=data.x[to_keep] - 1,  # Shift onehot encoding to match atom decoder
+#         charge=data.charge[to_keep],
+#         edge_index=new_edge_index,
+#         edge_attr=new_edge_attr,
+#     )
 
 
 def save_pickle(array, path):
