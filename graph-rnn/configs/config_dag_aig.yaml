@@ -13,8 +13,8 @@ model:
 data:
   dataset: 'aig'
   bfs:
-  m: 30
-  train_split: 0.8
+  m: 63
+  train_split: 0.7
 
 train:
   steps: 96000

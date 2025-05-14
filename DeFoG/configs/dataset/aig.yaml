@@ -1,6 +1,3 @@
-# configs/dataset/aig.yaml
-
-# Name of the dataset configuration. Hydra uses this to identify the dataset.
 name: aig
 remove_h: null
 
