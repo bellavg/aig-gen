@@ -9,7 +9,7 @@ remove_h: null
 # (e.g., train.pt, val.pt, test.pt).
 # Relative to general.abs_path_to_project_root.
 datadir: data_cache/aig_datasets # Example: project_root/data_cache/aig_datasets/aig/
-
+log_every_steps: 100
 # Directory where AIGCustomDataModule looks for the single, large, combined raw PyG file.
 # Relative to general.abs_path_to_project_root.
 # Matches output_pyg_dir from your create_dataset.py script.
