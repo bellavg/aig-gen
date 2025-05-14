@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-import src.flow_matching.flow_matching_utils
+from . import flow_matching_utils
 from .utils import dt_p_xt_g_x1, p_xt_g_x1
 
 

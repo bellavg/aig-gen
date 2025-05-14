@@ -16,9 +16,9 @@ from pytorch_lightning.utilities.warnings import PossibleUserWarning
 
 # DeFoG specific imports
 from src import utils  # Assuming utils.py is in src
-from src.metrics.abstract_metrics import TrainAbstractMetricsDiscrete
+from src.abstract_metrics import TrainAbstractMetricsDiscrete
 from graph_discrete_flow_model import GraphDiscreteFlowModel
-from src.models.extra_features import DummyExtraFeatures, ExtraFeatures
+from models.extra_features import DummyExtraFeatures, ExtraFeatures
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
 

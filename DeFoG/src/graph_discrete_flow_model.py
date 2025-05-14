@@ -15,7 +15,7 @@ from torch.distributions.categorical import Categorical
 
 from models.transformer_model import GraphTransformer
 
-from metrics.train_metrics import TrainLossDiscrete
+from src.train_metrics import TrainLossDiscrete
 from src import utils
 from flow_matching.noise_distribution import NoiseDistribution
 from flow_matching.time_distorter import TimeDistorter
