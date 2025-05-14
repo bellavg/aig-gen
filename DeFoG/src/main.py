@@ -119,7 +119,7 @@ def main(cfg: DictConfig):
 
         # Instantiate your custom AIG sampling metrics
         # Ensure AIGSamplingMetrics is defined and can be instantiated with datamodule (and cfg if needed)
-        sampling_metrics = AIGSamplingMetrics(datamodule=datamodule, cfg=cfg)
+        sampling_metrics = AIGSamplingMetrics(datamodule=datamodule)
 
         # Handle extra features based on model config, defaulting to Dummy if not specified or 'null'/'none'
         model_extra_features_type = model_config.get("extra_features")
