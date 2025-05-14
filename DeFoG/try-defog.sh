@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=digress_aig_train
+#SBATCH --job-name=defog_aig_train
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
 #SBATCH --time=00:20:00              # Initial requested time, adjust as needed
-#SBATCH --output=slurm_logs/digress_%j.out
+#SBATCH --output=slurm_logs/defog_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
@@ -12,7 +12,7 @@ export HYDRA_FULL_ERROR=1
 
 # --- Configuration ---
 CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
-PROJECT_ROOT="./DiGress" # IMPORTANT: SET THIS!
+PROJECT_ROOT="./DeFoG" # IMPORTANT: SET THIS!
 
 
 echo "Loading modules..."
@@ -32,14 +32,15 @@ echo "Starting DiGress AIG Training"
 echo "========================================"
 echo "Running command:"
 echo "----------------------------------------"
-pip install -e .
+#pip install -e .
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 srun python -u src/main.py \
     +experiment=aig.yaml \
-    dataset=aig
+    dataset=aig \
+    +general.abs_path_to_project_root=. \
     # Add any other specific Hydra overrides here if needed, e.g.:
     # general.resume=outputs/YYYY-MM-DD/HH-MM-SS-aig_resume/checkpoints/last-epoch=XXXX.ckpt
     # train.n_epochs=6000 # To override the config file value
