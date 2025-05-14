@@ -3,6 +3,7 @@ general:
 
   # --- USER MUST SET THIS ---
   abs_path_to_project_root: "." # Or provide via command line.
+  name: 'aig'
   gpus: 1
   wandb: 'online'
   log_every_steps: 100
