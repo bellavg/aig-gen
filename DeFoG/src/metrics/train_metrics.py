@@ -6,7 +6,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchmetrics import Metric, MeanSquaredError, MetricCollection
 
-from metrics.abstract_metrics import (
+from src.metrics.abstract_metrics import (
     CrossEntropyMetric,
     KLDMetric,
 )

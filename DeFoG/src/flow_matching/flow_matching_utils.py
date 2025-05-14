@@ -4,7 +4,7 @@ from torch.distributions.categorical import Categorical
 import numpy as np
 import math
 
-from utils import PlaceHolder
+from src.utils import PlaceHolder
 
 
 def assert_correctly_masked(variable, node_mask):

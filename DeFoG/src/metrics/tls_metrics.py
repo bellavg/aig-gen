@@ -10,9 +10,9 @@ import torch
 from torch import Tensor
 from torchmetrics import MeanMetric
 
-from datasets.tls_dataset import CellGraph
-from analysis.spectre_utils import PlanarSamplingMetrics
-from analysis.spectre_utils import is_planar_graph
+from src.datasets.tls_dataset import CellGraph
+from src.analysis.spectre_utils import PlanarSamplingMetrics
+from src.analysis.spectre_utils import is_planar_graph
 
 
 class TLSSamplingMetrics(PlanarSamplingMetrics):

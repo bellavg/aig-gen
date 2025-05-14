@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
 
-from flow_matching import flow_matching_utils
-from flow_matching.utils import dt_p_xt_g_x1, p_xt_g_x1
+import flow_matching_utils
+from .utils import dt_p_xt_g_x1, p_xt_g_x1
 
 
 class RateMatrixDesigner:
