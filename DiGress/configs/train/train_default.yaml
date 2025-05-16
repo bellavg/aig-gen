@@ -45,5 +45,5 @@ diffusion_steps: 1000 # Override default 500 from model/discrete.yaml [cite: cvi
 
 n_layers: 8 # Override default 5 from model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml].
 
-lambda_train: [1.0, 1.0, 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
+lambda_train: [5.0, 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
 

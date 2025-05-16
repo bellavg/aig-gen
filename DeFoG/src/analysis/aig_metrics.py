@@ -147,14 +147,14 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         return networkx_graphs
 
     def forward(self, generated_graphs_raw: list, name: str, current_epoch: int, val_counter: int,
-                local_rank_param: int,
+                local_rank: int,
                 test: bool = False):
         """
         Calculates metrics for generated AIGs.
         `local_rank_param`: The local rank passed to this function, typically from the trainer.
         """
         reference_graphs_nx = self.test_graphs if test else self.val_graphs
-        current_rank_for_tqdm = local_rank_param
+        current_rank_for_tqdm = local_rank
 
         generated_graphs_nx = []
         for i, graph_raw_data in enumerate(

@@ -60,6 +60,6 @@ model:
 
 
   # The default lambda_train: [5, 0] in model/discrete.yaml [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml] is ill-suited for the
-  # (loss_X, loss_E, loss_y) components the model calculates.
+
   # This override provides weights for X, E, and y (y_loss will be 0 anyway due to y_dim=0).
-  lambda_train: [1.0, 1.0, 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
+  lambda_train: [5.0 , 0.0] # Override default [5,0] [cite: cvignac/DiGress/DiGress-780242b8d3e7d78316bb5cf90c639fb0cd4c6079/configs/model/discrete.yaml]. Weights for X, E, y losses respectively.
