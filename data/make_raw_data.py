@@ -23,12 +23,13 @@ def convert_nx_to_pyg_with_edge_index(
 ) -> Data | None:
     """
     Converts a NetworkX DiGraph to a PyTorch Geometric Data object.
+    The output PyG Data object will represent an UNDIRECTED graph.
     Includes:
     - x: Node features (unpadded).
-    - adj: Custom adjacency tensor (N_src, N_tgt, NUM_EDGE_FEATURES).
-    - edge_index: Standard PyG edge index (2, Num_edges).
+    - adj: Custom adjacency tensor (N_src, N_tgt, NUM_EDGE_FEATURES), made symmetric.
+    - edge_index: Standard PyG edge index (2, Num_edges), with edges added for both directions.
     - edge_attr: Edge attributes for edge_index (Num_edges, NUM_EDGE_FEATURES).
-    Nodes are ordered topologically.
+    Nodes are ordered topologically based on the original DiGraph.
     Returns None if the graph cannot be processed or has validation issues.
     Will raise an error if topological sort fails (e.g., graph has cycles).
     """
@@ -39,7 +40,7 @@ def convert_nx_to_pyg_with_edge_index(
         return None
 
     # Perform topological sort. Halts on cycles.
-    node_list = list(nx.topological_sort(nx_graph))
+    node_list = list(nx.topological_sort(nx_graph)) # Original logic preserved
     node_id_map = {old_id: new_id for new_id, old_id in enumerate(node_list)}
 
     # --- Node Features (x) ---
@@ -68,12 +69,12 @@ def convert_nx_to_pyg_with_edge_index(
     x_tensor = torch.stack(node_features_list)
 
     # --- Custom Adjacency Tensor (adj) ---
-    # Modified: Removed the +1 for no_edge_channel
+    # Modified: Removed the +1 for no_edge_channel (as per original user code)
     adj_tensor = torch.zeros(
         (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES),  # Using user's NUM_EDGE_FEATURES
         dtype=torch.float
     )
-    # Removed: no_edge_channel_idx and its initialization for adj_tensor
+    # Removed: no_edge_channel_idx and its initialization for adj_tensor (as per original user code)
 
     # --- Edge Index and Edge Attributes ---
     edge_index_sources = []
@@ -105,12 +106,20 @@ def convert_nx_to_pyg_with_edge_index(
 
         # Populate custom adj tensor
         adj_tensor[u_new, v_new, edge_channel_index] = 1.0
-        # Removed: adj_tensor[u_new, v_new, no_edge_channel_idx] = 0.0
+        adj_tensor[v_new, u_new, edge_channel_index] = 1.0  # MODIFICATION: Symmetrize adj_tensor
+        # Removed: adj_tensor[u_new, v_new, no_edge_channel_idx] = 0.0 (as per original user code)
 
         # Populate edge_index and edge_attr lists
+        current_edge_attr_as_tensor = torch.tensor(edge_type_vec, dtype=torch.float) # Store the one-hot vector
+
         edge_index_sources.append(u_new)
         edge_index_targets.append(v_new)
-        edge_attributes_list.append(torch.tensor(edge_type_vec, dtype=torch.float))  # Store the one-hot vector
+        edge_attributes_list.append(current_edge_attr_as_tensor)
+
+        # MODIFICATION: Add the reverse edge for undirected representation
+        edge_index_sources.append(v_new)
+        edge_index_targets.append(u_new)
+        edge_attributes_list.append(current_edge_attr_as_tensor) # Use same attributes for the reverse edge
 
     edge_index_tensor = torch.tensor([edge_index_sources, edge_index_targets], dtype=torch.long)
 
@@ -129,7 +138,7 @@ def convert_nx_to_pyg_with_edge_index(
         num_nodes=torch.tensor(num_nodes_in_graph, dtype=torch.long)
     )
 
-    # Add optional graph-level attributes
+    # Add optional graph-level attributes (original logic preserved)
     if 'inputs' in nx_graph.graph: pyg_data.num_inputs = torch.tensor(nx_graph.graph['inputs'], dtype=torch.long)
     if 'outputs' in nx_graph.graph: pyg_data.num_outputs = torch.tensor(nx_graph.graph['outputs'], dtype=torch.long)
     if 'gates' in nx_graph.graph: pyg_data.num_gates = torch.tensor(nx_graph.graph['gates'], dtype=torch.long)
@@ -139,7 +148,7 @@ def convert_nx_to_pyg_with_edge_index(
 
 if __name__ == "__main__":
     # --- Configuration ---
-    # IMPORTANT: Replace these with the actual paths to your .pkl files
+    # IMPORTANT: Replace these with the actual paths to your .pkl files (original paths preserved)
     pkl_file_paths = [
         "../raw_data/networkx_aigs/real_aigs_part_1_of_6.pkl",
         "../raw_data/networkx_aigs/real_aigs_part_2_of_6.pkl",
@@ -150,17 +159,17 @@ if __name__ == "__main__":
     ]
 
     # Define the output directory for the processed .pt files
-    output_pyg_dir = "./data/pyg_full"
-    intermediate_file_suffix = "_pyg_full.pt"
-    combined_output_filename = "aig.pt"  # User's changed combined name
+    # MINIMAL MODIFICATION: Changed filenames to indicate "undirected"
+    output_pyg_dir = "./data/pyg_full_undirected"
+    intermediate_file_suffix = "_pyg_full_undirected.pt"
+    combined_output_filename = "aig_undirected.pt"
     # --- End Configuration ---
 
-    os.makedirs(output_pyg_dir, exist_ok=True)
+    os.makedirs(output_pyg_dir, exist_ok=True) # Original logic preserved
 
+    # Original print statements preserved
     print(f"--- AIG to Full PyG Conversion (adj, edge_index, edge_attr) ---")
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
-    # Using user's NUM_EDGE_FEATURES in print statement
-    # This print statement is now more direct as adj channels == NUM_EDGE_FEATURES
     print(f"Using NUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
 
@@ -239,13 +248,13 @@ if __name__ == "__main__":
 
         for pt_file_path in tqdm(successfully_saved_intermediate_pt_files, desc="Loading intermediate .pt files",
                                  unit="file"):
-            # **FIX APPLIED HERE**
+            # **FIX APPLIED HERE** (This was in user's original code, so preserved)
             intermediate_list = torch.load(pt_file_path, weights_only=False)
             # Set weights_only=False to allow unpickling of arbitrary objects like PyG Data
 
             all_pyg_data_objects_combined.extend(intermediate_list)
 
-            for data_obj in intermediate_list:
+            for data_obj in intermediate_list: # Original estimation logic preserved
                 if hasattr(data_obj, 'x') and data_obj.x is not None: total_estimated_bytes += data_obj.x.nbytes
                 if hasattr(data_obj, 'adj') and data_obj.adj is not None: total_estimated_bytes += data_obj.adj.nbytes
                 if hasattr(data_obj,
@@ -264,7 +273,7 @@ if __name__ == "__main__":
         total_estimated_gb = total_estimated_bytes / (1024 ** 3)
         print(f"Estimated total tensor data size for combined list: {total_estimated_gb:.2f} GB")
 
-        size_limit_gb = 32.0
+        size_limit_gb = 32.0 # Original logic preserved
 
         if total_estimated_gb > size_limit_gb:
             warnings.warn(
