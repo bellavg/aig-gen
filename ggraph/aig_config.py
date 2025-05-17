@@ -2,7 +2,7 @@
 import math
 import os # Added for potential path joining if needed
 import networkx as nx
-from typing import Union, Optional # Added for type hinting
+from typing import Union, Optional, List # Added for type hinting
 import warnings
 # --- Primary Configuration Constants ---
 dataset = 'aig'
@@ -22,7 +22,7 @@ MIN_PO_COUNT = 1
 MAX_PO_COUNT = 8
 MIN_AND_COUNT = 1 # Assuming at least one AND gate needed
 
-
+_PADDING_NODE_STR = "PADDING_NODE"
 NUM_ADJ_CHANNELS = 3
 
 EXPLICIT_NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
@@ -34,6 +34,8 @@ ALL_EDGE_KEYS = EXPLICIT_EDGE_TYPE_KEYS + ["NONE"]
 NUM2EDGETYPE = {0: ALL_EDGE_KEYS[0], 1: ALL_EDGE_KEYS[1], 2: ALL_EDGE_KEYS[2]}
 NUM2NODETYPE = {0: ALL_NODE_KEYS[0], 1: ALL_NODE_KEYS[1], 2: ALL_NODE_KEYS[2], 3: ALL_NODE_KEYS[3], 4: ALL_NODE_KEYS[4]}
 
+assert len(NUM2EDGETYPE) == len(ALL_EDGE_KEYS)
+assert len(NUM2NODETYPE) == len(ALL_NODE_KEYS)
 
 
 # Derive feature counts from the size of the derived vocabularies
@@ -75,7 +77,7 @@ DECODING_EDGE_TYPE_NX = {
 def to_directed_aig(graph: Union[nx.Graph, nx.DiGraph]) -> Optional[nx.DiGraph]:
     """
     Converts an input graph to a directed AIG representation.
-    - If the input is already a DiGraph, it's returned as is.
+    - If the input is already a DiGraph, it's returned as is (a shallow copy for safety if modified later).
     - If the input is an undirected Graph, it's converted to a DiGraph
       with edges pointing from the node with the smaller ID to the node
       with the larger ID. Node and edge attributes are preserved.
@@ -88,226 +90,173 @@ def to_directed_aig(graph: Union[nx.Graph, nx.DiGraph]) -> Optional[nx.DiGraph]:
         Optional[nx.DiGraph]: The directed graph, or None if conversion is not possible.
     """
     if isinstance(graph, nx.DiGraph):
-        return graph  # Already a DiGraph
+        return graph.copy()  # Return a copy to avoid modifying the original if it's passed around
 
-    if isinstance(graph, nx.Graph):  # Covers undirected nx.Graph
-        if graph.is_directed():  # Should have been caught by first isinstance, but as a safeguard
-            warnings.warn("Input graph to to_directed_aig was nx.Graph but already directed. Returning as is.")
-            return graph  # Technically a DiGraph if it passes is_directed()
+    if isinstance(graph, nx.Graph):
+        if graph.is_directed():
+            warnings.warn("Input graph to to_directed_aig was nx.Graph but already directed. Returning a copy.")
+            return graph.copy()
 
-        # Convert undirected graph to directed (smaller_id -> larger_id)
         directed_graph = nx.DiGraph()
-        directed_graph.add_nodes_from(graph.nodes(data=True))  # Copy nodes and their attributes
+        directed_graph.add_nodes_from(graph.nodes(data=True))
 
         for u, v, data in graph.edges(data=True):
-            edge_attrs = data.copy()  # Ensure edge attributes are copied
-            if u == v:  # Handle self-loops if they exist (though not typical for AIG edges from undirected)
+            edge_attrs = data.copy()
+            if u == v:
                 directed_graph.add_edge(u, v, **edge_attrs)
             elif u < v:
                 directed_graph.add_edge(u, v, **edge_attrs)
-            else:  # v < u
+            else:
                 directed_graph.add_edge(v, u, **edge_attrs)
         return directed_graph
 
-    # Input is not a recognized NetworkX graph type for this conversion
     return None
+
+
+def remove_padding_nodes(graph: Optional[nx.DiGraph]) -> Optional[nx.DiGraph]:
+    """
+    Removes nodes explicitly typed as "PADDING_NODE" from a directed graph.
+
+    Args:
+        graph (Optional[nx.DiGraph]): The input directed graph. Can be None.
+
+    Returns:
+        Optional[nx.DiGraph]: A new graph with padding nodes removed, or None if input was None.
+                              Returns an empty DiGraph if the input graph becomes empty after removal.
+    """
+    if graph is None:
+        return None
+
+    # Work on a copy to avoid modifying the original graph passed to this function
+    graph_copy = graph.copy()
+
+    padding_nodes_to_remove: List[int] = []
+    for node, data in graph_copy.nodes(data=True):
+        if data.get('type') == _PADDING_NODE_STR:
+            padding_nodes_to_remove.append(node)
+
+    graph_copy.remove_nodes_from(padding_nodes_to_remove)
+
+    # After removing padding nodes, some previously non-isolated nodes might become isolated.
+    # It's common practice to remove isolates from the "actual" graph part.
+    # However, the original check_validity didn't remove isolates until evaluate_aigs.py.
+    # For consistency with the previous structure, we'll leave isolate removal to a later stage
+    # or make it a separate utility if needed by check_validity's consumers.
+    # If isolates (other than CONST0) should make a graph invalid, that logic
+    # would be in check_validity itself, operating on the graph_after_padding_removal.
+
+    return graph_copy
 
 
 def check_validity(graph_input: Union[nx.Graph, nx.DiGraph, None]) -> bool:
     """
-    Checks the structural validity of a (potentially partially built) AIG.
-    It first ensures the graph is directed (handling undirected inputs)
-    and then applies AIG-specific validation rules.
+    Checks the structural validity of an AIG after converting to directed
+    and removing any padding nodes.
 
     Args:
         graph_input (Union[nx.Graph, nx.DiGraph, None]): The AIG graph to validate.
                                                        Node and edge 'type' attributes
                                                        are assumed to be strings.
-                                                       None or an empty graph is considered valid.
+                                                       None or an empty graph (after processing)
+                                                       is considered valid.
 
     Returns:
         bool: True if the graph is valid according to AIG rules, False otherwise.
     """
-    # Handle None or empty graph objects (which might evaluate to False)
-    # An empty graph (e.g., nx.Graph() or nx.DiGraph()) is considered valid.
     if not graph_input:
-        # This covers graph_input being None or an empty graph container that evaluates to False.
-        # print("Debug: Validity Check - Input graph is None or empty. Considered valid.")
-        return True
+        return True  # None or an empty container is valid by this definition
 
-    # Convert to a working DiGraph; to_directed_aig handles type checking.
-    working_graph = to_directed_aig(graph_input)
-
-    if working_graph is None:
-        # This means to_directed_aig received a non-graph type it couldn't process.
-        # An empty nx.Graph() would have been successfully converted to an empty nx.DiGraph().
+    directed_graph = to_directed_aig(graph_input)
+    if directed_graph is None:
         print(
             f"Debug: Validity Check Failed - Input graph type '{type(graph_input)}' could not be processed into a DiGraph.")
         return False
 
-    # If working_graph is an empty DiGraph (e.g., from an empty input graph),
-    # it's a DAG, and loops below won't run, so it will correctly return True.
+    # Remove padding nodes before further checks
+    # The remove_padding_nodes function handles None input and returns a copy.
+    graph_to_validate = remove_padding_nodes(directed_graph)
+
+    if graph_to_validate is None:  # Should not happen if directed_graph was not None
+        print(f"Debug: Validity Check Failed - Graph became None after attempting to remove padding nodes.")
+        return False
+
+    # If graph_to_validate is empty after removing padding nodes, it's valid.
+    if not graph_to_validate.nodes():  # Check if there are any nodes left
+        # print("Debug: Validity Check - Graph is empty after removing padding nodes. Considered valid.")
+        return True
 
     # 1. Check DAG property
-    if not nx.is_directed_acyclic_graph(working_graph):
-        # print("Debug: Validity Check Failed - Not a DAG")
+    if not nx.is_directed_acyclic_graph(graph_to_validate):
+        # print(f"Debug: Validity Check Failed - Not a DAG after removing padding nodes. Graph: {list(graph_to_validate.nodes())}")
         return False
 
     # Access EXPLICIT_NODE_TYPE_KEYS and EXPLICIT_EDGE_TYPE_KEYS
-    # These are expected to be defined in the global scope (e.g., in aig_config.py)
     try:
-        # These variables are used for comparison, ensure they are defined.
-        # (Assuming they are imported or defined in the same file as this function)
         _NODE_CONST0_STR = EXPLICIT_NODE_TYPE_KEYS[0]
         _NODE_PI_STR = EXPLICIT_NODE_TYPE_KEYS[1]
         _NODE_AND_STR = EXPLICIT_NODE_TYPE_KEYS[2]
         _NODE_PO_STR = EXPLICIT_NODE_TYPE_KEYS[3]
-    except NameError:
-        print(
-            "Debug: Validity Check Failed - EXPLICIT_NODE_TYPE_KEYS is not defined. Cannot perform detailed node type checks.")
-        return False  # Cannot validate without type definitions
+    except NameError:  # Should be caught by global try-except if aig_config is missing
+        print("Debug: Validity Check Failed - EXPLICIT_NODE_TYPE_KEYS is not defined (NameError).")
+        return False
     except IndexError:
-        print(
-            "Debug: Validity Check Failed - EXPLICIT_NODE_TYPE_KEYS does not contain enough elements. Cannot perform detailed node type checks.")
+        print("Debug: Validity Check Failed - EXPLICIT_NODE_TYPE_KEYS does not contain enough elements.")
         return False
 
-    # 2. Check Node Types and Degrees
-    for node, data in working_graph.nodes(data=True):
+    # 2. Check Node Types and Degrees (on graph_to_validate)
+    for node, data in graph_to_validate.nodes(data=True):
         if 'type' not in data:
             print(f"Debug: Validity Check Failed - Node {node} is missing 'type' attribute.")
             return False
         node_type = data['type']
 
-        if node_type == "UNKNOWN_TYPE_ATTRIBUTE":  # Specific string to check against
+        # After removing padding nodes, no node should have PADDING_NODE type.
+        # The check below ensures it's one of the EXPLICIT types.
+        if node_type == "UNKNOWN_TYPE_ATTRIBUTE":
             print(f"Debug: Validity Check Failed - Node {node} has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
             return False
-        if node_type not in EXPLICIT_NODE_TYPE_KEYS:
+        if node_type not in EXPLICIT_NODE_TYPE_KEYS:  # This check is crucial.
             print(
-                f"Debug: Validity Check Failed - Node {node} has type '{node_type}' not in defined EXPLICIT_NODE_TYPE_KEYS.")
+                f"Debug: Validity Check Failed - Node {node} has type '{node_type}' which is not in EXPLICIT_NODE_TYPE_KEYS (and not PADDING_NODE, as they should be removed).")
             return False
 
-        in_degree = working_graph.in_degree(node)
-        out_degree = working_graph.out_degree(node)
+        in_degree = graph_to_validate.in_degree(node)
+        out_degree = graph_to_validate.out_degree(node)
 
         if node_type == _NODE_CONST0_STR:
             if in_degree != 0:
-                # print(f"Debug: Validity Check Failed - CONST0 node {node} (type: {node_type}) has in-degree {in_degree} (should be 0).")
                 return False
         elif node_type == _NODE_PI_STR:
             if in_degree != 0:
-                # print(f"Debug: Validity Check Failed - PI node {node} (type: {node_type}) has in-degree {in_degree} (should be 0).")
                 return False
         elif node_type == _NODE_AND_STR:
-            # For AND gates, typical AIGs have exactly 2 inputs.
-            # Some definitions might allow more, but the original code checked for > 2.
-            # If it's strictly 2, change to `if in_degree != 2:`.
-            # Sticking to original logic:
-            if in_degree > 2:  # Or in_degree != 2 if strictly two inputs
-                # print(f"Debug: Validity Check Failed - AND node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 2 or exactly 2).")
+            if in_degree > 2:  # Or use `in_degree != 2` if strictly two inputs are required
                 return False
         elif node_type == _NODE_PO_STR:
-            # For PO nodes, typical AIGs have exactly 1 input.
-            # The original code checked for > 1.
-            # If it's strictly 1, change to `if in_degree != 1:`.
-            # Sticking to original logic:
-            if in_degree > 1:  # Or in_degree != 1 if strictly one input
-                # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 1 or exactly 1).")
+            if in_degree > 1:  # Or use `in_degree != 1` if strictly one input is required
                 return False
             if out_degree != 0:
-                # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has out-degree {out_degree} (should be 0).")
                 return False
 
-    # 3. Check Edge Types
+    # 3. Check Edge Types (on graph_to_validate)
     try:
-        # Ensure EXPLICIT_EDGE_TYPE_KEYS is defined for comparison
         _ = EXPLICIT_EDGE_TYPE_KEYS
-    except NameError:
-        print(
-            "Debug: Validity Check Failed - EXPLICIT_EDGE_TYPE_KEYS is not defined. Cannot perform detailed edge type checks.")
-        return False  # Cannot validate without type definitions
+    except NameError:  # Should be caught by global try-except
+        print("Debug: Validity Check Failed - EXPLICIT_EDGE_TYPE_KEYS is not defined (NameError).")
+        return False
 
-    for u, v, data in working_graph.edges(data=True):
+    for u, v, data in graph_to_validate.edges(data=True):
         if 'type' not in data:
             print(f"Debug: Validity Check Failed - Edge ({u}-{v}) is missing 'type' attribute.")
             return False
         edge_type = data['type']
 
-        if edge_type == "UNKNOWN_TYPE_ATTRIBUTE":  # Specific string to check against
-            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
+        if edge_type == "UNKNOWN_TYPE_ATTRIBUTE":
             return False
         if edge_type not in EXPLICIT_EDGE_TYPE_KEYS:
-            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has type '{edge_type}' not in defined EXPLICIT_EDGE_TYPE_KEYS.")
             return False
 
     return True
-
-def check_aig_component_minimums(current_aig_graph: nx.Graph) -> bool:
-    #TODO defintiely needs to be changed
-    """
-    Checks if the given AIG meets the minimum component criteria.
-    - At least 1 "NODE_AND"
-    - At least 2 "NODE_PI"
-    - At least 1 "NODE_PO"
-    """
-    if current_aig_graph is None or current_aig_graph.number_of_nodes() == 0:
-        return False
-
-    # Convert to a working DiGraph; to_directed_aig handles type checking.
-    current_aig_graph = to_directed_aig(current_aig_graph)
-
-
-    type_counts = {"NODE_AND": 0, "NODE_PI": 0, "NODE_PO": 0}
-    # Node types are stored as strings like "NODE_PI", "NODE_AND" etc.
-    # These strings are the values in the NUM2NODETYPE dictionary.
-
-    # We need to find the string values for PI, PO, AND from NUM2NODETYPE
-    # This assumes NUM2NODETYPE is {0: "NODE_CONST0", 1: "NODE_PI", 2: "NODE_AND", 3: "NODE_PO"}
-    # A more robust way would be to iterate NUM2NODETYPE's values if keys are not fixed.
-    # For now, assuming fixed mapping or direct string comparison.
-
-    # String representations for target node types
-    # These should match the values in your NUM2NODETYPE from aig_config.py
-    # Example: if NUM2NODETYPE = {0:"const0", 1:"pi", 2:"and", 3:"po"}
-    # then target_node_type_and = "and", etc.
-    # For this example, I'll assume the strings are exactly "NODE_AND", "NODE_PI", "NODE_PO"
-    # as per common naming, but ensure these match your config's string values.
-
-    # Find the string representation for AND, PI, PO from NUM2NODETYPE
-    str_node_and = None
-    str_node_pi = None
-    str_node_po = None
-
-    for key, value in NUM2NODETYPE.items():
-        if "AND" in value.upper():  # Case-insensitive check for "AND"
-            str_node_and = value
-        elif "PI" in value.upper():  # Case-insensitive check for "PI"
-            str_node_pi = value
-        elif "PO" in value.upper():  # Case-insensitive check for "PO"
-            str_node_po = value
-
-    if not all([str_node_and, str_node_pi, str_node_po]):
-        warnings.warn(
-            f"Could not find all required node type strings (AND, PI, PO) in NUM2NODETYPE: {NUM2NODETYPE}. Component check might be inaccurate.")
-        # Fallback to direct string comparison if mapping is complex
-        str_node_and = str_node_and or "NODE_AND"
-        str_node_pi = str_node_pi or "NODE_PI"
-        str_node_po = str_node_po or "NODE_PO"
-
-    for _, data in current_aig_graph.nodes(data=True):
-        node_type_str = data.get('type')
-        if node_type_str == str_node_and:
-            type_counts["NODE_AND"] += 1
-        elif node_type_str == str_node_pi:
-            type_counts["NODE_PI"] += 1
-        elif node_type_str == str_node_po:
-            type_counts["NODE_PO"] += 1
-
-    meets_criteria = (
-            type_counts["NODE_AND"] >= 1 and
-            type_counts["NODE_PI"] >= 2 and
-            type_counts["NODE_PO"] >= 1
-    )
-    return meets_criteria
 
 
 # --- Base Configuration Dictionary (Defaults) ---

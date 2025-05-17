@@ -7,7 +7,9 @@ Baselines to test
 | Graph-RNN | Not Running   | NA | no test  |              |          |
 | DiGress   | Running       | NA | Untested |              |          |
 | DeFoG     | trying to run | E  | untested |              |          |
-| Graph-DF  | trying to run | E  | untested | fix generate | fix eval |
+| Graph-DF  | Running       | E  | untested | fix generate | fix eval |
+| Graph-AF  | Running       | E  | untested | fix generate | fix eval |
+| Graph-EBM | trying to run | E  | untested | fix generate | fix eval |
 | LayerDAG  | trying to run | E  | untested |              |          |
 
 

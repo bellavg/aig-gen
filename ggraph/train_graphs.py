@@ -147,14 +147,6 @@ def main(args):
     elif args.model == 'GraphAF':
         runner = GraphAF()
     elif args.model == 'GraphEBM':
-        warnings.warn(
-            "GraphEBM is selected. The AIGPaddedInMemoryDataset provides node features "
-            f"with {NUM_NODE_ATTRIBUTES} dimensions (including padding type). "
-            "The current GraphEBM implementation (graphebm.py) might expect {NUM_EXPLICIT_NODE_FEATURES} "
-            "dimensions for its internal transformation '_transform_node_features_add_virtual_channel'. "
-            "This could lead to a mismatch if GraphEBM.py is not adapted to handle pre-padded features "
-            "or if the input to its train_rand_gen is not sliced appropriately."
-        )
         runner = GraphEBM(
             n_atom=MAX_NODE_COUNT,
             hidden=conf['model'].get('hidden', 64),
