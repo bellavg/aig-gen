@@ -4,7 +4,6 @@
 #SBATCH --gpus=1                  # Request 1 GPU if you intend to use it at runtime
 #SBATCH --time=02:00:00           # Adjust time as needed
 #SBATCH --output=slurm_logs/layerdag_%j.out # Relative to where sbatch is called
-#SBATCH --error=slurm_logs/layerdag_%j.err  # Relative to where sbatch is called
 
 # --- Environment Setup ---
 echo "Loading base environment module..."
