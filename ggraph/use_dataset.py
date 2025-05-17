@@ -167,7 +167,8 @@ class AIGTransformAndPad(BaseTransform):
         if hasattr(data, 'edge_attr'): transformed_data.edge_attr = data.edge_attr
 
         # Pass through any other attributes from the original Data object
-        for key in data.keys:
+        # MODIFICATION: Call .keys() as it's a method
+        for key in data.keys():
             if key not in ['x', 'adj', 'num_nodes', 'edge_index', 'edge_attr']:
                 transformed_data[key] = data[key]
 

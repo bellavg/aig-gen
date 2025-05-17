@@ -82,7 +82,7 @@ class GraphEBM(Generator):
         print(f"  (Input data 'adj' should have {self.n_edge_type_total_for_energy_func} channels)")
 
     def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict,
-                       save_interval, save_dir, wandb_active=False):  # Added wandb_active
+                       save_interval, save_dir, wandb_active=True):  # Added wandb_active
         r"""
             Running training for random generation task.
             ... (rest of docstring) ...
