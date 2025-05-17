@@ -200,7 +200,7 @@ class GraphFlowModel(nn.Module):
             # smiles = Chem.MolToSmiles(final_mol, isomericSmiles=True)
             # assert '.' not in smiles, 'warning: use is_connect to check stop action, but the final molecule is disconnected!!!'
 
-            num_atoms = final_graph.num_nodes()
+            num_atoms = final_graph.number_of_nodes()
 
             pure_valid = 0
             if total_resample == 0:

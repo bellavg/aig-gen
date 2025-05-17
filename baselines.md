@@ -2,15 +2,15 @@
 
 Baselines to test
 
-|           |                |    |          |                   |               |
-|-----------|----------------|----|----------|-------------------|---------------|
-| Graph-RNN | Not Running    | NA | no test  |                   |               |
-| DiGress   | Running train  | NA | Untested |                   | eval fucked   |
-| DeFoG     | Running?       |    | untested |                   | eval fucked   |
-| Graph-DF  | Running train  |    | untested | ready to generate | ready to eval |
-| Graph-AF  | Running  train |    | untested | ready to generate | ready to eval |
-| Graph-EBM | Running  train |    | untested | ready to generate | ready to eval |
-| LayerDAG  | Running  train |    | untested |                   |               |
+|           |                |    |          |                    |               |
+|-----------|----------------|----|----------|--------------------|---------------|
+| Graph-RNN | Not Running    | NA | no test  |                    |               |
+| DiGress   | Running train  | NA | Untested |                    | eval fucked   |
+| DeFoG     | Running?       |    | untested |                    | eval fucked   |
+| Graph-DF  | Done train     |    | untested | running generate   | ready to eval |
+| Graph-AF  | Done  train    |    | untested | running generate   | ready to eval |
+| Graph-EBM | Running  train |    | untested | ready to generate  | ready to eval |
+| LayerDAG  | Running  train |    | untested |                    |               |
 
 
 
