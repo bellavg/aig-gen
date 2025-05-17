@@ -40,11 +40,11 @@ srun python -u train_graphs.py \
 
 
 
-#srun python -u ggraph/sample_graphs.py \
-#    --model 'GraphAF' \
-#    --checkpoint "./ggraph/checkpoints/GraphAF/rand_gen_ckpt_24.pth" \
-#    --evaluate \
-#    --save
+srun python -u sample_graphs.py \
+    --model 'GraphAF' \
+    --checkpoint "./checkpoints_aig/GraphAF_GraphAF/GraphAF_rand_gen_ckpt_30.pth" \
+    --evaluate \
+    --save
 
 
 #

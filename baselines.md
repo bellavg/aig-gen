@@ -2,15 +2,15 @@
 
 Baselines to test
 
-|           |               |    |          |              |          |
-|-----------|---------------|----|----------|--------------|----------|
-| Graph-RNN | Not Running   | NA | no test  |              |          |
-| DiGress   | Running       | NA | Untested |              |          |
-| DeFoG     | trying to run | E  | untested |              |          |
-| Graph-DF  | Running       | E  | untested | fix generate | fix eval |
-| Graph-AF  | Running       | E  | untested | fix generate | fix eval |
-| Graph-EBM | trying to run | E  | untested | fix generate | fix eval |
-| LayerDAG  | trying to run | E  | untested |              |          |
+|           |                |    |          |                   |               |
+|-----------|----------------|----|----------|-------------------|---------------|
+| Graph-RNN | Not Running    | NA | no test  |                   |               |
+| DiGress   | Running        | NA | Untested |                   |               |
+| DeFoG     | trying to run  | E  | untested |                   |               |
+| Graph-DF  | Running train  |    | untested | ready to generate | ready to eval |
+| Graph-AF  | Running  train |    | untested | ready to generate | ready to eval |
+| Graph-EBM | Running  train |    | untested | ready to generate | ready to eval |
+| LayerDAG  | trying to run  | E  | untested |                   |               |
 
 
 
@@ -26,3 +26,4 @@ Baselines to test
 
 
   - SeaDAG and Circuit Transformer - done but not available for testing 
+

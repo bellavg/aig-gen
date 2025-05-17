@@ -163,7 +163,7 @@ class GraphFlowModel(nn.Module):
                     edge_dis = self.edge_base_log_probs[edge_idx].clone()
                     invalid_bond_type_set = set()
                     while not valid:
-                        if len(invalid_bond_type_set) < NUM_ADJ_CHANNELS and resample_edge <= 100:  # haven't sampled all possible bond type or is not stuck in the loop
+                        if len(invalid_bond_type_set) < NO_EDGE_CHANNEL and resample_edge <= 100:  # haven't sampled all possible bond type or is not stuck in the loop
                             prior_edge_dist = torch.distributions.OneHotCategorical( logits=edge_dis / temperature[1])
                             latent_edge = prior_edge_dist.sample().view(1, -1)
                             latent_id = torch.argmax(latent_edge, dim=1)
@@ -182,12 +182,12 @@ class GraphFlowModel(nn.Module):
                                     -1)  # (4, )
                             edge_discrete_id = torch.argmax(latent_edge).item()
                         else:
-                            assert resample_edge > 100 or len(invalid_bond_type_set) == NUM_ADJ_CHANNELS
-                            edge_discrete_id = 3  # we have no choice but to choose not to add edge between (i, j+start)
+                            assert resample_edge > 100 or len(invalid_bond_type_set) == NO_EDGE_CHANNEL
+                            edge_discrete_id = NO_EDGE_CHANNEL  # we have no choice but to choose not to add edge between (i, j+start)
 
                         cur_adj_features[0, edge_discrete_id, i, j + start] = 1.0
                         cur_adj_features[0, edge_discrete_id, j + start, i] = 1.0
-                        if edge_discrete_id == 3:  # virtual edge
+                        if edge_discrete_id == NO_EDGE_CHANNEL:  # virtual edge
                             valid = True
                         else:  # single/double/triple bond
                             aig.add_edge(i,  j + start, num2bond_map[edge_discrete_id])
@@ -233,9 +233,12 @@ class GraphFlowModel(nn.Module):
             if total_resamples == 0:
                 pure_valid = 1.0
 
+            final_mol = to_directed_aig(final_mol)
+            final_mol = remove_padding_nodes(final_mol)
+
         return final_mol, pure_valid, num_atoms
 
-    def initialize_masks(self, max_node_unroll=38, max_edge_unroll=12):
+    def initialize_masks(self, max_node_unroll=38, max_edge_unroll=25):
         """
         Args:
             max_node_unroll: Max number of nodes.

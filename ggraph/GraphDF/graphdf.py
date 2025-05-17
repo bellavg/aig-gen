@@ -2,6 +2,7 @@ import os
 import torch
 import warnings  # Added for wandb import warning
 
+from aig_config import display_graph_details
 from generator import Generator
 from .model import GraphFlowModel  # Assuming .model imports GraphFlowModel
 
@@ -186,6 +187,8 @@ class GraphDF(Generator):
                         cnt_mol += 1
                         all_graphs.append(mol)
                         pure_valids.append(no_resample)
+                        if cnt_mol == 1:
+                            display_graph_details(mol)
                         if cnt_mol % 100 == 0:
                             print('Generated {}/{} Graphs'.format(cnt_mol, n_mols))
                     elif mol is None:
@@ -198,10 +201,5 @@ class GraphDF(Generator):
 
         if cnt_mol < n_mols:
             warnings.warn(f"Desired {n_mols} graphs, but only {cnt_mol} were successfully generated and met criteria.")
-
-        # TODO: Convert to directed graphs if needed by downstream tasks.
-        # The current generation process in GraphFlowModel (commented out) produces nx.DiGraph.
-        # If the `mol` objects returned are already nx.DiGraph, this comment might be outdated.
-        # If they are RDKit Mol objects, conversion to NetworkX might be needed later.
 
         return all_graphs, pure_valids

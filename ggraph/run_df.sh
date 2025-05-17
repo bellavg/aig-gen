@@ -40,11 +40,11 @@ srun python -u train_graphs.py \
   --use_wandb
 
 
-#srun python -u ggraph/sample_graphs.py \
-#    --checkpoint "./ggraph/checkpoints/GraphDF/ckpt_30.pth" \
-#    --evaluate \
-#    --save \
-#
+srun python -u sample_graphs.py \
+    --checkpoint "./checkpoints_aig/GraphDF_GraphDF/GraphDF_ckpt_30.pth " \
+    --evaluate \
+    --save \
+
 
 
 #

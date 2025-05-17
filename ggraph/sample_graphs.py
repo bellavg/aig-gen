@@ -15,7 +15,7 @@ from GraphAF import GraphAF  # Or from ggraph.GraphAF import GraphAF
 # If GraphEBM is in ggraph/GraphEBM/graphebm.py, and sample_graphs.py is in ggraph/
 from GraphEBM.graphebm import GraphEBM  # Corrected import path assuming graphebm.py contains GraphEBM class
 
-from aig_config import base_conf, NUM_NODE_FEATURES, NUM_EXPLICIT_EDGE_TYPES  # Assuming aig_config.py is in the same directory or accessible
+from aig_config import base_conf, MAX_NODE_COUNT
 from evaluate_aigs import run_standalone_evaluation
 
 
@@ -74,10 +74,8 @@ def main(args):
             raise ValueError("Missing 'model' configuration in base_conf from aig_config.py for GraphEBM.")
 
         runner = GraphEBM(
-            n_atom=model_config.get("max_node_count", args.max_size),  # MAX_NODE_COUNT
-            n_atom_type_actual=NUM_NODE_FEATURES,  # NUM_NODE_FEATURES
-            n_edge_type_actual=NUM_EXPLICIT_EDGE_TYPES,  # NUM_EXPLICIT_EDGE_TYPES
-            hidden=model_config.get("hidden", args.nhid),  # Hidden dim for EnergyFunc
+            n_atom=MAX_NODE_COUNT,
+            hidden=base_conf['model'].get('hidden', 64),
             device=device
         )
         # generation_args for GraphEBM's run_rand_gen:
@@ -98,7 +96,7 @@ def main(args):
     generated_graphs, pure_valids = runner.run_rand_gen(**generation_args)
     print(f"\nGeneration finished for {args.model}.")
     print(f"Generated graphs: {len(generated_graphs)}")
-    print(f"Pure valids: {pure_valids}/1000")
+    print(f"Pure valids: {pure_valids}/{args.num_samples}")
 
     if generated_graphs is not None and len(generated_graphs) > 0:
         print(f"Successfully generated {len(generated_graphs)} graphs.")

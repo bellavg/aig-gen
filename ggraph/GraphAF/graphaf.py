@@ -4,7 +4,7 @@ import warnings  # Added for wandb import warning
 
 from generator import Generator
 from .model import GraphFlowModel  # Assuming .model imports GraphFlowModel
-
+from aig_config import display_graph_details
 # wandb import
 try:
     import wandb
@@ -83,7 +83,7 @@ class GraphAF(Generator):
             warnings.warn(f"Error loading pre-trained model from {path}: {e}")
 
     def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict,
-                       save_interval, save_dir, wandb_active=False):  # Added wandb_active
+                       save_interval, save_dir, wandb_active=True):  # Added wandb_active
         r"""
             Running training for random generation task.
             ... (rest of docstring)
@@ -183,6 +183,8 @@ class GraphAF(Generator):
                         cnt_generated += 1
                         all_mols.append(aig_graph)
                         pure_valids.append(no_resample_flag)
+                        if cnt_generated == 1:
+                            display_graph_details(aig_graph)
                         if cnt_generated % 100 == 0:  # Changed from 10 to 100 for less verbose output
                             print('Generated {}/{} AIGs'.format(cnt_generated, n_mols))
                     elif aig_graph is None:
@@ -195,6 +197,4 @@ class GraphAF(Generator):
             warnings.warn(
                 f"Desired {n_mols} AIGs, but only {cnt_generated} were successfully generated and met criteria by GraphAF.")
 
-        # The TODO for converting to directed graphs might be relevant depending on what self.model.generate returns
-        # and what downstream tasks expect. If it returns NetworkX DiGraphs, no further action here.
         return all_mols, pure_valids
