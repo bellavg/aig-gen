@@ -13,7 +13,7 @@ module load CUDA/11.6.0
 source activate LayerDAG
 # Clear pip's cache
 pip cache purge
-pip install --no-cache-dir -v torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.12.0+cu116.html
+pip install --no-cache-dir -v torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric
 
 # --- Training Command ---
 echo "Starting LayerDAG Training (Config: configs/LayerDAG/aig.yaml)"
