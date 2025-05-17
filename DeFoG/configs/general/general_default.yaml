@@ -53,7 +53,7 @@ batch_size: 64              # Adjust based on your AIG sizes and GPU memory
 lr: 0.0002                  # Default learning rate
 clip_grad: null             # Gradient clipping (e.g., 1.0) if needed
 save_model: True            # As requested
-ema_decay: 0.999            # Exponential Moving Average decay (0 means off)
+ema_decay: 0           # Exponential Moving Average decay (0 means off)
 
 # Time distortion for training (see DeFoG paper Sec 3.2, C.2 [cite: 972, 1373])
 # 'polydec' often works well for structured data by focusing on later refinement steps [cite: 970, 1245]

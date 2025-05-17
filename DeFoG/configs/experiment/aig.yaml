@@ -32,7 +32,7 @@ train:
   lr: 0.0002                  # Default learning rate
   clip_grad: null             # Gradient clipping (e.g., 1.0) if needed
   save_model: True            # As requested
-  ema_decay: 0.999            # Exponential Moving Average decay (0 means off)
+  ema_decay: 0          # Exponential Moving Average decay (0 means off)
 
   time_distortion: 'polydec'
 
