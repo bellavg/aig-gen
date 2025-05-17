@@ -21,9 +21,9 @@ from aig_config import (
     # NUM_ADJ_CHANNELS is also relevant for GraphEBM's internal logic if it differs from NUM_EDGE_ATTRIBUTES
     # The provided __init__ uses n_edge_type directly for EnergyFunc, which should be NUM_EDGE_ATTRIBUTES
 )
-from .generate import gen_mol_from_one_shot_tensor  # For run_rand_gen
-
-# wandb import
+# from .generate import gen_mol_from_one_shot_tensor  # For run_rand_gen
+#
+# # wandb import
 try:
     import wandb
 except ImportError:
@@ -234,86 +234,86 @@ class GraphEBM(Generator):
 
         print("GraphEBM training finished.")
 
-    def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples):
-        r"""
-            Running graph generation for random generation task.
-            ... (rest of docstring) ...
-        """
-        # Parameters for Langevin dynamics from model_conf_dict
-        c = model_conf_dict.get('c', 0.05)
-        ld_step = model_conf_dict.get('ld_step', 60)
-        ld_noise = model_conf_dict.get('ld_noise', 0.005)
-        ld_step_size = model_conf_dict.get('ld_step_size', 30.0)
-        clamp = model_conf_dict.get('clamp', True)
-        # atomic_num_list is handled by gen_mol_from_one_shot_tensor for AIGs
-
-        print(f"Loading parameters from {checkpoint_path}")
-        try:
-            self.energy_function.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
-            print(f"Successfully loaded checkpoint onto {self.device}")
-        except Exception as e:
-            warnings.warn(f"Could not load checkpoint from {checkpoint_path}: {e}. Using randomly initialized model.")
-
-        parameters = self.energy_function.parameters()
-
-        # Initialization of samples
-        print("Initializing samples for generation...")
-        # self.n_atom_type and self.n_edge_type are total channels (e.g., NUM_NODE_ATTRIBUTES, NUM_EDGE_ATTRIBUTES)
-        # self.n_atom is MAX_NODE_COUNT
-        gen_x = torch.rand(n_samples, self.n_atom, self.n_atom_type, device=self.device) * (
-                    1 + c)  # Shape (B, N, F_total)
-        gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom,
-                             device=self.device)  # Shape (B, E_total, N, N)
-        # Note: EnergyFunc expects h (node features) as (B,F,N) after permute. So gen_x (B,N,F) is correct here.
-
-        gen_x.requires_grad = True
-        gen_adj.requires_grad = True
-        requires_grad(parameters, False)
-        self.energy_function.eval()
-
-        noise_x = torch.randn_like(gen_x, device=self.device)
-        noise_adj = torch.randn_like(gen_adj, device=self.device)
-
-        # Langevin dynamics for generation
-        print(f"Generating {n_samples} samples using Langevin dynamics ({ld_step} steps)...")
-        for step_idx in tqdm(range(ld_step), desc="Langevin Dynamics Steps"):
-            noise_x.normal_(0, ld_noise)
-            noise_adj.normal_(0, ld_noise)
-            gen_x.data.add_(noise_x.data)
-            gen_adj.data.add_(noise_adj.data)
-
-            gen_out = self.energy_function(gen_adj, gen_x)  # adj, h
-            gen_out.sum().backward()
-
-            if clamp:
-                if gen_x.grad is not None: gen_x.grad.data.clamp_(-0.01, 0.01)
-                if gen_adj.grad is not None: gen_adj.grad.data.clamp_(-0.01, 0.01)
-
-            if gen_x.grad is not None: gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-            if gen_adj.grad is not None: gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
-
-            if gen_x.grad is not None: gen_x.grad.detach_(); gen_x.grad.zero_()
-            if gen_adj.grad is not None: gen_adj.grad.detach_(); gen_adj.grad.zero_()
-
-            gen_x.data.clamp_(0, 1 + c)
-            gen_adj.data.clamp_(0, 1)
-
-        gen_x = gen_x.detach()  # Shape (B, N, F_total)
-        gen_adj = gen_adj.detach()  # Shape (B, E_total, N, N)
-
-        # Symmetrize adjacency matrix (important for undirected interpretation)
-        gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
-
-        # Convert tensors to AIGs (NetworkX graphs)
-        # gen_mol_from_one_shot_tensor needs to be adapted for AIGs.
-        # It expects gen_x as (B, F_total, N) and gen_adj as (B, E_total, N, N)
-        # Our gen_x is (B, N, F_total), so permute it.
-        print("Converting generated tensors to NetworkX AIGs...")
-        # The generate.py script's gen_mol_from_one_shot_tensor expects x shape (B, F, N)
-        # and adj shape (B, E, N, N).
-        # Our gen_x is (B, N, F_total), so permute it.
-        # Our gen_adj is (B, E_total, N, N), which is correct.
-        generated_aigs, pure_valids_flags = gen_mol_from_one_shot_tensor(gen_adj, gen_x.permute(0, 2, 1))
-        print(f"Finished generation. Produced {len(generated_aigs)} AIG objects.")
-
-        return generated_aigs, pure_valids_flags
+    # def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples):
+    #     r"""
+    #         Running graph generation for random generation task.
+    #         ... (rest of docstring) ...
+    #     """
+    #     # Parameters for Langevin dynamics from model_conf_dict
+    #     c = model_conf_dict.get('c', 0.05)
+    #     ld_step = model_conf_dict.get('ld_step', 60)
+    #     ld_noise = model_conf_dict.get('ld_noise', 0.005)
+    #     ld_step_size = model_conf_dict.get('ld_step_size', 30.0)
+    #     clamp = model_conf_dict.get('clamp', True)
+    #     # atomic_num_list is handled by gen_mol_from_one_shot_tensor for AIGs
+    #
+    #     print(f"Loading parameters from {checkpoint_path}")
+    #     try:
+    #         self.energy_function.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+    #         print(f"Successfully loaded checkpoint onto {self.device}")
+    #     except Exception as e:
+    #         warnings.warn(f"Could not load checkpoint from {checkpoint_path}: {e}. Using randomly initialized model.")
+    #
+    #     parameters = self.energy_function.parameters()
+    #
+    #     # Initialization of samples
+    #     print("Initializing samples for generation...")
+    #     # self.n_atom_type and self.n_edge_type are total channels (e.g., NUM_NODE_ATTRIBUTES, NUM_EDGE_ATTRIBUTES)
+    #     # self.n_atom is MAX_NODE_COUNT
+    #     gen_x = torch.rand(n_samples, self.n_atom, self.n_atom_type, device=self.device) * (
+    #                 1 + c)  # Shape (B, N, F_total)
+    #     gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom,
+    #                          device=self.device)  # Shape (B, E_total, N, N)
+    #     # Note: EnergyFunc expects h (node features) as (B,F,N) after permute. So gen_x (B,N,F) is correct here.
+    #
+    #     gen_x.requires_grad = True
+    #     gen_adj.requires_grad = True
+    #     requires_grad(parameters, False)
+    #     self.energy_function.eval()
+    #
+    #     noise_x = torch.randn_like(gen_x, device=self.device)
+    #     noise_adj = torch.randn_like(gen_adj, device=self.device)
+    #
+    #     # Langevin dynamics for generation
+    #     print(f"Generating {n_samples} samples using Langevin dynamics ({ld_step} steps)...")
+    #     for step_idx in tqdm(range(ld_step), desc="Langevin Dynamics Steps"):
+    #         noise_x.normal_(0, ld_noise)
+    #         noise_adj.normal_(0, ld_noise)
+    #         gen_x.data.add_(noise_x.data)
+    #         gen_adj.data.add_(noise_adj.data)
+    #
+    #         gen_out = self.energy_function(gen_adj, gen_x)  # adj, h
+    #         gen_out.sum().backward()
+    #
+    #         if clamp:
+    #             if gen_x.grad is not None: gen_x.grad.data.clamp_(-0.01, 0.01)
+    #             if gen_adj.grad is not None: gen_adj.grad.data.clamp_(-0.01, 0.01)
+    #
+    #         if gen_x.grad is not None: gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
+    #         if gen_adj.grad is not None: gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
+    #
+    #         if gen_x.grad is not None: gen_x.grad.detach_(); gen_x.grad.zero_()
+    #         if gen_adj.grad is not None: gen_adj.grad.detach_(); gen_adj.grad.zero_()
+    #
+    #         gen_x.data.clamp_(0, 1 + c)
+    #         gen_adj.data.clamp_(0, 1)
+    #
+    #     gen_x = gen_x.detach()  # Shape (B, N, F_total)
+    #     gen_adj = gen_adj.detach()  # Shape (B, E_total, N, N)
+    #
+    #     # Symmetrize adjacency matrix (important for undirected interpretation)
+    #     gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
+    #
+    #     # Convert tensors to AIGs (NetworkX graphs)
+    #     # gen_mol_from_one_shot_tensor needs to be adapted for AIGs.
+    #     # It expects gen_x as (B, F_total, N) and gen_adj as (B, E_total, N, N)
+    #     # Our gen_x is (B, N, F_total), so permute it.
+    #     print("Converting generated tensors to NetworkX AIGs...")
+    #     # The generate.py script's gen_mol_from_one_shot_tensor expects x shape (B, F, N)
+    #     # and adj shape (B, E, N, N).
+    #     # Our gen_x is (B, N, F_total), so permute it.
+    #     # Our gen_adj is (B, E_total, N, N), which is correct.
+    #     generated_aigs, pure_valids_flags = gen_mol_from_one_shot_tensor(gen_adj, gen_x.permute(0, 2, 1))
+    #     print(f"Finished generation. Produced {len(generated_aigs)} AIG objects.")
+    #
+    #     return generated_aigs, pure_valids_flags
