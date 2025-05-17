@@ -27,7 +27,7 @@ _target_: src.datasets.aig_custom_dataset.AIGCustomDataModule
 dataset_infos_target_class: src.datasets.aig_custom_dataset.AIGCustomDatasetInfos
 
 # Configuration for extra features. 'null' for AIGs as they are processed by your scripts.
-extra_features: null
+extra_features: 'rrwp'
 
 # Configuration for domain-specific features. 'null' for AIGs.
 domain_features: null
