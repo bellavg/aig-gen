@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
 #SBATCH --time=16:00:00              # Initial requested time, adjust as needed
-#SBATCH --output=slurm_logs/defog_%j.out
+#SBATCH --output=slurm_logs/undirected_defog_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
