@@ -3,13 +3,13 @@
 Baselines to test
 
 - Graph-RNN
-- DiGress
+- DiGress - Running - Untested
 - dig
-  - Graph-DF
+  - Graph-DF - Ready to train -
   - Graph-AF
   - GraphEBM
-- LayerDAG
-- GRAPHARM
+- LayerDAG 
+
 
 
   - SeaDAG and Circuit Transformer - done but not available for testing 

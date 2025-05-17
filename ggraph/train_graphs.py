@@ -10,8 +10,8 @@ import warnings  # Added for warnings
 
 # Model and Dataset Imports
 from GraphDF import GraphDF
-from GraphAF import GraphAF
-from GraphEBM import GraphEBM
+# from GraphAF import GraphAF
+# from GraphEBM import GraphEBM
 
 # Assuming aig_padded_inmemory_dataset.py contains AIGPaddedInMemoryDataset
 # and is in the Python path or same directory.
@@ -176,30 +176,30 @@ def main(args):
     runner = None
     if args.model == 'GraphDF':
         runner = GraphDF()
-    elif args.model == 'GraphAF':
-        runner = GraphAF()
-    elif args.model == 'GraphEBM':
-        warnings.warn(
-            "GraphEBM is selected. The AIGPaddedInMemoryDataset provides node features "
-            f"with {NUM_NODE_ATTRIBUTES} dimensions (including padding type). "
-            "The current GraphEBM implementation (graphebm.py) might expect {NUM_EXPLICIT_NODE_FEATURES} "
-            "dimensions for its internal transformation '_transform_node_features_add_virtual_channel'. "
-            "This could lead to a mismatch if GraphEBM.py is not adapted to handle pre-padded features "
-            "or if the input to its train_rand_gen is not sliced appropriately."
-        )
-        runner = GraphEBM(
-            n_atom=MAX_NODE_COUNT,
-            n_atom_type_actual=NUM_EXPLICIT_NODE_FEATURES,
-            n_edge_type_actual=NUM_EXPLICIT_EDGE_FEATURES,
-            hidden=conf['model'].get('hidden', 64),
-            device=device
-        )
-        conf['lr'] = base_conf.get('ebm_lr', conf['lr'])
-        current_general_batch_size = conf['batch_size']  # Save before potential override
-        conf['batch_size'] = base_conf.get('ebm_bs', conf['batch_size'])
-        if conf['batch_size'] != current_general_batch_size:
-            train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
-            print(f"Re-created DataLoader for GraphEBM with batch size {conf['batch_size']}.")
+    # elif args.model == 'GraphAF':
+    #     runner = GraphAF()
+    # elif args.model == 'GraphEBM':
+    #     warnings.warn(
+    #         "GraphEBM is selected. The AIGPaddedInMemoryDataset provides node features "
+    #         f"with {NUM_NODE_ATTRIBUTES} dimensions (including padding type). "
+    #         "The current GraphEBM implementation (graphebm.py) might expect {NUM_EXPLICIT_NODE_FEATURES} "
+    #         "dimensions for its internal transformation '_transform_node_features_add_virtual_channel'. "
+    #         "This could lead to a mismatch if GraphEBM.py is not adapted to handle pre-padded features "
+    #         "or if the input to its train_rand_gen is not sliced appropriately."
+    #     )
+    #     runner = GraphEBM(
+    #         n_atom=MAX_NODE_COUNT,
+    #         n_atom_type_actual=NUM_EXPLICIT_NODE_FEATURES,
+    #         n_edge_type_actual=NUM_EXPLICIT_EDGE_FEATURES,
+    #         hidden=conf['model'].get('hidden', 64),
+    #         device=device
+    #     )
+    #     conf['lr'] = base_conf.get('ebm_lr', conf['lr'])
+    #     current_general_batch_size = conf['batch_size']  # Save before potential override
+    #     conf['batch_size'] = base_conf.get('ebm_bs', conf['batch_size'])
+    #     if conf['batch_size'] != current_general_batch_size:
+    #         train_loader = DenseDataLoader(train_dataset, batch_size=conf['batch_size'], shuffle=True, drop_last=True)
+    #         print(f"Re-created DataLoader for GraphEBM with batch size {conf['batch_size']}.")
     else:
         if wandb_run: wandb.finish(exit_code=1)
         print(f"Error: Unknown model type '{args.model}'.");
