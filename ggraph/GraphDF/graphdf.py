@@ -202,4 +202,4 @@ class GraphDF(Generator):
         if cnt_mol < n_mols:
             warnings.warn(f"Desired {n_mols} graphs, but only {cnt_mol} were successfully generated and met criteria.")
 
-        return all_graphs, pure_valids
+        return all_graphs, sum(pure_valids)

@@ -197,4 +197,4 @@ class GraphAF(Generator):
             warnings.warn(
                 f"Desired {n_mols} AIGs, but only {cnt_generated} were successfully generated and met criteria by GraphAF.")
 
-        return all_mols, pure_valids
+        return all_mols, sum(pure_valids)
