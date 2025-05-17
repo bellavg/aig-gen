@@ -10,7 +10,7 @@ echo "Loading base environment module..."
 module load 2022 # This module provides Python and potentially CUDA runtime
 module load CUDA/11.6.0
 conda create -n LayerDAG python=3.10 -y
-conda activate LayerDAG
+source activate LayerDAG
 pip install torch==1.12.0+cu116 --extra-index-url https://download.pytorch.org/whl/cu116
 conda install -c conda-forge cudatoolkit=11.6
 conda clean --all -y
