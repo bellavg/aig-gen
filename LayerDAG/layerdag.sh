@@ -11,8 +11,9 @@ module load 2022 # This module provides Python and potentially CUDA runtime
 module load CUDA/11.6.0
 
 source activate LayerDAG
-
-pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.12.0+cu116.html
+# Clear pip's cache
+pip cache purge
+pip install --no-cache-dir -v torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.12.0+cu116.html
 
 # --- Training Command ---
 echo "Starting LayerDAG Training (Config: configs/LayerDAG/aig.yaml)"
