@@ -1,277 +1,335 @@
 #!/usr/bin/env python3
+import os
 import os.path as osp
 import warnings
-from itertools import repeat
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
 import torch
-import torch_geometric.io.fs as pyg_fs
-from torch_geometric.data import Dataset
-from torch_geometric.data.data import BaseData
+from torch_geometric.data import Data, InMemoryDataset
+from torch_geometric.transforms import BaseTransform
+from tqdm import tqdm
+
+# --- Configuration Constants ---
+# These are now imported from your aig_config.py file.
+# Ensure aig_config.py is in your Python path or the same directory.
+try:
+    from aig_config import (
+        MAX_NODE_COUNT,
+        NUM_EXPLICIT_NODE_FEATURES,
+        PADDING_NODE_CHANNEL,
+        NUM_NODE_ATTRIBUTES,  # Total node feature dimensions (explicit + padding)
+        NUM_EXPLICIT_EDGE_FEATURES,
+        NO_EDGE_CHANNEL,  # Index of the no-edge channel
+        NUM_EDGE_ATTRIBUTES  # Total adjacency/edge channels (explicit + no-edge)
+    )
+
+    print("Successfully imported AIG configuration constants.")
+except ImportError as e:
+    warnings.warn(f"Could not import AIG configuration constants from aig_config.py: {e}. "
+                  "Please ensure it's available and correctly configured. "
+                  "Using placeholder values for script structure, but this will likely fail at runtime if aig_config is missing.")
+    # Placeholders to allow script structure to be valid, but processing will likely fail
+    MAX_NODE_COUNT = 64
+    NUM_EXPLICIT_NODE_FEATURES = 4
+    PADDING_NODE_CHANNEL = 4
+    NUM_NODE_ATTRIBUTES = 5
+    NUM_EXPLICIT_EDGE_FEATURES = 2
+    NO_EDGE_CHANNEL = 2
+    NUM_EDGE_ATTRIBUTES = 3
 
 
-class AIGPreprocessedDatasetLoader(Dataset):
-    def __init__(self, root: str, split: str,
+# --- Transform for Padding and Adjacency Matrix Reformatting ---
+class AIGTransformAndPad(BaseTransform):
+    def __init__(self, max_nodes: int,
+                 num_explicit_node_features: int, padding_node_channel_idx: int, total_node_feature_dim: int,
+                 num_explicit_edge_features: int, no_edge_channel_idx: int, total_adj_channels: int):
+        """
+        Initializes the transformation class.
+
+        Args:
+            max_nodes: MAX_NODE_COUNT from aig_config.
+            num_explicit_node_features: NUM_EXPLICIT_NODE_FEATURES from aig_config.
+            padding_node_channel_idx: PADDING_NODE_CHANNEL from aig_config.
+            total_node_feature_dim: NUM_NODE_ATTRIBUTES from aig_config.
+            num_explicit_edge_features: NUM_EXPLICIT_EDGE_FEATURES from aig_config.
+            no_edge_channel_idx: NO_EDGE_CHANNEL from aig_config.
+            total_adj_channels: NUM_EDGE_ATTRIBUTES from aig_config.
+        """
+        self.max_nodes = max_nodes
+        self.num_explicit_node_features = num_explicit_node_features
+        self.padding_node_channel_idx = padding_node_channel_idx
+        self.total_node_feature_dim = total_node_feature_dim
+        self.num_explicit_edge_features = num_explicit_edge_features
+        self.no_edge_channel_idx = no_edge_channel_idx
+        self.total_adj_channels = total_adj_channels
+
+    def __call__(self, data: Data) -> Data:
+        """
+        Applies padding and adjacency transformation to a single Data object.
+        Assumes input data.x has shape [num_actual_nodes, num_explicit_node_features]
+        and data.edge_attr has shape [num_edges, num_explicit_edge_features].
+        """
+        num_actual_nodes = data.num_nodes.item()
+
+        # 1. Pad Node Features (data.x)
+        # New x shape: [max_nodes, total_node_feature_dim]
+        new_x = torch.zeros((self.max_nodes, self.total_node_feature_dim), dtype=torch.float)
+
+        # Initialize all to padding type by default
+        if self.padding_node_channel_idx < self.total_node_feature_dim:
+            new_x[:, self.padding_node_channel_idx] = 1.0
+
+        if num_actual_nodes > 0:
+            if data.x.shape[0] != num_actual_nodes:
+                warnings.warn(
+                    f"data.x row count ({data.x.shape[0]}) does not match data.num_nodes ({num_actual_nodes}). Graph: {getattr(data, 'graph_name_original', 'Unknown')}")
+
+            if data.x.shape[1] != self.num_explicit_node_features:
+                warnings.warn(f"Input data.x feature dimension ({data.x.shape[1]}) does not match "
+                              f"configured num_explicit_node_features ({self.num_explicit_node_features}). Graph: {getattr(data, 'graph_name_original', 'Unknown')}")
+                # Handle mismatch if possible, or this might lead to errors
+                # For now, assume it will be sliced or cause an error if not matching
+
+            # Fill in actual node features
+            # Slice data.x to ensure it matches num_explicit_node_features if it's wider for some reason
+            new_x[:num_actual_nodes, :self.num_explicit_node_features] = data.x[:num_actual_nodes,
+                                                                         :self.num_explicit_node_features]
+            # Ensure actual nodes are not marked as padding type
+            if self.padding_node_channel_idx < self.total_node_feature_dim:
+                new_x[:num_actual_nodes, self.padding_node_channel_idx] = 0.0
+
+        # 2. Create Padded Adjacency Matrix (new_adj)
+        # Shape: [total_adj_channels, max_nodes, max_nodes]
+        new_adj = torch.zeros((self.total_adj_channels, self.max_nodes, self.max_nodes), dtype=torch.float)
+
+        # Initialize "no edge" channel (NO_EDGE_CHANNEL)
+        if self.no_edge_channel_idx < self.total_adj_channels:
+            for i in range(self.max_nodes):
+                for j in range(self.max_nodes):
+                    if i != j:  # No self-loops for "no edge" type
+                        new_adj[self.no_edge_channel_idx, i, j] = 1.0
+        # Diagonals of all channels (including no_edge_channel) remain 0.
+
+        # Populate explicit edge channels using data.edge_index and data.edge_attr
+        # data.edge_index: [2, num_undirected_actual_edges]
+        # data.edge_attr: [num_undirected_actual_edges, num_explicit_edge_features] (one-hot)
+        if hasattr(data, 'edge_index') and data.edge_index is not None and data.edge_index.numel() > 0:
+            if not hasattr(data, 'edge_attr') or data.edge_attr is None:
+                warnings.warn(
+                    f"Graph {getattr(data, 'graph_name_original', 'Unknown')} has edge_index but no edge_attr. "
+                    "Cannot determine explicit edge types for the new adjacency matrix.")
+            elif data.edge_attr.shape[1] != self.num_explicit_edge_features:
+                warnings.warn(
+                    f"Graph {getattr(data, 'graph_name_original', 'Unknown')} edge_attr feature dimension ({data.edge_attr.shape[1]}) "
+                    f"does not match configured num_explicit_edge_features ({self.num_explicit_edge_features}). "
+                    "Cannot reliably populate new_adj from edge_attr.")
+            else:
+                for k in range(data.edge_index.size(1)):  # Iterate over each directed edge in the undirected pair
+                    u, v = data.edge_index[0, k].item(), data.edge_index[1, k].item()
+
+                    # Ensure u and v are within the bounds of actual nodes for this graph
+                    if u >= num_actual_nodes or v >= num_actual_nodes:
+                        warnings.warn(
+                            f"Edge index ({u},{v}) in graph {getattr(data, 'graph_name_original', 'Unknown')} "
+                            f"is out of bounds for actual nodes ({num_actual_nodes}). Skipping this edge for new_adj.")
+                        continue
+
+                    edge_features_one_hot = data.edge_attr[k]  # Shape: [num_explicit_edge_features]
+
+                    try:
+                        # Determine the channel for this explicit edge type
+                        explicit_channel_idx = torch.argmax(edge_features_one_hot).item()
+                        if not (0 <= explicit_channel_idx < self.num_explicit_edge_features):
+                            warnings.warn(
+                                f"Invalid explicit channel index {explicit_channel_idx} derived from edge_attr for edge ({u},{v}). Skipping.")
+                            continue
+
+                        # Set the explicit edge channel
+                        new_adj[explicit_channel_idx, u, v] = 1.0
+                        # new_adj is made symmetric by processing both (u,v) and (v,u) from edge_index
+
+                        # Mark this edge as NOT a "no edge"
+                        if self.no_edge_channel_idx < self.total_adj_channels:
+                            new_adj[self.no_edge_channel_idx, u, v] = 0.0
+                    except Exception as e:
+                        warnings.warn(
+                            f"Error processing edge_attr for edge ({u},{v}) in graph {getattr(data, 'graph_name_original', 'Unknown')}: {e}. Skipping edge for new_adj.")
+                        continue
+
+        # Create the transformed Data object
+        transformed_data = Data()
+        transformed_data.x = new_x
+        transformed_data.adj = new_adj
+        transformed_data.num_nodes = data.num_nodes  # Preserve actual number of nodes
+
+        # Pass through original edge_index and edge_attr if they exist and are needed by some models
+        if hasattr(data, 'edge_index'): transformed_data.edge_index = data.edge_index
+        if hasattr(data, 'edge_attr'): transformed_data.edge_attr = data.edge_attr
+
+        # Pass through any other attributes from the original Data object
+        for key in data.keys:
+            if key not in ['x', 'adj', 'num_nodes', 'edge_index', 'edge_attr']:
+                transformed_data[key] = data[key]
+
+        return transformed_data
+
+
+# --- InMemoryDataset for Padded and Formatted AIGs ---
+class AIGPaddedInMemoryDataset(InMemoryDataset):
+    def __init__(self, root: str,
+                 split: str,
+                 raw_pt_input_dir: str,
+                 raw_pt_input_filename: str = "aig_undirected.pt",
                  transform: Optional[callable] = None,
                  pre_transform: Optional[callable] = None,
-                 pre_filter: Optional[callable] = None):
+                 pre_filter: Optional[callable] = None,
+                 processed_file_prefix: str = "padded_aig_"):  # Added "aig" to prefix
 
         self.split = split
-        self.dataset_specific_root = root
-        self._batch_has_valid_dunder_num_nodes = False  # Initialize flag
+        self.raw_pt_input_path = osp.join(raw_pt_input_dir, raw_pt_input_filename)
+        self.processed_file_prefix = processed_file_prefix
+        self.graph_identifiers: List[str] = []
 
-        super().__init__(root=self.dataset_specific_root, transform=transform,
-                         pre_transform=pre_transform, pre_filter=pre_filter)
+        super().__init__(root, transform, pre_transform, pre_filter)
 
-        current_processed_file_path = self.processed_paths[0]
-
-        if pyg_fs.exists(current_processed_file_path):
+        try:
+            # InMemoryDataset's __init__ calls self.load() if processed files exist.
+            # self.load() attempts to load self.processed_paths[0]
+            self.data, self.slices, self.graph_identifiers = torch.load(self.processed_paths[0])
+            print(f"Successfully loaded processed & padded '{self.split}' AIG data from: {self.processed_paths[0]}")
+        except FileNotFoundError:
+            print(f"Padded processed file not found at {self.processed_paths[0]}. "
+                  "This is normal if processing for the first time. Dataset will attempt to process.")
+        except Exception as e:
+            warnings.warn(
+                f"Could not load full data tuple (data, slices, identifiers) from {self.processed_paths[0]}: {e}. "
+                "Attempting to load just data and slices if processing was already done.")
             try:
-                loaded_content = torch.load(current_processed_file_path, map_location='cpu', weights_only=False)
-                if not isinstance(loaded_content, tuple) or len(loaded_content) != 2:
-                    raise TypeError(
-                        f"Loaded data from {current_processed_file_path} is not a tuple of 2 elements (data, slices). Got {type(loaded_content)}")
-                self._data_list = None
-                self.data, self.slices = loaded_content
-
-                # One-time check for num_nodes inconsistency and set flag
-                has_num_nodes_key_in_data = 'num_nodes' in self.data
-                has_num_nodes_key_in_slices = 'num_nodes' in self.slices
-                has_batch_dunder_num_nodes_attr = hasattr(self.data, '__num_nodes__') and \
-                                                  self.data.__num_nodes__ is not None and \
-                                                  torch.is_tensor(self.data.__num_nodes__) and \
-                                                  self.data.__num_nodes__.ndim > 0  # Ensure it's a non-empty tensor
-
-                # Calculate initial length based on slices for comparison
-                initial_len_from_slices = 0
-                if self.slices is not None and len(self.slices) > 0:  # Check if slices is not empty
-                    # Attempt to find a key that exists in both self.data and self.slices for a robust cat_dim check
-                    valid_key_for_cat_dim = None
-                    for key_check in self.slices.keys():
-                        if key_check in self.data and torch.is_tensor(self.data[key_check]):
-                            valid_key_for_cat_dim = key_check
-                            break
-
-                    if valid_key_for_cat_dim:
-                        for _, value in self.slices.items():  # Iterate to find a valid slice tensor
-                            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.numel() > 0:
-                                # Ensure the key used for cat_dim check is valid and its item is a tensor
-                                item_for_cat_dim = self.data[valid_key_for_cat_dim]
-                                cat_dim = self.data.__cat_dim__(valid_key_for_cat_dim, item_for_cat_dim)
-                                if cat_dim is not None and item_for_cat_dim.size(cat_dim) > 0:
-                                    initial_len_from_slices = value.size(0) - 1 if value.size(0) > 0 else 0
-                                    break
-                    else:  # No common key or self.data items are not tensors for slice keys
-                        pass  # initial_len_from_slices remains 0
-
-                num_graphs_from_dunder_nodes = 0
-                if has_batch_dunder_num_nodes_attr:
-                    num_graphs_from_dunder_nodes = self.data.__num_nodes__.size(0)
-
-                if has_num_nodes_key_in_data and not has_num_nodes_key_in_slices:
-                    if has_batch_dunder_num_nodes_attr:
-                        # Check if num_graphs_from_dunder_nodes is positive before comparing
-                        self._batch_has_valid_dunder_num_nodes = (
-                                    num_graphs_from_dunder_nodes == initial_len_from_slices and num_graphs_from_dunder_nodes > 0)
-                        if self._batch_has_valid_dunder_num_nodes:
-                            warnings.warn(
-                                f"Dataset Inconsistency for split '{self.split}': "
-                                f"'num_nodes' key exists in self.data but is missing from 'self.slices'. "
-                                f"However, 'self.data.__num_nodes__' is present and appears consistent with dataset length ({num_graphs_from_dunder_nodes} items). "
-                                f"The loader will use 'self.data.__num_nodes__'. This is usually acceptable.",
-                                UserWarning
-                            )
-                        else:  # Mismatch in length or zero length
-                            warnings.warn(
-                                f"Dataset Inconsistency for split '{self.split}': "
-                                f"'num_nodes' key exists in self.data but is missing from 'self.slices'. "
-                                f"'self.data.__num_nodes__' is present but its length ({num_graphs_from_dunder_nodes}) "
-                                f"might be inconsistent with length from slices ({initial_len_from_slices}) or is zero. "
-                                f"Review dataset integrity.",
-                                UserWarning
-                            )
-                    else:  # No __num_nodes__ fallback
-                        warnings.warn(
-                            f"CRITICAL Dataset Inconsistency for split '{self.split}': "
-                            f"'num_nodes' key exists in self.data but is missing from 'self.slices', AND "
-                            f"the batch-level 'self.data.__num_nodes__' attribute is also missing, None, or not a valid tensor. "
-                            f"Number of nodes for individual graphs may be inferred incorrectly by PyG.",
-                            UserWarning
-                        )
-                elif not has_num_nodes_key_in_data and not has_batch_dunder_num_nodes_attr:
-                    warnings.warn(
-                        f"Note for split '{self.split}': Neither 'num_nodes' key in self.data nor "
-                        f"'self.data.__num_nodes__' attribute found. PyG will infer num_nodes from other attributes (e.g., x, edge_index).",
-                        UserWarning
-                    )
-
-            except Exception as e:
-                print(f"  ERROR during direct torch.load or data assignment from {current_processed_file_path}: {e}")
-                raise RuntimeError(f"Failed to load pre-processed data: {e}")
-        else:
-            raise FileNotFoundError(
-                f"Processed file not found at {current_processed_file_path} during __init__ data loading. "
-                f"Please ensure the dataset is correctly processed by 'make_dataset.py'."
-            )
-
-        print(f"Dataset loader for split '{self.split}' initialization complete. Samples: {len(self)}")
+                self.data, self.slices = torch.load(self.processed_paths[0])
+                num_graphs = self.slices[list(self.slices.keys())[0]].size(
+                    0) - 1 if self.slices and self.slices.keys() else 0
+                self.graph_identifiers = [f"graph_{i}" for i in range(num_graphs)]  # Dummy identifiers
+                warnings.warn("Loaded only data and slices; graph identifiers are dummies.")
+            except Exception as e_simple:
+                # This might happen if the file is truly corrupted or doesn't exist and process() hasn't run
+                warnings.warn(f"Failed to load even basic data/slices from {self.processed_paths[0]}: {e_simple}. "
+                              "If this is the first run, processing will be attempted.")
 
     @property
     def raw_file_names(self) -> List[str]:
-        return []
+        # The "raw" file for this dataset is the pre-existing .pt file (e.g., aig_undirected.pt)
+        return [osp.basename(self.raw_pt_input_path)]
 
     @property
-    def processed_file_names(self) -> str | List[str] | Tuple:
-        return [f'{self.split}_processed_data.pt']
+    def raw_dir(self) -> str:
+        # The directory where the input .pt file is located
+        return osp.dirname(self.raw_pt_input_path)
+
+    @property
+    def processed_file_names(self) -> str:
+        # Name of the file this dataset will create (e.g., padded_aig_train.pt)
+        return f'{self.processed_file_prefix}{self.split}.pt'
 
     def download(self):
-        pass
+        if not osp.exists(self.raw_pt_input_path):
+            raise FileNotFoundError(f"Input .pt file not found: {self.raw_pt_input_path}. "
+                                    "This dataset expects it to be pre-existing in the specified `raw_pt_input_dir`.")
 
     def process(self):
-        print(f"AIGPreprocessedDatasetLoader.process() called for split '{self.split}'. "
-              f"This loader expects data to be already processed by AIGProcessedDataset script.")
-        current_processed_file_path = self.processed_paths[0]
-        if not pyg_fs.exists(current_processed_file_path):
-            raise FileNotFoundError(
-                f"Processed file not found at {current_processed_file_path} during process() check. "
-                f"Please run the AIG data generation and processing script (e.g., make_dataset.py) first.")
+        print(
+            f"Processing for '{self.split}' split: Loading from '{self.raw_pt_input_path}' and applying transformations...")
+
+        if not osp.exists(self.raw_pt_input_path):  # Double check before loading
+            raise FileNotFoundError(f"Cannot process: Raw input file {self.raw_pt_input_path} not found.")
+
+        try:
+            unpadded_data_list: List[Data] = torch.load(self.raw_pt_input_path)
+            if not isinstance(unpadded_data_list, list):
+                raise TypeError(f"Expected a list of Data objects from {self.raw_pt_input_path}, "
+                                f"but got {type(unpadded_data_list)}.")
+        except Exception as e:
+            raise RuntimeError(f"Error loading unpadded data from {self.raw_pt_input_path}: {e}")
+
+        # Instantiate the transformer using imported config values
+        transformer = AIGTransformAndPad(
+            max_nodes=MAX_NODE_COUNT,
+            num_explicit_node_types=NUM_EXPLICIT_NODE_FEATURES,
+            padding_node_channel_idx=PADDING_NODE_CHANNEL,
+            total_node_feature_dim=NUM_NODE_ATTRIBUTES,
+            num_explicit_edge_features=NUM_EXPLICIT_EDGE_FEATURES,
+            no_edge_channel_idx=NO_EDGE_CHANNEL,
+            total_adj_channels=NUM_EDGE_ATTRIBUTES
+        )
+
+        transformed_data_list: List[Data] = []
+        current_graph_identifiers: List[str] = []
+
+        for i, data_obj in enumerate(tqdm(unpadded_data_list, desc="Applying padding and transform")):
+            if not isinstance(data_obj, Data):
+                warnings.warn(f"Item {i} in {self.raw_pt_input_path} is not a PyG Data object. Skipping.")
+                continue
+
+            # Important: Ensure data_obj.num_nodes is present and correct before transforming
+            if not hasattr(data_obj, 'num_nodes') or data_obj.num_nodes is None:
+                warnings.warn(f"Data object {i} (name: {getattr(data_obj, 'graph_name_original', 'Unknown')}) "
+                              "is missing 'num_nodes' attribute. Attempting to infer from data.x.shape[0].")
+                if hasattr(data_obj, 'x') and data_obj.x is not None:
+                    data_obj.num_nodes = torch.tensor(data_obj.x.shape[0], dtype=torch.long)
+                else:
+                    warnings.warn(f"Cannot infer num_nodes for data object {i}. Skipping.")
+                    continue
+
+            transformed_obj = transformer(data_obj)
+            if transformed_obj:  # Transformer might return None if input data is problematic
+                transformed_data_list.append(transformed_obj)
+                identifier = getattr(data_obj, 'graph_name_original', f"{self.split}_graph_{i}")
+                current_graph_identifiers.append(identifier)
+                # Ensure the transformed object also carries the identifier if needed later by get()
+                if hasattr(transformed_obj, 'graph_name_original') and not transformed_obj.graph_name_original:
+                    transformed_obj.graph_name_original = identifier
+
+        if self.pre_filter is not None:
+            # Apply pre_filter to the transformed data
+            # Ensure identifiers list is filtered along with data_list
+            filtered_indices = [i for i, data in enumerate(transformed_data_list) if self.pre_filter(data)]
+            transformed_data_list = [transformed_data_list[i] for i in filtered_indices]
+            current_graph_identifiers = [current_graph_identifiers[i] for i in filtered_indices]
+            print(f"Applied pre_filter, {len(transformed_data_list)} graphs remaining for {self.split}.")
+
+        if self.pre_transform is not None:
+            # Apply pre_transform to the already transformed (padded) data
+            print(f"Applying pre_transform for {self.split}...")
+            transformed_data_list = [self.pre_transform(data) for data in
+                                     tqdm(transformed_data_list, desc="Pre-transforming (on padded data)")]
+
+        if not transformed_data_list:
+            warnings.warn(
+                f"No data to save for split '{self.split}' after transformation. Saving empty dataset structure.")
+
+        # Collate data_list into PyG's internal storage format
+        # This creates self.data and self.slices for InMemoryDataset
+        data, slices = self.collate(transformed_data_list)
+
+        # Save the processed (padded, collated) data and identifiers
+        # The path is self.processed_paths[0]
+        torch.save((data, slices, current_graph_identifiers), self.processed_paths[0])
+        print(
+            f"Finished processing for '{self.split}'. Saved {len(transformed_data_list)} graphs to {self.processed_paths[0]}.")
+        # self.graph_identifiers is loaded in __init__ from the saved file,
+        # so no need to set it here directly after saving. It will be set on next load.
+
+    def get(self, idx: int) -> Data:
+        data = super().get(idx)
+        if hasattr(self, 'graph_identifiers') and self.graph_identifiers and idx < len(self.graph_identifiers):
+            data.graph_name = self.graph_identifiers[idx]
+        else:
+            data.graph_name = f"{self.split}_graph_idx_{idx}"
+        return data
 
     def len(self) -> int:
-        if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None and \
-                torch.is_tensor(self.data.__num_nodes__):
-            return self.data.__num_nodes__.size(0)
-        elif hasattr(self.data, '__num_nodes__') and isinstance(self.data.__num_nodes__,
-                                                                (list, tuple)):  # Should be a tensor from PyG collate
-            return len(self.data.__num_nodes__)
-
-        if self.slices is not None and len(self.slices) > 0:
-            # Attempt to find a key that exists in both self.data and self.slices for a robust cat_dim check
-            valid_key_for_cat_dim = None
-            for key_check in self.slices.keys():
-                if key_check in self.data and torch.is_tensor(self.data[key_check]):
-                    valid_key_for_cat_dim = key_check
-                    break
-
-            if valid_key_for_cat_dim:
-                for key_for_len, slice_tensor_for_len in self.slices.items():
-                    if isinstance(slice_tensor_for_len,
-                                  torch.Tensor) and slice_tensor_for_len.ndim > 0 and slice_tensor_for_len.numel() > 0:
-                        item_for_cat_dim = self.data[valid_key_for_cat_dim]  # Use the validated key
-                        cat_dim = self.data.__cat_dim__(valid_key_for_cat_dim, item_for_cat_dim)
-                        if cat_dim is not None and item_for_cat_dim.size(cat_dim) > 0:
-                            return slice_tensor_for_len.size(0) - 1 if slice_tensor_for_len.size(0) > 0 else 0
-            return 0
-        return 0
-
-    def get(self, idx: int) -> BaseData:
-        if not hasattr(self, '_data_list') or self._data_list is None:
-            if self.data is None or self.slices is None:
-                raise IndexError(
-                    f"Dataset not loaded properly (self.data or self.slices is None), cannot get item {idx}")
-            if not isinstance(self.data, BaseData):
-                raise TypeError(f"self.data is not a PyG BaseData object, cannot get item {idx}")
-
-            num_items = self.len()
-            if not (0 <= idx < num_items):
-                raise IndexError(f"Index {idx} out of bounds for dataset with length {num_items}")
-
-            data_obj = self.data.__class__()
-
-            data_obj_dunder_num_nodes_was_set = False
-            if hasattr(self.data, '__num_nodes__') and self.data.__num_nodes__ is not None:
-                # Ensure self.data.__num_nodes__ is a sequence (tensor, list, or tuple) before len()
-                if isinstance(self.data.__num_nodes__, (torch.Tensor, list, tuple)) and idx < len(
-                        self.data.__num_nodes__):
-                    val = self.data.__num_nodes__[idx]
-                    true_num_nodes_for_this_item = None
-                    if torch.is_tensor(val) and val.numel() == 1:
-                        true_num_nodes_for_this_item = val.item()
-                    elif isinstance(val, int):
-                        true_num_nodes_for_this_item = val
-
-                    if true_num_nodes_for_this_item is not None:
-                        data_obj.__num_nodes__ = true_num_nodes_for_this_item
-                        data_obj_dunder_num_nodes_was_set = True
-                    else:
-                        warnings.warn(
-                            f"Value for num_nodes from self.data.__num_nodes__[{idx}] is unexpected (type: {type(val)}). "
-                            f"data_obj.__num_nodes__ not set from this source for item {idx}.", UserWarning)
-                else:
-                    warnings.warn(
-                        f"Index {idx} out of bounds for self.data.__num_nodes__ (len {len(self.data.__num_nodes__) if isinstance(self.data.__num_nodes__, (torch.Tensor, list, tuple)) else 'N/A'}). "
-                        f"data_obj.__num_nodes__ not set for item {idx}. PyG will infer num_nodes.", UserWarning
-                    )
-
-            for key in self.data.keys():
-                if key == 'num_nodes' and data_obj_dunder_num_nodes_was_set:
-                    continue
-
-                if key not in self.slices:
-                    if key == 'num_nodes':
-                        if not self._batch_has_valid_dunder_num_nodes:
-                            # This is the specific warning you wanted to remove.
-                            # It's triggered if 'num_nodes' is missing from slices AND
-                            # the batch-level __num_nodes__ was also deemed invalid/unavailable.
-                            # By commenting it out, we accept PyG's inference without warning in this specific case.
-                            # warnings.warn(
-                            #     f"Warning: Key 'num_nodes' is missing from slices for index {idx}, and batch-level "
-                            #     f"'self.data.__num_nodes__' was not valid/available. "
-                            #     f"PyG will infer num_nodes for this item.", UserWarning)
-                            pass  # Suppress this specific warning
-                        # If _batch_has_valid_dunder_num_nodes is True, it means data_obj_dunder_num_nodes_was_set
-                        # was False due to an item-specific issue with self.data.__num_nodes__[idx].
-                        # The warning for that specific item issue would have already been printed.
-                        # So, no additional warning here if _batch_has_valid_dunder_num_nodes was true.
-
-                    else:  # For keys other than 'num_nodes'
-                        warnings.warn(
-                            f"Key '{key}' found in self.data but not in self.slices. "
-                            f"Skipping attribute '{key}' for reconstructed Data object at index {idx}.",
-                            UserWarning
-                        )
-                    continue
-
-                item = self.data[key]
-                slices_for_key = self.slices[key]
-
-                if not (isinstance(slices_for_key, torch.Tensor) and \
-                        slices_for_key.ndim > 0 and \
-                        idx < slices_for_key.size(0) and \
-                        (idx + 1) < (slices_for_key.size(0) + 1)):
-                    warnings.warn(
-                        f"Slices for key '{key}' are invalid or index {idx} is out of bounds. "
-                        f"Skipping key '{key}'.", UserWarning)
-                    continue
-
-                if not torch.is_tensor(item):
-                    warnings.warn(
-                        f"Item for key '{key}' is not a tensor (type: {type(item)}). "
-                        f"Skipping slicing for this attribute on data_obj at index {idx}.", UserWarning
-                    )
-                    continue
-
-                s = list(repeat(slice(None), item.dim()))
-                cat_dim = self.data.__cat_dim__(key, item)
-
-                if cat_dim is None or not (0 <= cat_dim < item.dim()):
-                    warnings.warn(
-                        f"cat_dim {cat_dim} is invalid for item '{key}' with {item.dim()} dimensions. "
-                        f"Skipping key '{key}'.", UserWarning)
-                    continue
-
-                try:
-                    start_slice = slices_for_key[idx]
-                    end_slice = slices_for_key[idx + 1]
-                    s[cat_dim] = slice(start_slice, end_slice)
-                    data_obj[key] = item[s]
-                except Exception as e:
-                    warnings.warn(
-                        f"Error slicing item '{key}' for index {idx}. Error: {e}. Skipping attribute '{key}'.",
-                        UserWarning
-                    )
-            return data_obj
-        else:
-            if idx < 0 or idx >= len(self._data_list):
-                raise IndexError(f"Index {idx} out of bounds for self._data_list with length {len(self._data_list)}")
-            return self._data_list[idx]
+        if not hasattr(self, 'slices') or not self.slices: return 0
+        # Check if slices dictionary is empty
+        if not self.slices: return 0
+        slice_key = next(iter(self.slices.keys()), None)
+        return self.slices[slice_key].size(0) - 1 if slice_key and self.slices[slice_key].numel() > 0 else 0
 

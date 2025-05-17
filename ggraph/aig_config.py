@@ -1,8 +1,17 @@
+# G2PT/configs/aig.py
+import math
+import os # Added for potential path joining if needed
 import networkx as nx
+from typing import Union # Added for type hinting
 import warnings
-
 # --- Primary Configuration Constants ---
 dataset = 'aig'
+
+# Consider using os.path.join for better path handling
+# base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Gets G2PT directory
+# data_dir = os.path.join(base_dir, 'datasets', 'aig')
+# tokenizer_path = os.path.join(base_dir, 'tokenizers', 'aig')
+
 
 # AIG constraint constants
 MAX_NODE_COUNT = 64
@@ -15,12 +24,26 @@ MIN_AND_COUNT = 1 # Assuming at least one AND gate needed
 
 NUM_ADJ_CHANNELS = 3
 
-NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+EXPLICIT_NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
+EXPLICIT_EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+
+ALL_NODE_KEYS = EXPLICIT_NODE_TYPE_KEYS + ["PADDING_NODE"]
+ALL_EDGE_KEYS = EXPLICIT_EDGE_TYPE_KEYS + ["NONE"]
+
+NUM2EDGETYPE = {0: ALL_EDGE_KEYS[0], 1: ALL_EDGE_KEYS[1], 2: ALL_EDGE_KEYS[2]}
+NUM2NODETYPE = {0: ALL_NODE_KEYS[0], 1: ALL_NODE_KEYS[1], 2: ALL_NODE_KEYS[2], 3: ALL_NODE_KEYS[3], 4: ALL_NODE_KEYS[4]}
 
 
-NUM_NODE_FEATURES = len(NODE_TYPE_KEYS) # Should be 4
-NUM_EXPLICIT_EDGE_TYPES = len(EDGE_TYPE_KEYS) # Should be 2
+
+# Derive feature counts from the size of the derived vocabularies
+NUM_EXPLICIT_NODE_FEATURES = len(EXPLICIT_NODE_TYPE_KEYS) # Should be 4
+NUM_EXPLICIT_EDGE_FEATURES = len(EXPLICIT_EDGE_TYPE_KEYS) # Should be 2
+
+NUM_NODE_ATTRIBUTES = NUM_EXPLICIT_NODE_FEATURES + 1 # for none type
+NUM_EDGE_ATTRIBUTES = NUM_EXPLICIT_EDGE_FEATURES + 1 # for virtual no edge
+NO_EDGE_CHANNEL = NUM_EXPLICIT_EDGE_FEATURES
+PADDING_NODE_CHANNEL = NUM_EXPLICIT_NODE_FEATURES
+
 
 # Define one-hot encodings (Keep these hardcoded as they define the feature representation)
 NODE_TYPE_ENCODING_NX = {
@@ -48,90 +71,85 @@ DECODING_EDGE_TYPE_NX = {
 }
 
 
-# Define one-hot encodings (Keep these hardcoded as they define the feature representation)
-NODE_TYPE_ENCODING_PYG = {
-    # Map "NODE_CONST0" to the first encoding vector (index 0), etc.
-    "NODE_CONST0": 0, # Index 0 feature
-    "NODE_PI":     1, # Index 1 feature
-    "NODE_AND":    2, # Index 2 feature
-    "NODE_PO":     3  # Index 3 feature
-}
 
-# Define one-hot encodings (Keep these hardcoded as they define the feature representation)
-NUM2NODETYPE = {
-    # Map "NODE_CONST0" to the first encoding vector (index 0), etc.
-    0: "NODE_CONST0", # Index 0 feature
-    1: "NODE_PI", # Index 1 feature
-    2: "NODE_AND", # Index 2 feature
-    3: "NODE_PO"  # Index 3 feature
-}
-# IMPORTANT: Ensure keys/order match EDGE_TYPE_VOCAB derivation and NUM_EDGE_FEATURES
-# The order here should ideally match the order in EDGE_TYPE_KEYS
-EDGE_LABEL_ENCODING_PYG = {
-    "EDGE_REG": 0,  # Index 0 feature
-    "EDGE_INV": 1,   # Index 1 feature
-    "NONE" : 2
-}
-VIRTUAL_EDGE_INDEX = EDGE_LABEL_ENCODING_PYG['NONE']
-# IMPORTANT: Ensure keys/order match EDGE_TYPE_VOCAB derivation and NUM_EDGE_FEATURES
-# The order here should ideally match the order in EDGE_TYPE_KEYS
-NUM2EDGETYPE = {
-    0: "EDGE_REG",  # Index 0 feature
-    1: "EDGE_INV",   # Index 1 feature
-}
 
-Fan_ins =  {    # Map "NODE_CONST0" to the first encoding vector (index 0), etc.
-    "NODE_CONST0": 0, # Index 0 feature
-    "NODE_PI":     0, # Index 1 feature
-    "NODE_AND":    2, # Index 2 feature
-    "NODE_PO":     1  # Index 3 feature
-}
-
-def check_validity(graph: nx.DiGraph) -> bool:
+def check_validity(graph: Union[nx.Graph, nx.DiGraph]) -> bool: # Changed type hint
     """
     Checks the structural validity of a (potentially partially built) AIG.
-    This function is called during the generation process.
+    If the input graph is undirected, it's first converted to a directed graph
+    where edges go from smaller node ID to larger node ID.
 
     Args:
-        graph (nx.DiGraph): The AIG graph to validate. It's assumed that
-                            node and edge 'type' attributes are strings
-                            (e.g., "NODE_PI", "EDGE_REG").
+        graph (Union[nx.Graph, nx.DiGraph]): The AIG graph to validate.
+                                             Node and edge 'type' attributes are assumed
+                                             to be strings.
 
     Returns:
         bool: True if the graph is currently valid according to AIG rules, False otherwise.
     """
-    if not graph: # Handle empty graph case if necessary
-        return True # An empty graph might be considered valid at the start
+    if not graph: # Handle empty graph case
+        return True
 
-    # 1. Check DAG property
-    if not nx.is_directed_acyclic_graph(graph):
+    working_graph = nx.DiGraph() # Ensure we are working with a DiGraph
+
+    if isinstance(graph, nx.Graph) and not graph.is_directed():
+        # Input is undirected, convert to directed (smaller_id -> larger_id)
+        working_graph.add_nodes_from(graph.nodes(data=True)) # Copy nodes and their attributes
+        for u, v, data in graph.edges(data=True):
+            # data is a dictionary of edge attributes, make sure to copy them
+            edge_attrs = data.copy()
+            if u < v:
+                working_graph.add_edge(u, v, **edge_attrs)
+            else: # v < u (or u == v for self-loops, though less common for AIG edges from undirected)
+                working_graph.add_edge(v, u, **edge_attrs)
+    elif isinstance(graph, nx.DiGraph):
+        working_graph = graph # Use the graph directly if it's already a DiGraph
+    else:
+        # Should not happen if type hint is respected, but as a safeguard
+        print("Debug: Validity Check Failed - Input graph is neither nx.Graph nor nx.DiGraph.")
+        return False
+
+
+    # 1. Check DAG property (on the now guaranteed DiGraph)
+    if not nx.is_directed_acyclic_graph(working_graph):
         # print("Debug: Validity Check Failed - Not a DAG")
         return False
 
-    # Ensure NODE_TYPE_KEYS is accessible in this scope (it should be global in aig_config.py)
-    # These string constants must match the 'type' attributes set on nodes/edges
-    # NODE_TYPE_KEYS should be defined in aig_config.py as e.g.
+    # Ensure NODE_TYPE_KEYS and EDGE_TYPE_KEYS are accessible
+    # These constants should be defined in your aig_config.py or globally
+    # For example:
     # NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
     # EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
-    # If these are not defined, this function will error or behave unexpectedly.
 
-    NODE_CONST0_STR = NODE_TYPE_KEYS[0]
-    NODE_PI_STR = NODE_TYPE_KEYS[1]
-    NODE_AND_STR = NODE_TYPE_KEYS[2]
-    NODE_PO_STR = NODE_TYPE_KEYS[3]
+    # It's safer to ensure they are defined, or pass them as arguments,
+    # but following the original structure:
+    try:
+        NODE_CONST0_STR = EXPLICIT_NODE_TYPE_KEYS[0]
+        NODE_PI_STR = EXPLICIT_NODE_TYPE_KEYS[1]
+        NODE_AND_STR = EXPLICIT_NODE_TYPE_KEYS[2]
+        NODE_PO_STR = EXPLICIT_NODE_TYPE_KEYS[3]
+    except (NameError, IndexError) as e:
+        print(f"Debug: Validity Check Failed - NODE_TYPE_KEYS not properly defined or accessible: {e}")
+        return False
 
-    for node, data in graph.nodes(data=True):
+
+    for node, data in working_graph.nodes(data=True):
+        if 'type' not in data:
+            print(f"Debug: Validity Check Failed - Node {node} is missing 'type' attribute.")
+            return False
         node_type = data['type']
 
-        if node_type == "UNKNOWN_TYPE_ATTRIBUTE":
-            print(f"Debug: Validity Check Failed - Node {node} has missing or malformed 'type' attribute: {data}")
+        # This check was "UNKNOWN_TYPE_ATTRIBUTE", which might be too specific if 'type' is just missing
+        # Keeping similar logic for now.
+        if node_type == "UNKNOWN_TYPE_ATTRIBUTE": # Consider changing this if 'type' can be missing
+            print(f"Debug: Validity Check Failed - Node {node} has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
             return False
-        if node_type not in NODE_TYPE_KEYS:
+        if node_type not in EXPLICIT_NODE_TYPE_KEYS:
             print(f"Debug: Validity Check Failed - Node {node} has type '{node_type}' not in defined NODE_TYPE_KEYS.")
             return False
 
-        in_degree = graph.in_degree(node)
-        out_degree = graph.out_degree(node)
+        in_degree = working_graph.in_degree(node)
+        out_degree = working_graph.out_degree(node)
 
         if node_type == NODE_CONST0_STR:
             if in_degree != 0:
@@ -142,14 +160,10 @@ def check_validity(graph: nx.DiGraph) -> bool:
                 # print(f"Debug: Validity Check Failed - PI node {node} (type: {node_type}) has in-degree {in_degree} (should be 0).")
                 return False
         elif node_type == NODE_AND_STR:
-            # For AND gates during generation, in-degree can be 0, 1, or 2.
-            # The final check in evaluation_aigs.py will be stricter (must be 2).
             if in_degree > 2:
                 # print(f"Debug: Validity Check Failed - AND node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 2).")
                 return False
         elif node_type == NODE_PO_STR:
-            # For PO gates during generation, in-degree can be 0 or 1.
-            # The final check in evaluation_aigs.py will be stricter (must be 1).
             if in_degree > 1:
                 # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 1).")
                 return False
@@ -157,14 +171,23 @@ def check_validity(graph: nx.DiGraph) -> bool:
                 # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has out-degree {out_degree} (should be 0).")
                 return False
 
-
     # 3. Check Edge Types
-    for u, v, data in graph.edges(data=True):
-        edge_type = data['type']
-        if edge_type == "UNKNOWN_TYPE_ATTRIBUTE":
-            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has missing or malformed 'type' attribute: {data}")
+    try:
+        _ = EXPLICIT_EDGE_TYPE_KEYS # Check if EDGE_TYPE_KEYS is defined
+    except NameError as e:
+        print(f"Debug: Validity Check Failed - EDGE_TYPE_KEYS not defined or accessible: {e}")
+        return False
+
+    for u, v, data in working_graph.edges(data=True):
+        if 'type' not in data:
+            print(f"Debug: Validity Check Failed - Edge ({u}-{v}) is missing 'type' attribute.")
             return False
-        if edge_type not in EDGE_TYPE_KEYS: # EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+        edge_type = data['type']
+
+        if edge_type == "UNKNOWN_TYPE_ATTRIBUTE": # Similar to node type check
+            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
+            return False
+        if edge_type not in EXPLICIT_EDGE_TYPE_KEYS:
             # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has type '{edge_type}' not in defined EDGE_TYPE_KEYS.")
             return False
 
@@ -172,6 +195,7 @@ def check_validity(graph: nx.DiGraph) -> bool:
 
 
 def check_aig_component_minimums(current_aig_graph: nx.DiGraph) -> bool:
+    #TODO defintiely needs to be changed
     """
     Checks if the given AIG meets the minimum component criteria.
     - At least 1 "NODE_AND"
@@ -239,7 +263,7 @@ def check_aig_component_minimums(current_aig_graph: nx.DiGraph) -> bool:
 base_conf = {
     "data_name": "aig",  # This will be overridden by args.dataset_name
     "model": {
-        "max_size": MAX_NODE_COUNT, "node_dim": NUM_NODE_FEATURES, "bond_dim": NUM_ADJ_CHANNELS, "use_gpu": True,
+        "max_size": MAX_NODE_COUNT, "node_dim": NUM_NODE_ATTRIBUTES, "bond_dim": NUM_ADJ_CHANNELS, "use_gpu": True,
         "edge_unroll": 25, "num_flow_layer": 12, "num_rgcn_layer": 3,
         "nhid": 128, "nout": 128,
         "deq_coeff": 0.9, "st_type": "exp", "use_df": False,
@@ -253,6 +277,6 @@ base_conf = {
 
     },
     "lr": 0.001, "weight_decay": 1e-5, "batch_size": 32, "max_epochs": 30,
-    "save_interval": 3, "grad_clip_value": 1.0, "ebm_lr": 0.0001, "ebm_bs": 128
+    "save_interval": 3, "grad_clip_value": 1.0,
 }
 

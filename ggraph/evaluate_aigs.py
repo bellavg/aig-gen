@@ -12,9 +12,11 @@ import io
 import warnings  # For warning about unknown type formats
 from tqdm import tqdm
 
+#TODO change to be in line
+
 # Import necessary items from aig_config
 from aig_config import (
-    NODE_TYPE_KEYS, EDGE_TYPE_KEYS, MIN_AND_COUNT, MIN_PO_COUNT,
+    EXPLICIT_NODE_TYPE_KEYS, EXPLICIT_EDGE_TYPE_KEYS, MIN_AND_COUNT, MIN_PO_COUNT,
     DECODING_NODE_TYPE_NX, DECODING_EDGE_TYPE_NX  # For decoding one-hot vectors
 )
 
@@ -23,10 +25,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("evaluate_aigs_pkl")
 
 # Define node type constants directly from NODE_TYPE_KEYS for clarity
-NODE_CONST0 = NODE_TYPE_KEYS[0]
-NODE_PI = NODE_TYPE_KEYS[1]
-NODE_AND = NODE_TYPE_KEYS[2]
-NODE_PO = NODE_TYPE_KEYS[3]
+NODE_CONST0 = EXPLICIT_NODE_TYPE_KEYS[0]
+NODE_PI = EXPLICIT_NODE_TYPE_KEYS[1]
+NODE_AND = EXPLICIT_NODE_TYPE_KEYS[2]
+NODE_PO = EXPLICIT_NODE_TYPE_KEYS[3]
 
 
 # --- Helper functions to get type string from node/edge attributes ---
@@ -116,7 +118,7 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
         node_type_str = get_node_type_str_from_attrs(data)  # Use new helper
         node_type_counts[node_type_str] += 1
 
-        if node_type_str not in NODE_TYPE_KEYS:
+        if node_type_str not in EXPLICIT_NODE_TYPE_KEYS:
             metrics['num_unknown_nodes'] += 1
             if "Unknown node types" not in metrics['constraints_failed']:
                 metrics['constraints_failed'].append("Unknown node types")
@@ -160,7 +162,7 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     # 3. Check Edge Types
     for u, v, data in G.edges(data=True):
         edge_type_str = get_edge_type_str_from_attrs(data)  # Use new helper
-        if edge_type_str not in EDGE_TYPE_KEYS:
+        if edge_type_str not in EXPLICIT_EDGE_TYPE_KEYS:
             metrics['num_unknown_edges'] += 1
             if "Unknown edge types" not in metrics['constraints_failed']:
                 metrics['constraints_failed'].append("Unknown edge types")

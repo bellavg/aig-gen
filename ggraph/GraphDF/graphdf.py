@@ -115,4 +115,6 @@ class GraphDF(Generator):
                     print('Generated {} Graphs'.format(cnt_mol))
 
         assert cnt_mol == n_mols, 'number of generated molecules does not equal num'
+        #TODO convert to directed graphs
+
         return all_graphs, pure_valids

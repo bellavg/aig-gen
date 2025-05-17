@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from aig_config import (NUM_NODE_FEATURES, NUM_ADJ_CHANNELS, MAX_NODE_COUNT, VIRTUAL_EDGE_INDEX)
+from aig_config import (NUM_NODE_ATTRIBUTES, NUM_ADJ_CHANNELS, MAX_NODE_COUNT, NO_EDGE_CHANNEL)
 from .df_utils import one_hot_add, one_hot_minus
 from .rgcn import RGCN
 from .st_net import ST_Dis
@@ -9,7 +9,7 @@ from .st_net import ST_Dis
 
 class DisGraphAF(nn.Module):
     def __init__(self, mask_node, mask_edge, index_select_edge, num_flow_layer=12, graph_size=MAX_NODE_COUNT,
-                 num_node_type=NUM_NODE_FEATURES, num_edge_type=NUM_ADJ_CHANNELS, use_bn=True, num_rgcn_layer=3, nhid=128, nout=128):
+                 num_node_type=NUM_NODE_ATTRIBUTES, num_edge_type=NUM_ADJ_CHANNELS, use_bn=True, num_rgcn_layer=3, nhid=128, nout=128):
         '''
         :param index_nod_edg:
         :param num_edge_type, virtual type included
@@ -106,7 +106,7 @@ class DisGraphAF(nn.Module):
         Returns:
             graph embedding for updating node features with shape (batch, d)
         """
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 2, N, N) take out virtual edge
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 2, N, N) take out virtual edge
 
         node_emb = self.rgcn(x, adj)  # (batch, N, d)
         if hasattr(self, 'batchNorm'):
@@ -128,7 +128,7 @@ class DisGraphAF(nn.Module):
         batch_size = x.size(0)
         assert batch_size == index.size(0)
 
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 3, N, N)
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 3, N, N)
 
         node_emb = self.rgcn(x, adj)  # (batch, N, d)
         if hasattr(self, 'batchNorm'):
@@ -153,7 +153,7 @@ class DisGraphAF(nn.Module):
         '''
         # inputs for RelGCNs
         batch_size = x.size(0)
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 2, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 2, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
         x = torch.where(self.mask_node, x.unsqueeze(1).repeat(1, self.repeat_num, 1, 1),
                         torch.zeros([1], device=x.device)).view(
             -1, self.graph_size, self.num_node_type)  # (batch*repeat_num, N, 9)

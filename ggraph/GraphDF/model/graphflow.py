@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 from .disgraphaf import DisGraphAF  # Assuming this is in the same directory
-from aig_config import *  # Make sure Fan_ins, NUM2NODETYPE, NUM2EDGETYPE, VIRTUAL_EDGE_INDEX, NUM_EXPLICIT_EDGE_TYPES, check_validity are here
-import networkx as nx
-import numpy as np
-import warnings
+# from aig_config import *  # Make sure Fan_ins, NUM2NODETYPE, NUM2EDGETYPE, VIRTUAL_EDGE_INDEX, NUM_EXPLICIT_EDGE_TYPES, check_validity are here
+# import networkx as nx
+# import numpy as np
+# import warnings
 
 
 class GraphFlowModel(nn.Module):
@@ -90,235 +90,237 @@ class GraphFlowModel(nn.Module):
         z = self.flow_core(inp_node_features, inp_adj_features, inp_node_features_cont, inp_adj_features_cont)
         return z
 
-    def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=20):
-        """
-        Inverse flow to generate AIGs.
-        Attempts to satisfy in-degree for AND (2) and PO (1) nodes for the current node i.
-        """
-        disconnection_streak = 0
-        current_device = torch.device("cuda" if self.dp and torch.cuda.is_available() else "cpu")
+    #TODO CHANGE TO BE in line with undirected
 
-        with torch.no_grad():
-            num2bond_map = NUM2EDGETYPE  # e.g., {0: "EDGE_REG", 1: "EDGE_INV"}
-            num2atom_map = NUM2NODETYPE  # e.g., {0: "NODE_CONST0", ..., 3: "NODE_PO"}
-
-            # Initialize tensors for current graph features
-            cur_node_features = torch.zeros([1, max_atoms, self.node_dim], device=current_device)
-            cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms], device=current_device)
-
-            # Backups for graph state if generation needs to revert due to disconnection
-            node_features_each_iter_backup = cur_node_features.clone()
-            adj_features_each_iter_backup = cur_adj_features.clone()
-
-            aig = nx.DiGraph()  # The graph being built
-            graph_backup_candidate = None  # Stores the last "good" AIG state
-
-            is_generation_continue = True
-            edge_idx_counter = 0  # Index for self.edge_base_log_probs
-            total_resamples_count = 0
-
-            # Main loop: Generate one node at a time
-            for i in range(max_atoms):  # i is the current node index (target node)
-                if not is_generation_continue:
-                    break
-
-                # Determine the range of previous nodes to connect to the current node i
-                if i < self.edge_unroll:
-                    num_potential_sources_to_try = i
-                    source_node_idx_start = 0
-                else:
-                    num_potential_sources_to_try = self.edge_unroll
-                    source_node_idx_start = i - self.edge_unroll
-
-                # 1. Generate Node Type for current node i
-                prior_node_dist = torch.distributions.OneHotCategorical(
-                    logits=self.node_base_log_probs[i].to(current_device) * temperature[0])
-                latent_node_type_sample = prior_node_dist.sample().view(1, -1)
-
-                if self.dp:
-                    resolved_node_type_latent = self.flow_core.module.reverse(
-                        cur_node_features, cur_adj_features, latent_node_type_sample, mode=0).view(-1)
-                else:
-                    resolved_node_type_latent = self.flow_core.reverse(
-                        cur_node_features, cur_adj_features, latent_node_type_sample, mode=0).view(-1)
-
-                node_feature_id = torch.argmax(resolved_node_type_latent).item()
-                cur_node_features[0, i, node_feature_id] = 1.0
-                # Adjacency matrix for self-loops (usually not actual edges in AIGs, but might be for model conditioning)
-                # If self.bond_dim includes a "no edge" or "self-loop" type, this needs care.
-                # Assuming diagonal of adjacency is for model state, not literal self-loops.
-                # The original code sets all bond_dim channels to 1.0 for (i,i).
-                # This might be specific to how the model interprets it.
-                # If bond_dim has a specific "no edge" or "padding" channel, only that should be set.
-                # For now, replicating original:
-                cur_adj_features[0, :, i, i] = 1.0  # This might need adjustment based on bond_dim meaning
-
-                node_type_str = num2atom_map[node_feature_id]
-                aig.add_node(i, type=node_type_str)
-
-                # 2. Generate Edges to current node i from previous nodes
-                actual_edges_added_to_node_i = 0
-                is_node_i_connected = (i == 0)  # Node 0 is connected by definition (no prior nodes)
-
-                # Determine desired in-degree for node i based on its type
-                # Fan_ins should be like: {"NODE_AND": 2, "NODE_PO": 1, "NODE_PI": 0, ...}
-                desired_in_degree_for_node_i = Fan_ins.get(node_type_str, 0)
-
-                potential_source_indices = list(
-                    range(source_node_idx_start, source_node_idx_start + num_potential_sources_to_try))
-                # np.random.shuffle(potential_source_indices) # Optional: if order of trying sources matters
-
-                for k_source_attempt in range(num_potential_sources_to_try):
-                    source_prev_node_idx = potential_source_indices[k_source_attempt]
-
-                    # If node 'i' has a specific in-degree target and it's already met,
-                    # subsequent "attempts" for this node 'i' from other sources are forced to be virtual.
-                    if desired_in_degree_for_node_i > 0 and actual_edges_added_to_node_i >= desired_in_degree_for_node_i:
-                        chosen_edge_discrete_id = VIRTUAL_EDGE_INDEX
-                        # Update cur_adj_features for the flow core. AIG is not changed for virtual.
-                        cur_adj_features[0, chosen_edge_discrete_id, source_prev_node_idx, i] = 1.0
-                        # valid_edge_found_for_this_source = True # Not strictly needed here
-                    else:
-                        # Attempt to sample a real or virtual edge
-                        valid_edge_found_for_this_source = False
-                        resample_edge_count = 0
-
-                        if edge_idx_counter >= self.edge_base_log_probs.shape[0]:
-                            warnings.warn(
-                                f"edge_idx_counter {edge_idx_counter} is out of bounds for edge_base_log_probs (shape {self.edge_base_log_probs.shape[0]}). Forcing virtual edge.")
-                            edge_log_probs_for_current_pair = None  # Cannot sample
-                        else:
-                            edge_log_probs_for_current_pair = self.edge_base_log_probs[edge_idx_counter].clone().to(
-                                current_device)
-
-                        invalid_edge_type_set_for_pair = set()
-
-                        while not valid_edge_found_for_this_source:
-                            if edge_log_probs_for_current_pair is None or \
-                                    (
-                                            len(invalid_edge_type_set_for_pair) >= self.bond_dim or resample_edge_count > 50):  # Tried all bond types or timed out
-                                chosen_edge_discrete_id = VIRTUAL_EDGE_INDEX
-                            else:
-                                prior_edge_dist = torch.distributions.OneHotCategorical(
-                                    logits=edge_log_probs_for_current_pair / temperature[1])
-                                latent_edge_sample = prior_edge_dist.sample().view(1, -1)
-                                sampled_edge_type_id_in_logits = torch.argmax(latent_edge_sample,
-                                                                              dim=1).item()  # For blacklisting
-
-                                if self.dp:
-                                    resolved_edge_latent = self.flow_core.module.reverse(
-                                        cur_node_features, cur_adj_features, latent_edge_sample, mode=1,
-                                        edge_index=torch.tensor([[source_prev_node_idx, i]], dtype=torch.long,
-                                                                device=current_device)
-                                    ).view(-1)
-                                else:
-                                    resolved_edge_latent = self.flow_core.reverse(
-                                        cur_node_features, cur_adj_features, latent_edge_sample, mode=1,
-                                        edge_index=torch.tensor([[source_prev_node_idx, i]], dtype=torch.long,
-                                                                device=current_device)
-                                    ).view(-1)
-                                chosen_edge_discrete_id = torch.argmax(resolved_edge_latent).item()
-
-                            # Update cur_adj_features (model state)
-                            cur_adj_features[0, chosen_edge_discrete_id, source_prev_node_idx, i] = 1.0
-
-                            if chosen_edge_discrete_id == VIRTUAL_EDGE_INDEX:
-                                valid_edge_found_for_this_source = True
-                                if aig.has_edge(source_prev_node_idx,
-                                                i):  # If a real edge was there from a failed attempt
-                                    aig.remove_edge(source_prev_node_idx, i)
-                            else:  # Actual edge type proposed
-                                aig.add_edge(source_prev_node_idx, i, type=num2bond_map[chosen_edge_discrete_id])
-                                is_current_aig_valid = check_validity(aig)
-
-                                if is_current_aig_valid:
-                                    valid_edge_found_for_this_source = True
-                                    is_node_i_connected = True
-                                    actual_edges_added_to_node_i += 1
-                                else:  # Backtrack AIG and model state for this edge type
-                                    if edge_log_probs_for_current_pair is not None:  # Check if we could sample
-                                        edge_log_probs_for_current_pair[sampled_edge_type_id_in_logits] = float('-inf')
-
-                                    aig.remove_edge(source_prev_node_idx, i)
-                                    cur_adj_features[
-                                        0, chosen_edge_discrete_id, source_prev_node_idx, i] = 0.0  # Reset adj
-
-                                    total_resamples_count += 1
-                                    resample_edge_count += 1
-                                    invalid_edge_type_set_for_pair.add(chosen_edge_discrete_id)
-                        # End of while not valid_edge_found_for_this_source
-                    # End of else (attempt to sample real/virtual edge)
-                    edge_idx_counter += 1  # Increment for each (source, target) pair considered
-                # End of for k_source_attempt loop
-
-                # "Patience" exhibited: if desired_in_degree not met, we tried.
-                if desired_in_degree_for_node_i > 0 and actual_edges_added_to_node_i < desired_in_degree_for_node_i:
-                    # print(f"Info: Node {i} ({node_type_str}) aimed for {desired_in_degree_for_node_i} edges, got {actual_edges_added_to_node_i}.")
-                    pass
-
-                # 3. Update graph backups and decide whether to continue generation
-                if is_node_i_connected:
-                    is_generation_continue = True
-                    graph_backup_candidate = aig.copy()
-                    node_features_each_iter_backup = cur_node_features.clone()
-                    adj_features_each_iter_backup = cur_adj_features.clone()
-                    disconnection_streak = 0
-                elif not is_node_i_connected and disconnection_streak < disconnection_patience:
-                    # Node i was not connected, but we might tolerate it for a few steps
-                    is_generation_continue = True
-                    # We still back up this state, as it's the current "best" even if node i is isolated
-                    graph_backup_candidate = aig.copy()
-                    node_features_each_iter_backup = cur_node_features.clone()
-                    adj_features_each_iter_backup = cur_adj_features.clone()
-                    disconnection_streak += 1
-                    # print(f"Info: Node {i} is not connected. Disconnection streak: {disconnection_streak}")
-                else:  # Node i not connected AND patience ran out
-                    is_generation_continue = False
-                    # print(f"Info: Node {i} not connected and disconnection patience {disconnection_patience} reached. Stopping generation.")
-                    # The 'aig' at this point includes the disconnected node 'i'.
-                    # 'graph_backup_candidate' holds the state *before* adding the problematic node 'i'
-                    # if the previous iteration was connected.
-                    # If the *very first node* (i=0) somehow fails to be 'is_node_i_connected' (shouldn't happen),
-                    # graph_backup_candidate would be None.
-
-                    # If stopping, we need to decide which graph to return.
-                    # 'graph_backup_candidate' is likely the one to consider if 'aig' (with the new disconnected node) is bad.
-                    # The logic below for final_graph_to_return handles this.
-                    # If we stopped because node 'i' couldn't connect, 'aig' has node 'i',
-                    # but 'graph_backup_candidate' (if not None) does not.
-                    # We might want to revert to graph_backup_candidate.
-                    # The current logic for choosing final_graph_to_return will prefer graph_backup_candidate if it's valid
-                    # and aig (the one with the disconnected node i) is not or is too small.
-                    pass  # Final graph selection happens after the loop
-
-            # End of for i in range(max_atoms) loop
-
-            # Determine the final graph to return
-            final_graph_to_return = nx.DiGraph()
-            # Prefer graph_backup_candidate if it exists, is large enough, and meets component minimums
-            if graph_backup_candidate is not None and \
-                    graph_backup_candidate.number_of_nodes() >= min_atoms and \
-                    check_aig_component_minimums(graph_backup_candidate):
-                final_graph_to_return = graph_backup_candidate
-            # Fallback to current 'aig' if generation completed fully and 'aig' is valid
-            elif is_generation_continue and \
-                    aig.number_of_nodes() >= min_atoms and \
-                    check_aig_component_minimums(aig):
-                final_graph_to_return = aig
-            # Additional fallback: if graph_backup_candidate was too small or invalid, but aig is better
-            elif aig.number_of_nodes() >= min_atoms and \
-                    check_aig_component_minimums(aig):
-                final_graph_to_return = aig
-
-            if final_graph_to_return.number_of_nodes() == 0 and min_atoms > 0:
-                print(
-                    f"Warning: Generated AIG is empty or did not meet all criteria "
-                    f"(nodes: {final_graph_to_return.number_of_nodes()}), but min_nodes was {min_atoms}.")
-
-            num_nodes_generated = final_graph_to_return.number_of_nodes()
-            pure_valid_generation = 1.0 if total_resamples_count == 0 else 0.0
-
-            return final_graph_to_return, pure_valid_generation, num_nodes_generated
+    # def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=20):
+    #     """
+    #     Inverse flow to generate AIGs.
+    #     Attempts to satisfy in-degree for AND (2) and PO (1) nodes for the current node i.
+    #     """
+    #     disconnection_streak = 0
+    #     current_device = torch.device("cuda" if self.dp and torch.cuda.is_available() else "cpu")
+    #
+    #     with torch.no_grad():
+    #         num2bond_map = NUM2EDGETYPE  # e.g., {0: "EDGE_REG", 1: "EDGE_INV"}
+    #         num2atom_map = NUM2NODETYPE  # e.g., {0: "NODE_CONST0", ..., 3: "NODE_PO"}
+    #
+    #         # Initialize tensors for current graph features
+    #         cur_node_features = torch.zeros([1, max_atoms, self.node_dim], device=current_device)
+    #         cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms], device=current_device)
+    #
+    #         # Backups for graph state if generation needs to revert due to disconnection
+    #         node_features_each_iter_backup = cur_node_features.clone()
+    #         adj_features_each_iter_backup = cur_adj_features.clone()
+    #
+    #         aig = nx.DiGraph()  # The graph being built
+    #         graph_backup_candidate = None  # Stores the last "good" AIG state
+    #
+    #         is_generation_continue = True
+    #         edge_idx_counter = 0  # Index for self.edge_base_log_probs
+    #         total_resamples_count = 0
+    #
+    #         # Main loop: Generate one node at a time
+    #         for i in range(max_atoms):  # i is the current node index (target node)
+    #             if not is_generation_continue:
+    #                 break
+    #
+    #             # Determine the range of previous nodes to connect to the current node i
+    #             if i < self.edge_unroll:
+    #                 num_potential_sources_to_try = i
+    #                 source_node_idx_start = 0
+    #             else:
+    #                 num_potential_sources_to_try = self.edge_unroll
+    #                 source_node_idx_start = i - self.edge_unroll
+    #
+    #             # 1. Generate Node Type for current node i
+    #             prior_node_dist = torch.distributions.OneHotCategorical(
+    #                 logits=self.node_base_log_probs[i].to(current_device) * temperature[0])
+    #             latent_node_type_sample = prior_node_dist.sample().view(1, -1)
+    #
+    #             if self.dp:
+    #                 resolved_node_type_latent = self.flow_core.module.reverse(
+    #                     cur_node_features, cur_adj_features, latent_node_type_sample, mode=0).view(-1)
+    #             else:
+    #                 resolved_node_type_latent = self.flow_core.reverse(
+    #                     cur_node_features, cur_adj_features, latent_node_type_sample, mode=0).view(-1)
+    #
+    #             node_feature_id = torch.argmax(resolved_node_type_latent).item()
+    #             cur_node_features[0, i, node_feature_id] = 1.0
+    #             # Adjacency matrix for self-loops (usually not actual edges in AIGs, but might be for model conditioning)
+    #             # If self.bond_dim includes a "no edge" or "self-loop" type, this needs care.
+    #             # Assuming diagonal of adjacency is for model state, not literal self-loops.
+    #             # The original code sets all bond_dim channels to 1.0 for (i,i).
+    #             # This might be specific to how the model interprets it.
+    #             # If bond_dim has a specific "no edge" or "padding" channel, only that should be set.
+    #             # For now, replicating original:
+    #             cur_adj_features[0, :, i, i] = 1.0  # This might need adjustment based on bond_dim meaning
+    #
+    #             node_type_str = num2atom_map[node_feature_id]
+    #             aig.add_node(i, type=node_type_str)
+    #
+    #             # 2. Generate Edges to current node i from previous nodes
+    #             actual_edges_added_to_node_i = 0
+    #             is_node_i_connected = (i == 0)  # Node 0 is connected by definition (no prior nodes)
+    #
+    #             # Determine desired in-degree for node i based on its type
+    #             # Fan_ins should be like: {"NODE_AND": 2, "NODE_PO": 1, "NODE_PI": 0, ...}
+    #             desired_in_degree_for_node_i = Fan_ins.get(node_type_str, 0)
+    #
+    #             potential_source_indices = list(
+    #                 range(source_node_idx_start, source_node_idx_start + num_potential_sources_to_try))
+    #             # np.random.shuffle(potential_source_indices) # Optional: if order of trying sources matters
+    #
+    #             for k_source_attempt in range(num_potential_sources_to_try):
+    #                 source_prev_node_idx = potential_source_indices[k_source_attempt]
+    #
+    #                 # If node 'i' has a specific in-degree target and it's already met,
+    #                 # subsequent "attempts" for this node 'i' from other sources are forced to be virtual.
+    #                 if desired_in_degree_for_node_i > 0 and actual_edges_added_to_node_i >= desired_in_degree_for_node_i:
+    #                     chosen_edge_discrete_id = VIRTUAL_EDGE_INDEX
+    #                     # Update cur_adj_features for the flow core. AIG is not changed for virtual.
+    #                     cur_adj_features[0, chosen_edge_discrete_id, source_prev_node_idx, i] = 1.0
+    #                     # valid_edge_found_for_this_source = True # Not strictly needed here
+    #                 else:
+    #                     # Attempt to sample a real or virtual edge
+    #                     valid_edge_found_for_this_source = False
+    #                     resample_edge_count = 0
+    #
+    #                     if edge_idx_counter >= self.edge_base_log_probs.shape[0]:
+    #                         warnings.warn(
+    #                             f"edge_idx_counter {edge_idx_counter} is out of bounds for edge_base_log_probs (shape {self.edge_base_log_probs.shape[0]}). Forcing virtual edge.")
+    #                         edge_log_probs_for_current_pair = None  # Cannot sample
+    #                     else:
+    #                         edge_log_probs_for_current_pair = self.edge_base_log_probs[edge_idx_counter].clone().to(
+    #                             current_device)
+    #
+    #                     invalid_edge_type_set_for_pair = set()
+    #
+    #                     while not valid_edge_found_for_this_source:
+    #                         if edge_log_probs_for_current_pair is None or \
+    #                                 (
+    #                                         len(invalid_edge_type_set_for_pair) >= self.bond_dim or resample_edge_count > 50):  # Tried all bond types or timed out
+    #                             chosen_edge_discrete_id = VIRTUAL_EDGE_INDEX
+    #                         else:
+    #                             prior_edge_dist = torch.distributions.OneHotCategorical(
+    #                                 logits=edge_log_probs_for_current_pair / temperature[1])
+    #                             latent_edge_sample = prior_edge_dist.sample().view(1, -1)
+    #                             sampled_edge_type_id_in_logits = torch.argmax(latent_edge_sample,
+    #                                                                           dim=1).item()  # For blacklisting
+    #
+    #                             if self.dp:
+    #                                 resolved_edge_latent = self.flow_core.module.reverse(
+    #                                     cur_node_features, cur_adj_features, latent_edge_sample, mode=1,
+    #                                     edge_index=torch.tensor([[source_prev_node_idx, i]], dtype=torch.long,
+    #                                                             device=current_device)
+    #                                 ).view(-1)
+    #                             else:
+    #                                 resolved_edge_latent = self.flow_core.reverse(
+    #                                     cur_node_features, cur_adj_features, latent_edge_sample, mode=1,
+    #                                     edge_index=torch.tensor([[source_prev_node_idx, i]], dtype=torch.long,
+    #                                                             device=current_device)
+    #                                 ).view(-1)
+    #                             chosen_edge_discrete_id = torch.argmax(resolved_edge_latent).item()
+    #
+    #                         # Update cur_adj_features (model state)
+    #                         cur_adj_features[0, chosen_edge_discrete_id, source_prev_node_idx, i] = 1.0
+    #
+    #                         if chosen_edge_discrete_id == VIRTUAL_EDGE_INDEX:
+    #                             valid_edge_found_for_this_source = True
+    #                             if aig.has_edge(source_prev_node_idx,
+    #                                             i):  # If a real edge was there from a failed attempt
+    #                                 aig.remove_edge(source_prev_node_idx, i)
+    #                         else:  # Actual edge type proposed
+    #                             aig.add_edge(source_prev_node_idx, i, type=num2bond_map[chosen_edge_discrete_id])
+    #                             is_current_aig_valid = check_validity(aig)
+    #
+    #                             if is_current_aig_valid:
+    #                                 valid_edge_found_for_this_source = True
+    #                                 is_node_i_connected = True
+    #                                 actual_edges_added_to_node_i += 1
+    #                             else:  # Backtrack AIG and model state for this edge type
+    #                                 if edge_log_probs_for_current_pair is not None:  # Check if we could sample
+    #                                     edge_log_probs_for_current_pair[sampled_edge_type_id_in_logits] = float('-inf')
+    #
+    #                                 aig.remove_edge(source_prev_node_idx, i)
+    #                                 cur_adj_features[
+    #                                     0, chosen_edge_discrete_id, source_prev_node_idx, i] = 0.0  # Reset adj
+    #
+    #                                 total_resamples_count += 1
+    #                                 resample_edge_count += 1
+    #                                 invalid_edge_type_set_for_pair.add(chosen_edge_discrete_id)
+    #                     # End of while not valid_edge_found_for_this_source
+    #                 # End of else (attempt to sample real/virtual edge)
+    #                 edge_idx_counter += 1  # Increment for each (source, target) pair considered
+    #             # End of for k_source_attempt loop
+    #
+    #             # "Patience" exhibited: if desired_in_degree not met, we tried.
+    #             if desired_in_degree_for_node_i > 0 and actual_edges_added_to_node_i < desired_in_degree_for_node_i:
+    #                 # print(f"Info: Node {i} ({node_type_str}) aimed for {desired_in_degree_for_node_i} edges, got {actual_edges_added_to_node_i}.")
+    #                 pass
+    #
+    #             # 3. Update graph backups and decide whether to continue generation
+    #             if is_node_i_connected:
+    #                 is_generation_continue = True
+    #                 graph_backup_candidate = aig.copy()
+    #                 node_features_each_iter_backup = cur_node_features.clone()
+    #                 adj_features_each_iter_backup = cur_adj_features.clone()
+    #                 disconnection_streak = 0
+    #             elif not is_node_i_connected and disconnection_streak < disconnection_patience:
+    #                 # Node i was not connected, but we might tolerate it for a few steps
+    #                 is_generation_continue = True
+    #                 # We still back up this state, as it's the current "best" even if node i is isolated
+    #                 graph_backup_candidate = aig.copy()
+    #                 node_features_each_iter_backup = cur_node_features.clone()
+    #                 adj_features_each_iter_backup = cur_adj_features.clone()
+    #                 disconnection_streak += 1
+    #                 # print(f"Info: Node {i} is not connected. Disconnection streak: {disconnection_streak}")
+    #             else:  # Node i not connected AND patience ran out
+    #                 is_generation_continue = False
+    #                 # print(f"Info: Node {i} not connected and disconnection patience {disconnection_patience} reached. Stopping generation.")
+    #                 # The 'aig' at this point includes the disconnected node 'i'.
+    #                 # 'graph_backup_candidate' holds the state *before* adding the problematic node 'i'
+    #                 # if the previous iteration was connected.
+    #                 # If the *very first node* (i=0) somehow fails to be 'is_node_i_connected' (shouldn't happen),
+    #                 # graph_backup_candidate would be None.
+    #
+    #                 # If stopping, we need to decide which graph to return.
+    #                 # 'graph_backup_candidate' is likely the one to consider if 'aig' (with the new disconnected node) is bad.
+    #                 # The logic below for final_graph_to_return handles this.
+    #                 # If we stopped because node 'i' couldn't connect, 'aig' has node 'i',
+    #                 # but 'graph_backup_candidate' (if not None) does not.
+    #                 # We might want to revert to graph_backup_candidate.
+    #                 # The current logic for choosing final_graph_to_return will prefer graph_backup_candidate if it's valid
+    #                 # and aig (the one with the disconnected node i) is not or is too small.
+    #                 pass  # Final graph selection happens after the loop
+    #
+    #         # End of for i in range(max_atoms) loop
+    #
+    #         # Determine the final graph to return
+    #         final_graph_to_return = nx.DiGraph()
+    #         # Prefer graph_backup_candidate if it exists, is large enough, and meets component minimums
+    #         if graph_backup_candidate is not None and \
+    #                 graph_backup_candidate.number_of_nodes() >= min_atoms and \
+    #                 check_aig_component_minimums(graph_backup_candidate):
+    #             final_graph_to_return = graph_backup_candidate
+    #         # Fallback to current 'aig' if generation completed fully and 'aig' is valid
+    #         elif is_generation_continue and \
+    #                 aig.number_of_nodes() >= min_atoms and \
+    #                 check_aig_component_minimums(aig):
+    #             final_graph_to_return = aig
+    #         # Additional fallback: if graph_backup_candidate was too small or invalid, but aig is better
+    #         elif aig.number_of_nodes() >= min_atoms and \
+    #                 check_aig_component_minimums(aig):
+    #             final_graph_to_return = aig
+    #
+    #         if final_graph_to_return.number_of_nodes() == 0 and min_atoms > 0:
+    #             print(
+    #                 f"Warning: Generated AIG is empty or did not meet all criteria "
+    #                 f"(nodes: {final_graph_to_return.number_of_nodes()}), but min_nodes was {min_atoms}.")
+    #
+    #         num_nodes_generated = final_graph_to_return.number_of_nodes()
+    #         pure_valid_generation = 1.0 if total_resamples_count == 0 else 0.0
+    #
+    #         return final_graph_to_return, pure_valid_generation, num_nodes_generated
 
     def initialize_masks(self, max_node_unroll=38, max_edge_unroll=12):
         """

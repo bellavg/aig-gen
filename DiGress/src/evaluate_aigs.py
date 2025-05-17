@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 # Import necessary items from aig_config
 from aig_config import (
-    NODE_TYPE_KEYS, EDGE_TYPE_KEYS, MIN_AND_COUNT, MIN_PO_COUNT,
+    NODE_TYPE_KEYS, EXPLICIT_EDGE_TYPE_KEYS, MIN_AND_COUNT, MIN_PO_COUNT,
     DECODING_NODE_TYPE_NX, DECODING_EDGE_TYPE_NX  # For decoding one-hot vectors
 )
 
@@ -160,7 +160,7 @@ def calculate_structural_aig_metrics(G: nx.DiGraph) -> Dict[str, Any]:
     # 3. Check Edge Types
     for u, v, data in G.edges(data=True):
         edge_type_str = get_edge_type_str_from_attrs(data)  # Use new helper
-        if edge_type_str not in EDGE_TYPE_KEYS:
+        if edge_type_str not in EXPLICIT_EDGE_TYPE_KEYS:
             metrics['num_unknown_edges'] += 1
             if "Unknown edge types" not in metrics['constraints_failed']:
                 metrics['constraints_failed'].append("Unknown edge types")

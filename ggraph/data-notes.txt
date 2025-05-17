@@ -1,0 +1,19 @@
+GraphEBM
+virtual edge and node type -> so for all of them?
+
+Therefore, for a dataset, X∈{0,1}
+n×(b+1)
+  (where b is the number of actual node types) and A∈{0,1}
+n×n×(c+1)
+  (where c is the number of actual edge types).
+
+  GraphAF does no edge
+
+  GraphDF does no edge
+
+  for all models
+
+    last dimension of adj is no edge dim
+
+    add none type for node padding so to pad to max nodes which is 64 then add a dimension which is none type
+

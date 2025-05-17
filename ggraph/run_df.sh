@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/sample_df_%j.out
+#SBATCH --output=./slurm_logs/sample_df_%j.out
 
 
 # --- Configuration ---
@@ -17,11 +17,12 @@ TRAIN_SCRIPT="train_graphs.py" # The simplified script that delegates training
 
 # --- End Configuration ---
 
-cd ..
 
 # --- Setup ---
 mkdir -p slurm_logs
 
+# Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
+export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
 
 echo "Log and output directories ensured."
 echo "Loading modules..."
@@ -35,13 +36,15 @@ echo "Conda environment activated."
 
 #
 ### Call the simplified train_graphs.py script, ensuring all required args are present
-#srun python -u ggraph/train_graphs.py
+srun python -u ggraph/train_graphs.py \
+  --wandb
 
 
-srun python -u ggraph/sample_graphs.py \
-    --checkpoint "./ggraph/checkpoints/GraphDF/ckpt_30.pth" \
-    --evaluate \
-    --save
+#srun python -u ggraph/sample_graphs.py \
+#    --checkpoint "./ggraph/checkpoints/GraphDF/ckpt_30.pth" \
+#    --evaluate \
+#    --save \
+#
 
 
 #
