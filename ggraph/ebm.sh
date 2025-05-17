@@ -2,8 +2,8 @@
 #SBATCH --job-name=ebm # Updated job name
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
-#SBATCH --time=08:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/sample_ebm_%j.out
+#SBATCH --time=12:00:00 # Keep increased time
+#SBATCH --output=./slurm_logs/ebm_%j.out
 
 
 # --- Configuration ---
@@ -17,7 +17,6 @@ TRAIN_SCRIPT="train_graphs.py" # The simplified script that delegates training
 
 # --- End Configuration ---
 
-cd ..
 
 # --- Setup ---
 mkdir -p slurm_logs
@@ -35,18 +34,19 @@ echo "Conda environment activated."
 
 
 ## Call the simplified train_graphs.py script, ensuring all required args are present
-#srun python -u ggraph/train_graphs.py \
-#    --model 'GraphEBM'
+srun python -u train_graphs.py \
+    --model 'GraphEBM' \
+    --use_wandb
 
 #
 #
-echo "super low threshold higher number of cycles broken"
-srun python -u ggraph/sample_graphs.py \
-    --model 'GraphEBM' \
-    --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \
-    --num_samples 1000 \
-    --evaluate \
-    --save
+#echo "super low threshold higher number of cycles broken"
+#srun python -u ggraph/sample_graphs.py \
+#    --model 'GraphEBM' \
+#    --checkpoint "./ggraph/checkpoints/GraphEBM/epoch_30.pt" \
+#    --num_samples 1000 \
+#    --evaluate \
+#    --save
 #
 #
 ##

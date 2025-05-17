@@ -1,235 +1,270 @@
 import time
 import os
-import copy
+import warnings  # Added for wandb import warning
 
-import networkx as nx
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
+from typing import Optional
 from generator import Generator
-#from dig.ggraph.utils import gen_mol_from_one_shot_tensor
 from .energy_func import EnergyFunc
 from .util import rescale_adj, requires_grad, clip_grad
-from aig_config import *
-from .generate import gen_mol_from_one_shot_tensor
+# Assuming aig_config.py provides necessary constants if not passed directly
+# For GraphEBM, constants like NUM_NODE_ATTRIBUTES, NUM_EDGE_ATTRIBUTES are used in its __init__
+# and MAX_NODE_COUNT, NUM_EXPLICIT_NODE_FEATURES, NUM_EXPLICIT_EDGE_FEATURES are used in train_graphs.py for instantiation.
+from aig_config import (
+    MAX_NODE_COUNT,
+    NUM_EXPLICIT_NODE_FEATURES,  # Used for n_atom_type_actual
+    NUM_NODE_ATTRIBUTES,  # Total node features including padding (n_atom_type for EnergyFunc)
+    NUM_EXPLICIT_EDGE_FEATURES,  # Used for n_edge_type_actual
+    NUM_EDGE_ATTRIBUTES,  # Total edge features including no-edge (n_edge_type for EnergyFunc)
+    # NUM_ADJ_CHANNELS is also relevant for GraphEBM's internal logic if it differs from NUM_EDGE_ATTRIBUTES
+    # The provided __init__ uses n_edge_type directly for EnergyFunc, which should be NUM_EDGE_ATTRIBUTES
+)
+from .generate import gen_mol_from_one_shot_tensor  # For run_rand_gen
+
+# wandb import
+try:
+    import wandb
+except ImportError:
+    wandb = None
+    # Warning will be issued in train_rand_gen if wandb_active is True but wandb is not installed
 
 
 class GraphEBM(Generator):
     r"""
-        Adapted for AIG generation with on-the-fly virtual node channel handling.
+        The method class for GraphEBM algorithm.
         Args:
-            n_atom (int): Maximum number of nodes (MAX_NODE_COUNT for AIGs).
-            n_atom_type (int): Number of ACTUAL node types (e.g., NUM_NODE_FEATURES from aig_config).
-                               The model will internally add +1 for the virtual channel.
-            n_edge_type (int): Number of ACTUAL edge types (e.g., NUM_EXPLICIT_EDGE_TYPES from aig_config).
-                               The model will use NUM_ADJ_CHANNELS (actual + virtual) internally.
             hidden (int): Hidden dimensions for the EnergyFunc.
+            n_atom (int): Maximum number of nodes (MAX_NODE_COUNT).
+            n_atom_type_actual (int): Number of ACTUAL node types (e.g., NUM_EXPLICIT_NODE_FEATURES).
+                                      The EnergyFunc will be initialized with NUM_NODE_ATTRIBUTES.
+            n_edge_type_actual (int): Number of ACTUAL edge types (e.g., NUM_EXPLICIT_EDGE_FEATURES).
+                                      The EnergyFunc will be initialized with NUM_EDGE_ATTRIBUTES.
             device (torch.device, optional): The device where the model is deployed.
     """
 
-    def __init__(self, n_atom, n_atom_type_actual, n_edge_type_actual, hidden, device=None):
+    def __init__(self, hidden: int,
+                 n_atom: int = MAX_NODE_COUNT,
+                 n_atom_type_actual: int = NUM_EXPLICIT_NODE_FEATURES,  # As passed by train_graphs.py
+                 n_edge_type_actual: int = NUM_EXPLICIT_EDGE_FEATURES,  # As passed by train_graphs.py
+                 device: Optional[torch.device] = None):
         super(GraphEBM, self).__init__()
+
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
 
-        # Node feature setup
-        self.num_actual_node_features = n_atom_type_actual  # e.g., 4 (NUM_NODE_FEATURES)
-        # self.n_atom_type from user's original code was n_atom_type_actual + 1
-        # This is the total number of channels the EnergyFunc's node input will have.
-        self.model_total_node_channels = n_atom_type_actual + 1  # e.g., 5
-        self.virtual_node_channel_idx = self.num_actual_node_features  # Index for the virtual channel (0-indexed)
+        # The EnergyFunc expects the total number of node/edge types,
+        # which includes any padding or virtual/no-edge channels.
+        # These total counts are NUM_NODE_ATTRIBUTES and NUM_EDGE_ATTRIBUTES from aig_config.py
+        self.n_atom_type_total_for_energy_func = NUM_NODE_ATTRIBUTES
+        self.n_edge_type_total_for_energy_func = NUM_EDGE_ATTRIBUTES
 
-        # Edge feature setup
-        # n_edge_type_actual is NUM_EXPLICIT_EDGE_TYPES (e.g., 2)
-        # The EnergyFunc and data use NUM_ADJ_CHANNELS (e.g., 3 from aig_config)
-        self.model_total_edge_channels = NUM_ADJ_CHANNELS  # This is what EnergyFunc needs for num_edge_type
-        self.virtual_edge_channel_idx = self.model_total_edge_channels - 1
+        self.energy_function = EnergyFunc(
+            n_atom_type=self.n_atom_type_total_for_energy_func,  # Total node features
+            hidden=hidden,
+            num_edge_type=self.n_edge_type_total_for_energy_func  # Total edge/adj channels
+        ).to(self.device)
 
-        # Initialize EnergyFunc with total channels
-        self.energy_function = EnergyFunc(self.model_total_node_channels, hidden, self.model_total_edge_channels).to(
-            self.device)
+        self.n_atom = n_atom  # Max nodes (for generating samples)
 
-        self.n_atom = n_atom  # MAX_NODE_COUNT
+        # For consistency in run_rand_gen, store the total types the model operates on.
+        self.n_atom_type = self.n_atom_type_total_for_energy_func
+        self.n_edge_type = self.n_edge_type_total_for_energy_func
 
-        # For consistency and use in methods like run_rand_gen,
-        # self.n_atom_type and self.n_edge_type will store the *total model channels*.
-        self.n_atom_type = self.model_total_node_channels  # Consistent with user's self.n_atom_type = n_atom_type + 1
-        self.n_edge_type = self.model_total_edge_channels  # Corrected to use total edge channels
-
-        print(f"GraphEBM Initialized (User Structure Adapted & Corrected):")
+        print(f"GraphEBM Initialized on device: {self.device}")
         print(f"  Max Nodes (self.n_atom): {self.n_atom}")
-        print(f"  Model Node Channels (self.n_atom_type): {self.n_atom_type}")
-        print(f"  Model Edge Channels (self.n_edge_type): {self.n_edge_type}")
-        print(
-            f"  Actual Node Features from input data (self.num_actual_node_features): {self.num_actual_node_features}")
-        print(f"  Virtual Node Channel Index used in transform: {self.virtual_node_channel_idx}")
-        print(f"  Virtual Edge Channel Index for AIG conversion: {self.virtual_edge_channel_idx}")
-
-    def _transform_node_features_add_virtual_channel(self, x_features_actual_BNF, device):
-        """
-        Transforms node features from (B, N, NUM_ACTUAL_FEATURES)
-        to (B, MODEL_TOTAL_NODE_CHANNELS, N) by adding a virtual node channel.
-        Assumes padded rows in x_features_actual_BNF are all zeros.
-        The output shape is (B, F_total, N) as expected by the original EnergyFunc's 'h' input.
-        """
-        batch_size, num_nodes, num_actual_feats = x_features_actual_BNF.shape
-
-        if num_actual_feats != self.num_actual_node_features:
-            raise ValueError(
-                f"Input x_features_actual_BNF has {num_actual_feats} features, "
-                f"but model was initialized for {self.num_actual_node_features} actual features."
-            )
-
-        # Target shape for EnergyFunc input h: (B, self.n_atom_type, N)
-        # self.n_atom_type is self.model_total_node_channels
-        x_transformed_BFN = torch.zeros(batch_size, self.n_atom_type, num_nodes, device=device)
-
-        # Copy actual features. Input is (B,N,F_actual), permute to (B,F_actual,N) for assignment.
-        x_transformed_BFN[:, :self.num_actual_node_features, :] = x_features_actual_BNF.permute(0, 2, 1)
-
-        is_padding_node_BN = (x_features_actual_BNF.abs().sum(dim=2) < 1e-6)
-
-        for b in range(batch_size):
-            padding_node_indices_in_sample = torch.where(is_padding_node_BN[b])[0]
-            if len(padding_node_indices_in_sample) > 0:
-                # Use self.virtual_node_channel_idx (which is self.num_actual_node_features)
-                x_transformed_BFN[b, self.virtual_node_channel_idx, padding_node_indices_in_sample] = 1.0
-                x_transformed_BFN[b, :self.num_actual_node_features, padding_node_indices_in_sample] = 0.0
-
-        return x_transformed_BFN
+        print(f"  EnergyFunc - n_atom_type (input features): {self.n_atom_type_total_for_energy_func}")
+        print(f"  EnergyFunc - num_edge_type (adj channels): {self.n_edge_type_total_for_energy_func}")
+        print(f"  (Input data 'x' should have {self.n_atom_type_total_for_energy_func} features per node)")
+        print(f"  (Input data 'adj' should have {self.n_edge_type_total_for_energy_func} channels)")
 
     def train_rand_gen(self, loader, lr, wd, max_epochs, model_conf_dict,
-                       save_interval, save_dir):
-        c = model_conf_dict['c']
-        ld_step = model_conf_dict['ld_step']
-        ld_noise = model_conf_dict['ld_noise']
-        ld_step_size = model_conf_dict['ld_step_size']
-        clamp = model_conf_dict['clamp']
-        alpha = model_conf_dict['alpha']
+                       save_interval, save_dir, wandb_active=False):  # Added wandb_active
+        r"""
+            Running training for random generation task.
+            ... (rest of docstring) ...
+            Args:
+                ...
+                wandb_active (bool, optional): Flag to enable/disable wandb logging.
+        """
+        # Parameters for Langevin dynamics from model_conf_dict
+        # These should be part of base_conf['model'] in aig_config.py
+        c = model_conf_dict.get('c', 0.05)
+        ld_step = model_conf_dict.get('ld_step', 60)
+        ld_noise = model_conf_dict.get('ld_noise', 0.005)
+        ld_step_size = model_conf_dict.get('ld_step_size', 30.0)
+        clamp = model_conf_dict.get('clamp', True)
+        alpha = model_conf_dict.get('alpha', 1.0)
 
         parameters = self.energy_function.parameters()
         optimizer = Adam(parameters, lr=lr, betas=(0.0, 0.999), weight_decay=wd)
 
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
 
-        for epoch in range(max_epochs):
+        if wandb_active and wandb is None:
+            warnings.warn("wandb_active is True, but wandb library is not installed. Logging will be skipped.")
+            wandb_active = False
+
+        model_device = self.device  # Device model is on
+        print(f"Starting GraphEBM training for {max_epochs} epochs on device {model_device}...")
+
+        for epoch in range(max_epochs):  # Original code was range(max_epochs), usually range(1, max_epochs + 1)
+            epoch_display = epoch + 1  # For display and logging
             t_start = time.time()
-            losses_reg, losses_en, losses = [], [], []
-            for i_batch, batch_data in enumerate(tqdm(loader, desc=f"Epoch {epoch + 1}/{max_epochs}")):
 
-                pos_x_actual_feats_BNF = batch_data.x.to(self.device).to(dtype=torch.float32)
-                pos_x_BFN = self._transform_node_features_add_virtual_channel(pos_x_actual_feats_BNF, self.device)
-                pos_x_BFN += c * torch.rand_like(pos_x_BFN, device=self.device)
+            epoch_losses_reg = []
+            epoch_losses_en = []
+            epoch_losses_total = []  # Renamed from 'losses' for clarity
 
-                pos_adj_BEFN = batch_data.adj.to(self.device).to(dtype=torch.float32)
-                pos_adj_BEFN += c * torch.rand_like(pos_adj_BEFN, device=self.device)
+            for batch_idx, data_batch in enumerate(tqdm(loader, desc=f"Epoch {epoch_display}/{max_epochs}")):
+                # Data from AIGPaddedInMemoryDataset is already on CPU by default from torch.load
+                # Move to model's device
+                pos_x = data_batch.x.to(model_device)  # Shape (B, MAX_NODE_COUNT, NUM_NODE_ATTRIBUTES)
+                pos_adj = data_batch.adj.to(
+                    model_device)  # Shape (B, NUM_EDGE_ATTRIBUTES, MAX_NODE_COUNT, MAX_NODE_COUNT)
 
-                pos_adj_normalized_BEFN = rescale_adj(pos_adj_BEFN)
+                # Dequantization (as per original GraphEBM logic)
+                pos_x = pos_x + c * torch.rand_like(pos_x, device=model_device)
+                pos_adj = pos_adj + c * torch.rand_like(pos_adj, device=model_device)
 
-                neg_x_BFN = torch.rand(pos_x_BFN.shape[0], self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
-                neg_adj_BEFN = torch.rand_like(pos_adj_BEFN, device=self.device)
+                # Langevin dynamics for negative samples
+                # Shapes should match pos_x and pos_adj
+                neg_x = torch.rand_like(pos_x, device=model_device) * (1 + c)
+                neg_adj = torch.rand_like(pos_adj, device=model_device)
 
-                neg_x_BFN.requires_grad = True
-                neg_adj_BEFN.requires_grad = True
+                # Adjacency matrix normalization (GraphEBM specific utility)
+                pos_adj = rescale_adj(pos_adj)
+
+                neg_x.requires_grad = True
+                neg_adj.requires_grad = True
 
                 requires_grad(parameters, False)
                 self.energy_function.eval()
 
-                noise_x_ld = torch.randn_like(neg_x_BFN, device=self.device)
-                noise_adj_ld = torch.randn_like(neg_adj_BEFN, device=self.device)
+                noise_x_ld = torch.randn_like(neg_x, device=model_device)
+                noise_adj_ld = torch.randn_like(neg_adj, device=model_device)
                 for _ in range(ld_step):
                     noise_x_ld.normal_(0, ld_noise)
                     noise_adj_ld.normal_(0, ld_noise)
-                    neg_x_BFN.data.add_(noise_x_ld.data)
-                    neg_adj_BEFN.data.add_(noise_adj_ld.data)
+                    neg_x.data.add_(noise_x_ld.data)
+                    neg_adj.data.add_(noise_adj_ld.data)
 
                     # EnergyFunc expects h as (B, F, N) and adj as (B, E, N, N)
-                    # Your EnergyFunc (original) has h.permute(0,2,1) at the start of its forward.
-                    # So, it expects input h to be (B, F_total, N)
-                    # And input adj to be (B, E_total, N, N)
-                    neg_out_ld = self.energy_function(neg_adj_BEFN, neg_x_BFN)
+                    # Input pos_x is (B,N,F), pos_adj is (B,E,N,N)
+                    # EnergyFunc's forward permutes h: h.permute(0, 2, 1)
+                    # So, we pass neg_x as (B,N,F) and neg_adj as (B,E,N,N)
+                    neg_out_ld = self.energy_function(neg_adj, neg_x)  # adj, h
                     neg_out_ld.sum().backward()
+
                     if clamp:
-                        if neg_x_BFN.grad is not None: neg_x_BFN.grad.data.clamp_(-0.01, 0.01)
-                        if neg_adj_BEFN.grad is not None: neg_adj_BEFN.grad.data.clamp_(-0.01, 0.01)
+                        if neg_x.grad is not None: neg_x.grad.data.clamp_(-0.01, 0.01)
+                        if neg_adj.grad is not None: neg_adj.grad.data.clamp_(-0.01, 0.01)
 
-                    if neg_x_BFN.grad is not None: neg_x_BFN.data.add_(neg_x_BFN.grad.data, alpha=-ld_step_size)
-                    if neg_adj_BEFN.grad is not None: neg_adj_BEFN.data.add_(neg_adj_BEFN.grad.data,
-                                                                             alpha=-ld_step_size)
+                    if neg_x.grad is not None: neg_x.data.add_(neg_x.grad.data, alpha=-ld_step_size)
+                    if neg_adj.grad is not None: neg_adj.data.add_(neg_adj.grad.data, alpha=-ld_step_size)
 
-                    if neg_x_BFN.grad is not None: neg_x_BFN.grad.detach_(); neg_x_BFN.grad.zero_()
-                    if neg_adj_BEFN.grad is not None: neg_adj_BEFN.grad.detach_(); neg_adj_BEFN.grad.zero_()
+                    if neg_x.grad is not None: neg_x.grad.detach_(); neg_x.grad.zero_()
+                    if neg_adj.grad is not None: neg_adj.grad.detach_(); neg_adj.grad.zero_()
 
-                    neg_x_BFN.data.clamp_(0, 1 + c)
-                    neg_adj_BEFN.data.clamp_(0, 1)
+                    neg_x.data.clamp_(0, 1 + c)
+                    neg_adj.data.clamp_(0, 1)  # Adjacency values typically [0,1]
 
-                neg_x_final_BFN = neg_x_BFN.detach()
-                neg_adj_final_BEFN = neg_adj_BEFN.detach()
+                # Training by backprop
+                neg_x_final = neg_x.detach()
+                neg_adj_final = neg_adj.detach()
 
                 requires_grad(parameters, True)
                 self.energy_function.train()
                 optimizer.zero_grad()
 
-                pos_out = self.energy_function(pos_adj_normalized_BEFN, pos_x_BFN)
-                neg_out = self.energy_function(neg_adj_final_BEFN, neg_x_final_BFN)
+                pos_out = self.energy_function(pos_adj, pos_x)
+                neg_out = self.energy_function(neg_adj_final, neg_x_final)
 
                 loss_reg = (pos_out ** 2 + neg_out ** 2)
                 loss_en = pos_out - neg_out
-                loss = (loss_en + alpha * loss_reg).mean()
+                loss = (loss_en + alpha * loss_reg).mean()  # Mean over batch
+
                 loss.backward()
-                clip_grad(optimizer)
+                clip_grad(optimizer,
+                          grad_clip_value=model_conf_dict.get('grad_clip_value', None))  # Use configured clip value
                 optimizer.step()
 
-                losses_reg.append(loss_reg.mean().item())
-                losses_en.append(loss_en.mean().item())
-                losses.append(loss.item())
+                epoch_losses_reg.append(loss_reg.mean().item())
+                epoch_losses_en.append(loss_en.mean().item())
+                epoch_losses_total.append(loss.item())
 
             t_end = time.time()
-            if (epoch + 1) % save_interval == 0:
-                torch.save(self.energy_function.state_dict(), os.path.join(save_dir, f'epoch_{epoch + 1}.pt'))
-                print(f'Saving checkpoint at epoch {epoch + 1}')
-            avg_total_loss = sum(losses) / len(losses) if losses else float('nan')
-            avg_en_loss = sum(losses_en) / len(losses_en) if losses_en else float('nan')
-            avg_reg_loss = sum(losses_reg) / len(losses_reg) if losses_reg else float('nan')
+
+            avg_total_loss_epoch = sum(epoch_losses_total) / len(epoch_losses_total) if epoch_losses_total else float(
+                'nan')
+            avg_en_loss_epoch = sum(epoch_losses_en) / len(epoch_losses_en) if epoch_losses_en else float('nan')
+            avg_reg_loss_epoch = sum(epoch_losses_reg) / len(epoch_losses_reg) if epoch_losses_reg else float('nan')
+
             print(
-                f'Epoch: {epoch + 1:03d}, Loss: {avg_total_loss:.6f}, Energy Loss: {avg_en_loss:.6f}, Regularizer Loss: {avg_reg_loss:.6f}, Sec/Epoch: {t_end - t_start:.2f}')
-            print('==========================================')
+                f'Epoch: {epoch_display:03d}/{max_epochs}, Avg Total Loss: {avg_total_loss_epoch:.6f}, '
+                f'Avg Energy Loss: {avg_en_loss_epoch:.6f}, Avg Regularizer Loss: {avg_reg_loss_epoch:.6f}, '
+                f'Sec/Epoch: {t_end - t_start:.2f}'
+            )
+            print('===================================================================================')
+
+            # --- Wandb Logging (Per Epoch for GraphEBM) ---
+            if wandb_active and wandb.run:
+                try:
+                    wandb.log({
+                        "epoch": epoch_display,
+                        "ebm_avg_total_loss": avg_total_loss_epoch,
+                        "ebm_avg_energy_loss": avg_en_loss_epoch,
+                        "ebm_avg_regularizer_loss": avg_reg_loss_epoch,
+                        "learning_rate": lr
+                        # Assuming lr is constant per run, or get from optimizer: optimizer.param_groups[0]['lr']
+                    })
+                except Exception as e:
+                    warnings.warn(f"Failed to log to wandb for epoch {epoch_display}: {e}")
+            # --- End Wandb Logging ---
+
+            if epoch_display % save_interval == 0:
+                ckpt_path = os.path.join(save_dir, 'GraphEBM_epoch_{}.pt'.format(epoch_display))
+                torch.save(self.energy_function.state_dict(), ckpt_path)
+                print(f'Saving checkpoint to {ckpt_path}')
+                print('===================================================================================')
+
+        print("GraphEBM training finished.")
 
     def run_rand_gen(self, model_conf_dict, checkpoint_path, n_samples):
         r"""
             Running graph generation for random generation task.
-
-            Args:
-                checkpoint_path (str): The path of the trained model, *i.e.*, the .pt file.
-                n_samples (int): the number of molecules to generate.
-                c (float): The scaling hyperparameter for dequantization.
-                ld_step (int): The number of iteration steps of Langevin dynamics.
-                ld_noise (float): The standard deviation of the added noise in Langevin dynamics.
-                ld_step_size (int): The step size of Langevin dynamics.
-                clamp (bool): Whether to use gradient clamp in Langevin dynamics.
-                atomic_num_list (list): The list used to indicate atom types.
-
-            :rtype:
-                gen_mols (list): A list of generated molecules represented by rdkit Chem.Mol objects;
-
+            ... (rest of docstring) ...
         """
-        c = model_conf_dict['c']
-        ld_step = model_conf_dict['ld_step']
-        ld_noise = model_conf_dict['ld_noise']
-        ld_step_size = model_conf_dict['ld_step_size']
-        clamp = model_conf_dict['clamp']
+        # Parameters for Langevin dynamics from model_conf_dict
+        c = model_conf_dict.get('c', 0.05)
+        ld_step = model_conf_dict.get('ld_step', 60)
+        ld_noise = model_conf_dict.get('ld_noise', 0.005)
+        ld_step_size = model_conf_dict.get('ld_step_size', 30.0)
+        clamp = model_conf_dict.get('clamp', True)
+        # atomic_num_list is handled by gen_mol_from_one_shot_tensor for AIGs
 
-        print("Loading paramaters from {}".format(checkpoint_path))
-        self.energy_function.load_state_dict(torch.load(checkpoint_path))
+        print(f"Loading parameters from {checkpoint_path}")
+        try:
+            self.energy_function.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+            print(f"Successfully loaded checkpoint onto {self.device}")
+        except Exception as e:
+            warnings.warn(f"Could not load checkpoint from {checkpoint_path}: {e}. Using randomly initialized model.")
+
         parameters = self.energy_function.parameters()
 
-        ### Initialization
-        print("Initializing samples...")
-        gen_x = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
-        gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
+        # Initialization of samples
+        print("Initializing samples for generation...")
+        # self.n_atom_type and self.n_edge_type are total channels (e.g., NUM_NODE_ATTRIBUTES, NUM_EDGE_ATTRIBUTES)
+        # self.n_atom is MAX_NODE_COUNT
+        gen_x = torch.rand(n_samples, self.n_atom, self.n_atom_type, device=self.device) * (
+                    1 + c)  # Shape (B, N, F_total)
+        gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom,
+                             device=self.device)  # Shape (B, E_total, N, N)
+        # Note: EnergyFunc expects h (node features) as (B,F,N) after permute. So gen_x (B,N,F) is correct here.
 
         gen_x.requires_grad = True
         gen_adj.requires_grad = True
@@ -239,37 +274,46 @@ class GraphEBM(Generator):
         noise_x = torch.randn_like(gen_x, device=self.device)
         noise_adj = torch.randn_like(gen_adj, device=self.device)
 
-        ### Langevin dynamics
-        print("Generating samples...")
-        for _ in range(ld_step):
+        # Langevin dynamics for generation
+        print(f"Generating {n_samples} samples using Langevin dynamics ({ld_step} steps)...")
+        for step_idx in tqdm(range(ld_step), desc="Langevin Dynamics Steps"):
             noise_x.normal_(0, ld_noise)
             noise_adj.normal_(0, ld_noise)
             gen_x.data.add_(noise_x.data)
             gen_adj.data.add_(noise_adj.data)
 
-            gen_out = self.energy_function(gen_adj, gen_x)
+            gen_out = self.energy_function(gen_adj, gen_x)  # adj, h
             gen_out.sum().backward()
+
             if clamp:
-                gen_x.grad.data.clamp_(-0.01, 0.01)
-                gen_adj.grad.data.clamp_(-0.01, 0.01)
+                if gen_x.grad is not None: gen_x.grad.data.clamp_(-0.01, 0.01)
+                if gen_adj.grad is not None: gen_adj.grad.data.clamp_(-0.01, 0.01)
 
-            gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
-            gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
+            if gen_x.grad is not None: gen_x.data.add_(gen_x.grad.data, alpha=-ld_step_size)
+            if gen_adj.grad is not None: gen_adj.data.add_(gen_adj.grad.data, alpha=-ld_step_size)
 
-            gen_x.grad.detach_()
-            gen_x.grad.zero_()
-            gen_adj.grad.detach_()
-            gen_adj.grad.zero_()
+            if gen_x.grad is not None: gen_x.grad.detach_(); gen_x.grad.zero_()
+            if gen_adj.grad is not None: gen_adj.grad.detach_(); gen_adj.grad.zero_()
 
             gen_x.data.clamp_(0, 1 + c)
             gen_adj.data.clamp_(0, 1)
 
-        gen_x = gen_x.detach()
-        gen_adj = gen_adj.detach()
+        gen_x = gen_x.detach()  # Shape (B, N, F_total)
+        gen_adj = gen_adj.detach()  # Shape (B, E_total, N, N)
+
+        # Symmetrize adjacency matrix (important for undirected interpretation)
         gen_adj = (gen_adj + gen_adj.permute(0, 1, 3, 2)) / 2
 
-        gen_mols, pure_valids = gen_mol_from_one_shot_tensor(gen_adj, gen_x)
+        # Convert tensors to AIGs (NetworkX graphs)
+        # gen_mol_from_one_shot_tensor needs to be adapted for AIGs.
+        # It expects gen_x as (B, F_total, N) and gen_adj as (B, E_total, N, N)
+        # Our gen_x is (B, N, F_total), so permute it.
+        print("Converting generated tensors to NetworkX AIGs...")
+        # The generate.py script's gen_mol_from_one_shot_tensor expects x shape (B, F, N)
+        # and adj shape (B, E, N, N).
+        # Our gen_x is (B, N, F_total), so permute it.
+        # Our gen_adj is (B, E_total, N, N), which is correct.
+        generated_aigs, pure_valids_flags = gen_mol_from_one_shot_tensor(gen_adj, gen_x.permute(0, 2, 1))
+        print(f"Finished generation. Produced {len(generated_aigs)} AIG objects.")
 
-        return gen_mols, pure_valids
-
-
+        return generated_aigs, pure_valids_flags

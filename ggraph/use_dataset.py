@@ -195,25 +195,27 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         try:
             # InMemoryDataset's __init__ calls self.load() if processed files exist.
             # self.load() attempts to load self.processed_paths[0]
-            self.data, self.slices, self.graph_identifiers = torch.load(self.processed_paths[0])
-            print(f"Successfully loaded processed & padded '{self.split}' AIG data from: {self.processed_paths[0]}")
+            # Load with weights_only=False if you trust the source
+            loaded_content = torch.load(self.processed_paths[0], weights_only=False)
+            if isinstance(loaded_content, tuple) and len(loaded_content) == 3:
+                 self.data, self.slices, self.graph_identifiers = loaded_content
+                 print(f"Successfully loaded processed & padded '{self.split}' AIG data from: {self.processed_paths[0]}")
+            elif isinstance(loaded_content, tuple) and len(loaded_content) == 2: # Older format without identifiers
+                 self.data, self.slices = loaded_content
+                 num_graphs = self.slices[list(self.slices.keys())[0]].size(0) - 1 if self.slices and self.slices.keys() else 0
+                 self.graph_identifiers = [f"graph_{i}" for i in range(num_graphs)]
+                 warnings.warn(f"Loaded older format (data, slices) from {self.processed_paths[0]}; graph identifiers are dummies.")
+            else:
+                raise TypeError(f"Loaded content from {self.processed_paths[0]} is not a recognized tuple format.")
+
         except FileNotFoundError:
             print(f"Padded processed file not found at {self.processed_paths[0]}. "
                   "This is normal if processing for the first time. Dataset will attempt to process.")
         except Exception as e:
             warnings.warn(
-                f"Could not load full data tuple (data, slices, identifiers) from {self.processed_paths[0]}: {e}. "
-                "Attempting to load just data and slices if processing was already done.")
-            try:
-                self.data, self.slices = torch.load(self.processed_paths[0])
-                num_graphs = self.slices[list(self.slices.keys())[0]].size(
-                    0) - 1 if self.slices and self.slices.keys() else 0
-                self.graph_identifiers = [f"graph_{i}" for i in range(num_graphs)]  # Dummy identifiers
-                warnings.warn("Loaded only data and slices; graph identifiers are dummies.")
-            except Exception as e_simple:
-                # This might happen if the file is truly corrupted or doesn't exist and process() hasn't run
-                warnings.warn(f"Failed to load even basic data/slices from {self.processed_paths[0]}: {e_simple}. "
-                              "If this is the first run, processing will be attempted.")
+                f"Could not load data from {self.processed_paths[0]} with weights_only=False: {e}. "
+                "If this is the first run, processing will be attempted. Otherwise, the file might be corrupted or incompatible.")
+
 
     @property
     def raw_file_names(self) -> List[str]:
@@ -243,7 +245,8 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
             raise FileNotFoundError(f"Cannot process: Raw input file {self.raw_pt_input_path} not found.")
 
         try:
-            unpadded_data_list: List[Data] = torch.load(self.raw_pt_input_path)
+            # MODIFICATION: Set weights_only=False
+            unpadded_data_list: List[Data] = torch.load(self.raw_pt_input_path, weights_only=False)
             if not isinstance(unpadded_data_list, list):
                 raise TypeError(f"Expected a list of Data objects from {self.raw_pt_input_path}, "
                                 f"but got {type(unpadded_data_list)}.")
@@ -253,7 +256,7 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         # Instantiate the transformer using imported config values
         transformer = AIGTransformAndPad(
             max_nodes=MAX_NODE_COUNT,
-            num_explicit_node_types=NUM_EXPLICIT_NODE_FEATURES,
+            num_explicit_node_features=NUM_EXPLICIT_NODE_FEATURES, # Corrected argument name
             padding_node_channel_idx=PADDING_NODE_CHANNEL,
             total_node_feature_dim=NUM_NODE_ATTRIBUTES,
             num_explicit_edge_features=NUM_EXPLICIT_EDGE_FEATURES,
@@ -285,8 +288,9 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
                 identifier = getattr(data_obj, 'graph_name_original', f"{self.split}_graph_{i}")
                 current_graph_identifiers.append(identifier)
                 # Ensure the transformed object also carries the identifier if needed later by get()
-                if hasattr(transformed_obj, 'graph_name_original') and not transformed_obj.graph_name_original:
+                if hasattr(transformed_obj, 'graph_name_original') and not transformed_obj.graph_name_original: # Check if attribute exists and is empty
                     transformed_obj.graph_name_original = identifier
+
 
         if self.pre_filter is not None:
             # Apply pre_filter to the transformed data
@@ -332,4 +336,3 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         if not self.slices: return 0
         slice_key = next(iter(self.slices.keys()), None)
         return self.slices[slice_key].size(0) - 1 if slice_key and self.slices[slice_key].numel() > 0 else 0
-
