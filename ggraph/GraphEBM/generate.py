@@ -82,7 +82,7 @@ def correct_mol(x):
 
     made_changes_in_current_pass = True  # Assume changes might be made, to enter loop at least once for iterative potential
     iteration_count = 0
-    max_iterations = graph_copy.number_of_nodes()  # Heuristic limit for iterations
+    max_iterations = 20  # Heuristic limit for iterations
     while made_changes_in_current_pass and iteration_count < max_iterations:  # Loop for stability
         made_changes_in_current_pass = False
         iteration_count += 1
