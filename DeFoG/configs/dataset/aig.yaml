@@ -10,11 +10,11 @@ log_every_steps: 100
 # Directory where AIGCustomDataModule looks for the single, large, combined raw PyG file.
 # Relative to general.abs_path_to_project_root.
 # Matches output_pyg_dir from your create_dataset.py script.
-datadir_for_all_raw: data/pyg_full
+datadir_for_all_raw: ./
 
 # Filename of the combined raw PyTorch Geometric Data objects list.
 # Matches combined_output_filename from your create_dataset.py script.
-all_raw_graphs_filename: aig.pt
+all_raw_graphs_filename: aig_undirected.pt
 
 # If True, AIGCustomDataModule re-splits all_raw_graphs_filename into train/val/test
 # intermediate files, even if they already exist.

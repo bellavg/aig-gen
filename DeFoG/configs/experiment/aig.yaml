@@ -2,18 +2,17 @@
 general:
   gpus: 1
   wandb: 'online' # Or 'disabled' or 'offline'
-  abs_path_to_project_root: null # Set this if your project root is not parent of src, or let it be inferred
 
   resume: null            # Path to checkpoint if resuming training
   test_only: null         # Path to checkpoint for testing only
 
-  check_val_every_n_epochs: 100 # How often to run validation
+  check_val_every_n_epochs: 1000 # How often to run validation
   sample_every_val: 1         # Run sampling every time validation runs
 
   # Logging and Saving during training/validation
-  samples_to_generate: 64   # Number of graphs to generate during validation/sampling steps
-  samples_to_save: 16       # Number of generated graph visualizations to save
-  chains_to_save: 2         # Number of generation process GIFs to save
+  samples_to_generate: 100   # Number of graphs to generate during validation/sampling steps
+  samples_to_save: 0      # Number of generated graph visualizations to save
+  chains_to_save: 0         # Number of generation process GIFs to save
 
   # For final evaluation after training or with test_only
   final_model_samples_to_generate: 1000 # Generate more samples for robust final metrics
@@ -23,12 +22,13 @@ general:
 
   # Conditional generation (set to True if your AIGs have labels you want to condition on)
   conditional: False
+  sample_steps: 1000
   # target: 'your_aig_label_key' # if conditional is True
   # guidance_weight: 2.0          # if conditional is True (typical value from paper)
 
 train:
-  n_epochs: 20000             # Start with a moderate number, adjust based on convergence
-  batch_size: 64              # Adjust based on your AIG sizes and GPU memory
+  n_epochs: 1000000           # Start with a moderate number, adjust based on convergence
+  batch_size: 256             # Adjust based on your AIG sizes and GPU memory
   lr: 0.0002                  # Default learning rate
   clip_grad: null             # Gradient clipping (e.g., 1.0) if needed
   save_model: True            # As requested
@@ -37,13 +37,11 @@ train:
   time_distortion: 'polydec'
 
 sample:
-  sample_steps: 1000          # Number of steps for the sampling process (denoising)
   time_distortion: 'polydec'
   omega: 0.0
   eta: 0.0
-  search: False
-  rdb: 'general'
-  rdb_crit: 'dummy'
+
+
 
 model:
   n_layers: 10

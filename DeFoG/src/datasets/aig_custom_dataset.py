@@ -3,7 +3,7 @@ import os
 import os.path as osp
 import pathlib
 import warnings  # For explicit warnings
-
+import math
 import torch
 import torch.nn.functional as F
 import networkx as nx
@@ -26,28 +26,29 @@ from src.aig_config import (
 from typing import Union, List
 
 
-# --- Helper Function: PyG Data to NetworkX DiGraph for AIG Validation ---
-def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, None]:
+def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.Graph, None]:  # Changed DiGraph to Graph
     """
     Converts a PyTorch Geometric Data object, specifically formatted for AIGs
-    (with edge_attr having NUM_EDGE_FEATURES + 1 dimensions), to a NetworkX DiGraph
+    (with edge_attr having NUM_EDGE_FEATURES + 1 dimensions), to a NetworkX Graph (undirected)
     for validation purposes.
     """
     # Basic attribute checks
     if not all(hasattr(pyg_data, attr) for attr in ['x', 'edge_index', 'edge_attr']):
-        warnings.warn("convert_pyg_to_nx: pyg_data object missing one or more core attributes (x, edge_index, edge_attr).")
+        warnings.warn(
+            "convert_pyg_to_nx: pyg_data object missing one or more core attributes (x, edge_index, edge_attr).")
         return None
-    if pyg_data.num_nodes is None: # num_nodes can be explicitly set or inferred by PyG
+    if pyg_data.num_nodes is None:  # num_nodes can be explicitly set or inferred by PyG
         warnings.warn("convert_pyg_to_nx: pyg_data.num_nodes is None.")
         return None
 
-    num_nodes = pyg_data.num_nodes # This should be an int after .item() if it was a tensor
+    num_nodes = pyg_data.num_nodes  # This should be an int after .item() if it was a tensor
 
     if pyg_data.x is None or pyg_data.x.shape[0] != num_nodes or pyg_data.x.shape[1] != NUM_NODE_FEATURES:
-        warnings.warn(f"convert_pyg_to_nx: Node feature tensor 'x' mismatch. Shape: {pyg_data.x.shape if pyg_data.x is not None else 'None'}, Expected nodes: {num_nodes}, Expected features: {NUM_NODE_FEATURES}")
+        warnings.warn(
+            f"convert_pyg_to_nx: Node feature tensor 'x' mismatch. Shape: {pyg_data.x.shape if pyg_data.x is not None else 'None'}, Expected nodes: {num_nodes}, Expected features: {NUM_NODE_FEATURES}")
         return None
 
-    nx_graph = nx.DiGraph()
+    nx_graph = nx.Graph()  # MODIFICATION: Changed DiGraph to Graph
 
     # Process nodes
     for i in range(num_nodes):
@@ -61,8 +62,8 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, No
             type_index = np.argmax(node_feature_vector)
             if not (0 <= type_index < len(NODE_TYPE_KEYS)):
                 node_type_str = "UNKNOWN_TYPE_ATTRIBUTE_BAD_INDEX"
-                warnings.warn(f"Node {i} type index {type_index} out of bounds for NODE_TYPE_KEYS (len {len(NODE_TYPE_KEYS)}).")
-
+                warnings.warn(
+                    f"Node {i} type index {type_index} out of bounds for NODE_TYPE_KEYS (len {len(NODE_TYPE_KEYS)}).")
             else:
                 node_type_str = NODE_TYPE_KEYS[type_index]
         nx_graph.add_node(i, type=node_type_str)
@@ -73,11 +74,9 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, No
             warnings.warn("convert_pyg_to_nx: Graph has edges but 'edge_attr' is None.")
             return None
 
-        # This is the crucial part: edge_attr is expected to be NUM_EDGE_FEATURES + 1 dimensional here
-        # because it comes from AIGDataset.process() which already did the transformation.
         expected_edge_attr_dim = NUM_EDGE_FEATURES + 1
         if pyg_data.edge_attr.shape[0] != pyg_data.edge_index.shape[1] or \
-           pyg_data.edge_attr.shape[1] != expected_edge_attr_dim:
+                pyg_data.edge_attr.shape[1] != expected_edge_attr_dim:
             warnings.warn(f"convert_pyg_to_nx: Edge attribute tensor 'edge_attr' has incorrect shape. "
                           f"Got {pyg_data.edge_attr.shape}, expected ({pyg_data.edge_index.shape[1]}, {expected_edge_attr_dim}). "
                           "This implies the input pyg_data might not have been processed by AIGDataset.process correctly.")
@@ -85,40 +84,43 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, No
 
         for i in range(pyg_data.edge_index.shape[1]):
             src, tgt = pyg_data.edge_index[0, i].item(), pyg_data.edge_index[1, i].item()
-            edge_feature_vector_processed = pyg_data.edge_attr[i].cpu().numpy() # Already NUM_EDGE_FEATURES + 1
+            edge_feature_vector_processed = pyg_data.edge_attr[i].cpu().numpy()
 
             if not (np.isclose(np.sum(edge_feature_vector_processed), 1.0) and
-                    np.all((np.isclose(edge_feature_vector_processed, 0.0)) | (np.isclose(edge_feature_vector_processed, 1.0)))):
-                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE_NON_ONE_HOT" # Should be one-hot
+                    np.all((np.isclose(edge_feature_vector_processed, 0.0)) | (
+                    np.isclose(edge_feature_vector_processed, 1.0)))):
+                edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE_NON_ONE_HOT"
                 warnings.warn(f"Edge ({src}-{tgt}) processed features not one-hot: {edge_feature_vector_processed}")
-
             else:
                 shifted_type_index = np.argmax(edge_feature_vector_processed)
-                if shifted_type_index == 0: # Index 0 means "no specific AIG type" or "generic edge"
+                if shifted_type_index == 0:
                     edge_type_str = "NO_SPECIFIC_AIG_TYPE_OR_ABSENT_EDGE"
-                    warnings.warn(f"Edge ({src}-{tgt}) has type index 0 in its {expected_edge_attr_dim}-dim 'edge_attr'. This implies no specific AIG type.")
+                    # This warning might be frequent if index 0 is a common "generic" edge type post-processing
+                    # warnings.warn(f"Edge ({src}-{tgt}) has type index 0 in its {expected_edge_attr_dim}-dim 'edge_attr'. This implies no specific AIG type.")
                 else:
-                    actual_aig_type_index = shifted_type_index - 1 # Convert back to 0-indexed for actual AIG types
+                    actual_aig_type_index = shifted_type_index - 1
                     if not (0 <= actual_aig_type_index < len(EDGE_TYPE_KEYS)):
                         edge_type_str = "UNKNOWN_TYPE_ATTRIBUTE_BAD_INDEX"
-                        warnings.warn(f"Edge ({src}-{tgt}) decoded to invalid actual_aig_type_index {actual_aig_type_index} from shifted index {shifted_type_index}.")
+                        warnings.warn(
+                            f"Edge ({src}-{tgt}) decoded to invalid actual_aig_type_index {actual_aig_type_index} from shifted index {shifted_type_index}.")
                     else:
                         edge_type_str = EDGE_TYPE_KEYS[actual_aig_type_index]
+
+            # For nx.Graph, add_edge(src, tgt) is the same as add_edge(tgt, src)
+            # If edge_index already contains both (src,tgt) and (tgt,src) with potentially
+            # the same attributes due to symmetrization, nx.Graph handles it by creating one edge.
+            # Attributes are updated if an edge is added that already exists.
             nx_graph.add_edge(src, tgt, type=edge_type_str)
 
-    # Add graph-level attributes if they exist (e.g., from original AIG processing)
-    for attr_name in ['inputs', 'outputs', 'gates', 'name', 'filename']: # Added common graph attributes
+    # Add graph-level attributes
+    for attr_name in ['inputs', 'outputs', 'gates', 'name', 'filename']:
         if hasattr(pyg_data, attr_name):
             attr_val = getattr(pyg_data, attr_name)
-            # Ensure graph attributes are basic types for NetworkX
             if isinstance(attr_val, torch.Tensor) and attr_val.numel() == 1:
                 nx_graph.graph[attr_name] = attr_val.item()
-            elif isinstance(attr_val, (str, int, float, list, dict)): # Allow common serializable types
-                 nx_graph.graph[attr_name] = attr_val
-
-
+            elif isinstance(attr_val, (str, int, float, list, dict)):
+                nx_graph.graph[attr_name] = attr_val
     return nx_graph
-
 
 class AIGDataset(InMemoryDataset):
     def __init__(self, split: str, root: str, cfg, dataset_name: str = 'aig', transform=None, pre_transform=None,

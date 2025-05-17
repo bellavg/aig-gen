@@ -592,7 +592,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         #     self.visualization_tools.visualize(result_path, molecule_list, save_final)
         #     self.print("Done.")
         #
-        # return molecule_list
+        return molecule_list
 
     def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):
         """Samples from zs ~ p(zs | zt). Only used during sampling.
