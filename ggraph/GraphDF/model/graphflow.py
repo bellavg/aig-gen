@@ -190,14 +190,15 @@ class GraphFlowModel(nn.Module):
                         if edge_discrete_id == NO_EDGE_CHANNEL:  # virtual edge
                             valid = True
                         else:  # single/double/triple bond
-                            aig.add_edge(i,  j + start, num2bond_map[edge_discrete_id])
-                            valid = check_validity(aig) #TODO fix to be okay with none type
+                            aig.add_edge(i,  j + start, type=num2bond_map[edge_discrete_id])
+                            valid = check_validity(aig)
                             if valid:
                                 is_connect = True
                                 # print(num2bond_symbol[edge_discrete_id])
                             else:  # backtrack
                                 edge_dis[latent_id] = float('-inf')
                                 aig.remove_edge(i, j + start)
+                                print("edge removed:", i, j + start)
                                 cur_adj_features[0, edge_discrete_id, i, j + start] = 0.0
                                 cur_adj_features[0, edge_discrete_id, j + start, i] = 0.0
                                 total_resamples += 1.0
