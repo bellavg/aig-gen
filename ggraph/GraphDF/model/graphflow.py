@@ -91,16 +91,14 @@ class GraphFlowModel(nn.Module):
                            inp_node_features_one_hot, inp_adj_features_one_hot)
         return z
 
+    # Class attribute to track if detailed failure prints have occurred for the first graph
+    _detailed_failure_printed_for_first_graph = False
+
     def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=20):
         """
         Inverse flow to generate AIGs.
         """
-        # --- Debug Print Control ---
-        generated_graph_count = 0  # To track how many full graphs we've started generating
-        edge_attempt_print_count = 0  # To track edge attempts for sparse printing
-        print_details_frequency = 100  # Print every Nth edge attempt after initial prints
-        max_initial_prints = 3  # Print details for the first N graphs
-        # --- End Debug Print Control ---
+        current_graph_instance_prints_details_on_failure = not GraphFlowModel._detailed_failure_printed_for_first_graph
 
         disconnection_streak = 0
         current_device = self.node_base_log_probs.device
@@ -112,17 +110,17 @@ class GraphFlowModel(nn.Module):
             cur_node_features = torch.zeros([1, max_atoms, self.node_dim], device=current_device)
             cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms], device=current_device)
 
-            node_features_each_iter_backup = cur_node_features.clone()
-            adj_features_each_iter_backup = cur_adj_features.clone()
+            # graph_backup now stores the latest version of 'aig' that was considered good (connected)
+            # or just the current 'aig' if we are allowing disconnected parts to extend.
+            graph_backup = None
+            # We won't use node/adj_features_each_iter_backup for reverting features,
+            # as 'aig' will be the single source of truth for graph structure being built.
 
             aig = nx.Graph()
-            graph_backup = None
 
             is_continue = True
             edge_idx_for_sampling = 0
             total_resamples = 0
-
-            generated_graph_count += 1  # Increment for each call to generate
 
             for i in range(max_atoms):
                 if not is_continue:
@@ -149,24 +147,39 @@ class GraphFlowModel(nn.Module):
                     cur_node_features, cur_adj_features, latent_node_sample, mode=0).view(-1)
 
                 node_feature_id = torch.argmax(resolved_node_type_latent).item()
-                cur_node_features[0, i, node_feature_id] = 1.0
+                cur_node_features[0, i, node_feature_id] = 1.0  # Update feature matrix for model
+                # Self-loops in adj_features usually marked as NO_EDGE or a special type.
+                # This helps the model understand node i's type is now known.
                 cur_adj_features[0, NO_EDGE_CHANNEL, i, i] = 1.0
 
-                node_type_str = num2atom_map[node_feature_id]
-                aig.add_node(i, type=node_type_str)
+                node_type_str = num2atom_map.get(node_feature_id, f"UNKNOWN_NODE_ID_{node_feature_id}")
+                aig.add_node(i, type=node_type_str)  # Add node i to our NetworkX graph object
 
                 if i == 0:
-                    is_connect = True
+                    is_connect = True  # First node is considered "connected" to itself/start
                 else:
-                    is_connect = False
+                    is_connect = False  # Assume node i is not connected until an edge is formed
 
                 for j_offset in range(edge_total_to_consider):
                     actual_source_node_idx = source_start_offset + j_offset
+
+                    # Ensure actual_source_node_idx is valid and exists (should be < i)
+                    if actual_source_node_idx >= i or actual_source_node_idx < 0:
+                        # This case should not happen with correct loop bounds for j_offset
+                        warnings.warn(
+                            f"Invalid actual_source_node_idx {actual_source_node_idx} for target node {i}. Skipping edge.")
+                        edge_idx_for_sampling += 1  # Still consume an edge logit
+                        continue
+                    if not aig.has_node(actual_source_node_idx):
+                        # This would be very unusual if nodes are added sequentially 0 to i-1
+                        warnings.warn(
+                            f"Source node {actual_source_node_idx} does not exist in AIG when trying to connect to target {i}. Skipping edge.")
+                        edge_idx_for_sampling += 1
+                        continue
+
                     valid_edge_found = False
                     resample_edge_count = 0
                     current_edge_logits = self.edge_base_log_probs[edge_idx_for_sampling].to(current_device).clone()
-
-                    edge_attempt_print_count += 1  # Increment for every edge consideration
 
                     while not valid_edge_found:
                         if resample_edge_count > 100 or torch.isneginf(current_edge_logits).all():
@@ -189,82 +202,99 @@ class GraphFlowModel(nn.Module):
                             ).view(-1)
                             edge_discrete_id = torch.argmax(resolved_edge_type_latent).item()
 
+                        # Update current feature matrix (for model's next step)
                         cur_adj_features[0, edge_discrete_id, i, actual_source_node_idx] = 1.0
                         cur_adj_features[0, edge_discrete_id, actual_source_node_idx, i] = 1.0
+
+                        current_edge_type_str = num2bond_map.get(edge_discrete_id,
+                                                                 f"UNKNOWN_EDGE_ID_{edge_discrete_id}")
 
                         if edge_discrete_id == NO_EDGE_CHANNEL:
                             valid_edge_found = True
                         else:
-                            aig.add_edge(i, actual_source_node_idx, type=num2bond_map[edge_discrete_id])
+                            # Add edge to NetworkX graph object
+                            aig.add_edge(i, actual_source_node_idx, type=current_edge_type_str)
 
-                            # --- Conditional Debug Print ---
-                            should_print_details = (generated_graph_count <= max_initial_prints) or \
-                                                   (edge_attempt_print_count % print_details_frequency == 0)
-                            if should_print_details:
-                                print(
-                                    f"\n--- [Graph {generated_graph_count}, EdgeAttempt {edge_attempt_print_count}] Attempting edge ({actual_source_node_idx} -- {i}) type {num2bond_map[edge_discrete_id]} ---")
-                                display_graph_details(aig,
-                                                      f"Graph state BEFORE check_validity for edge ({actual_source_node_idx}--{i})")
-                            # --- End Conditional Debug Print ---
-
-                            is_structurally_valid = check_validity(aig)
+                            is_structurally_valid = check_validity(aig)  # Using the less strict check_validity
 
                             if is_structurally_valid:
                                 valid_edge_found = True
-                                is_connect = True
+                                is_connect = True  # An actual edge was formed connecting node i
                             else:
-                                if should_print_details:
+                                # --- Conditional Debug Print on Failure ---
+                                if current_graph_instance_prints_details_on_failure:
                                     print(
-                                        f"--- [Graph {generated_graph_count}, EdgeAttempt {edge_attempt_print_count}] check_validity FAILED for edge ({actual_source_node_idx} -- {i}) ---")
+                                        f"\n--- [First Failing Graph Detail] Attempting edge ({actual_source_node_idx} -- {i}) type {current_edge_type_str} ---")
                                     display_graph_details(aig,
-                                                          f"Graph state AFTER FAILED check_validity for edge ({actual_source_node_idx}--{i}) (before removal)")
+                                                          f"Graph state BEFORE check_validity for edge ({actual_source_node_idx}--{i}) that FAILED")
+                                    print(
+                                        f"--- [First Failing Graph Detail] check_validity FAILED for edge ({actual_source_node_idx} -- {i}) ---")
+                                # --- End Conditional Debug Print ---
 
-                                aig.remove_edge(i, actual_source_node_idx)
-                                # print(f"Edge ({actual_source_node_idx} -- {i}) type {num2bond_map[edge_discrete_id]} removed due to invalidity.") # Less frequent print
+                                aig.remove_edge(i, actual_source_node_idx)  # Remove from NetworkX graph
 
+                                # Revert adj_features for this failed attempt
                                 cur_adj_features[0, edge_discrete_id, i, actual_source_node_idx] = 0.0
                                 cur_adj_features[0, edge_discrete_id, actual_source_node_idx, i] = 0.0
+                                # Ensure NO_EDGE is marked for this pair if an explicit edge failed (optional, depends on model needs)
+                                # cur_adj_features[0, NO_EDGE_CHANNEL, i, actual_source_node_idx] = 1.0
+                                # cur_adj_features[0, NO_EDGE_CHANNEL, actual_source_node_idx, i] = 1.0
 
                                 total_resamples += 1.0
                                 resample_edge_count += 1
                                 current_edge_logits[edge_discrete_id] = -float('inf')
 
-                                if should_print_details:
-                                    display_graph_details(aig,
-                                                          f"Graph state AFTER FAILED check_validity AND edge ({actual_source_node_idx}--{i}) REMOVAL")
+                                if current_graph_instance_prints_details_on_failure:
+                                    # display_graph_details(aig, f"Graph state AFTER FAILED check_validity AND edge ({actual_source_node_idx}--{i}) REMOVAL")
+                                    GraphFlowModel._detailed_failure_printed_for_first_graph = True
                     edge_idx_for_sampling += 1
 
+                    # After trying to connect node i to all its potential sources:
                 if is_connect:
                     is_continue = True
+                    # `aig` now contains node `i` and its successful connections.
+                    # `graph_backup` will store this state as the last known "good" state.
                     graph_backup = aig.copy()
-                    node_features_each_iter_backup = cur_node_features.clone()
-                    adj_features_each_iter_backup = cur_adj_features.clone()
                     disconnection_streak = 0
                 elif not is_connect and disconnection_streak < disconnection_patience:
-                    is_continue = True
-                    if graph_backup is None and i > 0:
-                        graph_backup = aig.copy()
-                        node_features_each_iter_backup = cur_node_features.clone()
-                        adj_features_each_iter_backup = cur_adj_features.clone()
-                    elif graph_backup is not None:
-                        aig = graph_backup.copy()
-                        cur_node_features = node_features_each_iter_backup.clone()
-                        cur_adj_features = adj_features_each_iter_backup.clone()
+                    # Node `i` was added but failed to connect to any previous nodes.
+                    # We want to KEEP node `i` in `aig`.
+                    is_continue = True  # Continue trying to add more nodes, hoping they connect to this segment.
+                    # `aig` still contains node `i`.
+                    # `graph_backup` remains the last state where a node successfully connected.
+                    # If no node has connected yet (e.g. i=1, node 1 fails to connect to node 0),
+                    # graph_backup might still be None or the state of node 0.
+                    # We can choose to update graph_backup to include the disconnected 'i' if we want to keep it no matter what.
+                    # For now, graph_backup holds the largest "successfully extended" graph.
+                    # 'aig' holds the current attempt, including potentially isolated node 'i'.
+                    if graph_backup is None:  # If this is the first node or no backup was ever made
+                        graph_backup = aig.copy()  # Consider the current state (with isolated i) as a baseline
+
                     disconnection_streak += 1
-                else:
-                    is_continue = False
-                    if graph_backup is not None:
-                        aig = graph_backup.copy()
-                        cur_node_features = node_features_each_iter_backup.clone()
-                        cur_adj_features = adj_features_each_iter_backup.clone()
+                else:  # Node `i` is disconnected, and patience ran out.
+                    is_continue = False  # Stop adding NEW nodes after this one.
+                    # We KEEP node `i` in `aig`. `aig` is NOT reverted.
+                    # `graph_backup` remains the last state where a node successfully connected.
+                    # If no node ever connected, graph_backup might be the initial node or None.
+                    # If we want the final graph to include this persistently disconnected node `i`:
+                    # We could update graph_backup here if we decide this is the new "final" state.
+                    # For now, `aig` holds this state.
+                    if graph_backup is None:
+                        graph_backup = aig.copy()
 
-            final_graph_nx = graph_backup if graph_backup is not None else aig
-            if final_graph_nx is None or final_graph_nx.number_of_nodes() == 0:
-                warnings.warn("Generated graph is empty or None.")
-                return None, 0, 0
+            # --- End of main loop for adding nodes ---
 
-            num_actual_nodes_in_final_nx = final_graph_nx.number_of_nodes()  # Before final processing
+            # Determine the final graph to return
+            # If we always want to return what was built in `aig`, even if disconnected at the end:
+            final_graph_nx = aig
+            if final_graph_nx is None or final_graph_nx.number_of_nodes() == 0:  # Should not be None if aig was used
+                warnings.warn("Generated graph `aig` is empty or None at the end.")
+                # Fallback if aig somehow became None; prefer graph_backup if it exists
+                final_graph_nx = graph_backup if graph_backup is not None else nx.Graph()
+                if final_graph_nx.number_of_nodes() == 0:
+                    return None, 0, 0
 
+            # Final processing: convert to directed, remove padding (if any was modeled)
             final_aig_directed = to_directed_aig(final_graph_nx)
             if final_aig_directed:
                 final_aig_processed = remove_padding_nodes(final_aig_directed)
@@ -272,7 +302,7 @@ class GraphFlowModel(nn.Module):
                     final_aig_processed = final_aig_directed
             else:
                 warnings.warn(f"to_directed_aig failed for generated graph.")
-                final_aig_processed = final_graph_nx
+                final_aig_processed = final_graph_nx  # Fallback to the (likely undirected) graph
 
             num_nodes_after_processing = final_aig_processed.number_of_nodes() if final_aig_processed else 0
 
@@ -292,19 +322,17 @@ class GraphFlowModel(nn.Module):
             tuple: Contains node_masks_all, adj_masks_all, link_prediction_index, flow_core_edge_masks.
         """
         num_edge_steps = 0
-        if max_node_unroll <= 0:  # Handle case with no nodes
+        if max_node_unroll <= 0:
             num_edge_steps = 0
-        elif max_edge_unroll >= max_node_unroll - 1:  # If edge_unroll is large enough to connect to all previous nodes
+        elif max_edge_unroll >= max_node_unroll - 1:
             num_edge_steps = int((max_node_unroll - 1) * max_node_unroll / 2) if max_node_unroll > 0 else 0
-        else:  # Standard case
+        else:
             num_edge_steps = int(
-                (max_edge_unroll - 1) * max_edge_unroll / 2 +  # Edges for the first 'max_edge_unroll' nodes
-                (max_node_unroll - max_edge_unroll) * max_edge_unroll  # Edges for the remaining nodes
+                (max_edge_unroll - 1) * max_edge_unroll / 2 +
+                (max_node_unroll - max_edge_unroll) * max_edge_unroll
             )
-            if max_edge_unroll == 0:  # if edge_unroll is 0, means only first part is 0
+            if max_edge_unroll == 0:
                 num_edge_steps = (max_node_unroll - max_edge_unroll) * max_edge_unroll
-
-        num_total_steps = max_node_unroll + num_edge_steps
 
         node_masks_for_node_step = torch.zeros([max_node_unroll, max_node_unroll]).bool()
         adj_masks_for_node_step = torch.zeros([max_node_unroll, max_node_unroll, max_node_unroll]).bool()
@@ -313,7 +341,7 @@ class GraphFlowModel(nn.Module):
             node_masks_for_edge_step = torch.zeros([num_edge_steps, max_node_unroll]).bool()
             adj_masks_for_edge_step = torch.zeros([num_edge_steps, max_node_unroll, max_node_unroll]).bool()
             link_prediction_index = torch.zeros([num_edge_steps, 2]).long()
-        else:  # Handle case where no edges are generated (e.g. max_node_unroll = 1 or 0)
+        else:
             node_masks_for_edge_step = torch.empty([0, max_node_unroll]).bool()
             adj_masks_for_edge_step = torch.empty([0, max_node_unroll, max_node_unroll]).bool()
             link_prediction_index = torch.empty([0, 2]).long()
@@ -331,15 +359,14 @@ class GraphFlowModel(nn.Module):
 
             num_sources_to_connect_to = 0
             source_start_node_idx = 0
-            if i < max_edge_unroll:
+            if i == 0:
+                num_sources_to_connect_to = 0
+            elif i < max_edge_unroll:
                 source_start_node_idx = 0
                 num_sources_to_connect_to = i
             else:
                 source_start_node_idx = i - max_edge_unroll
                 num_sources_to_connect_to = max_edge_unroll
-
-            if i == 0 and num_sources_to_connect_to > 0:  # First node cannot connect to previous nodes
-                num_sources_to_connect_to = 0
 
             for j_offset in range(num_sources_to_connect_to):
                 actual_source_node = source_start_node_idx + j_offset
@@ -347,6 +374,7 @@ class GraphFlowModel(nn.Module):
                     node_masks_for_edge_step[current_edge_step_idx, :i + 1] = 1
                     adj_masks_for_edge_step[current_edge_step_idx, :i, :i] = 1
                     adj_masks_for_edge_step[current_edge_step_idx, i, i] = 1
+
                     for k_prev_source_offset in range(j_offset):
                         prev_source_node = source_start_node_idx + k_prev_source_offset
                         adj_masks_for_edge_step[current_edge_step_idx, i, prev_source_node] = 1
@@ -360,7 +388,8 @@ class GraphFlowModel(nn.Module):
         if not (current_node_step_idx == max_node_unroll):
             warnings.warn(f"Node mask count mismatch: expected {max_node_unroll}, got {current_node_step_idx}")
         if not (current_edge_step_idx == num_edge_steps):
-            warnings.warn(f"Edge mask count mismatch: expected {num_edge_steps}, got {current_edge_step_idx}")
+            warnings.warn(
+                f"Edge mask count mismatch: expected {num_edge_steps}, got {current_edge_step_idx}. This can happen if max_node_unroll is small (e.g., 0 or 1).")
 
         node_masks_all = torch.cat((node_masks_for_node_step, node_masks_for_edge_step), dim=0)
         adj_masks_all = torch.cat((adj_masks_for_node_step, adj_masks_for_edge_step), dim=0)
@@ -385,7 +414,7 @@ class GraphFlowModel(nn.Module):
         num_node_variables = self.max_size
         num_edge_variables = self.edge_base_log_probs.shape[0]
 
-        if (num_node_variables + num_edge_variables) == 0:  # Avoid division by zero if no variables
-            return -torch.tensor(0.0, device=mean_ll.device) if mean_ll == 0 else -mean_ll  # Or handle as error
+        if (num_node_variables + num_edge_variables) == 0:
+            return -torch.tensor(0.0, device=mean_ll.device) if mean_ll == 0 else -mean_ll
 
         return -(mean_ll / (num_node_variables + num_edge_variables))
