@@ -69,37 +69,48 @@ class AIGTransformAndPad(BaseTransform):
         Assumes input data.x has shape [num_actual_nodes, num_explicit_node_features]
         and data.edge_attr has shape [num_edges, num_explicit_edge_features].
         """
+        graph_id_for_error = getattr(data, 'graph_name_original', 'Unknown')
         num_actual_nodes = data.num_nodes.item()
 
         # 1. Pad Node Features (data.x)
-        # New x shape: [max_nodes, total_node_feature_dim]
+        # Expected new_x shape: [max_nodes, total_node_feature_dim]
         new_x = torch.zeros((self.max_nodes, self.total_node_feature_dim), dtype=torch.float)
 
         # Initialize all to padding type by default
         if self.padding_node_channel_idx < self.total_node_feature_dim:
             new_x[:, self.padding_node_channel_idx] = 1.0
+        else:
+            warnings.warn(f"Graph {graph_id_for_error}: padding_node_channel_idx ({self.padding_node_channel_idx}) "
+                          f"is out of bounds for total_node_feature_dim ({self.total_node_feature_dim}). Padding type not set.")
 
         if num_actual_nodes > 0:
-            if data.x.shape[0] != num_actual_nodes:
+            if not hasattr(data, 'x') or data.x is None:
                 warnings.warn(
-                    f"data.x row count ({data.x.shape[0]}) does not match data.num_nodes ({num_actual_nodes}). Graph: {getattr(data, 'graph_name_original', 'Unknown')}")
+                    f"Graph {graph_id_for_error}: data.x is missing or None, but num_actual_nodes is {num_actual_nodes}. Cannot populate node features.")
+            else:
+                if data.x.shape[0] != num_actual_nodes:
+                    warnings.warn(
+                        f"Graph {graph_id_for_error}: data.x row count ({data.x.shape[0]}) does not match data.num_nodes ({num_actual_nodes}).")
 
-            if data.x.shape[1] != self.num_explicit_node_features:
-                warnings.warn(f"Input data.x feature dimension ({data.x.shape[1]}) does not match "
-                              f"configured num_explicit_node_features ({self.num_explicit_node_features}). Graph: {getattr(data, 'graph_name_original', 'Unknown')}")
-                # Handle mismatch if possible, or this might lead to errors
-                # For now, assume it will be sliced or cause an error if not matching
+                if data.x.shape[1] != self.num_explicit_node_features:
+                    warnings.warn(
+                        f"Graph {graph_id_for_error}: Input data.x feature dimension ({data.x.shape[1]}) does not match "
+                        f"configured num_explicit_node_features ({self.num_explicit_node_features}). Slicing data.x.")
 
-            # Fill in actual node features
-            # Slice data.x to ensure it matches num_explicit_node_features if it's wider for some reason
-            new_x[:num_actual_nodes, :self.num_explicit_node_features] = data.x[:num_actual_nodes,
-                                                                         :self.num_explicit_node_features]
-            # Ensure actual nodes are not marked as padding type
-            if self.padding_node_channel_idx < self.total_node_feature_dim:
-                new_x[:num_actual_nodes, self.padding_node_channel_idx] = 0.0
+                # Fill in actual node features
+                # Slice data.x to ensure it matches num_explicit_node_features if it's wider for some reason
+                # and ensure we don't try to read more nodes than available in data.x
+                nodes_to_copy = min(num_actual_nodes, data.x.shape[0])
+                features_to_copy = min(self.num_explicit_node_features, data.x.shape[1])
+
+                new_x[:nodes_to_copy, :features_to_copy] = data.x[:nodes_to_copy, :features_to_copy]
+
+                # Ensure actual nodes are not marked as padding type
+                if self.padding_node_channel_idx < self.total_node_feature_dim:
+                    new_x[:nodes_to_copy, self.padding_node_channel_idx] = 0.0
 
         # 2. Create Padded Adjacency Matrix (new_adj)
-        # Shape: [total_adj_channels, max_nodes, max_nodes]
+        # Expected new_adj shape: [total_adj_channels, max_nodes, max_nodes]
         new_adj = torch.zeros((self.total_adj_channels, self.max_nodes, self.max_nodes), dtype=torch.float)
 
         # Initialize "no edge" channel (NO_EDGE_CHANNEL)
@@ -108,52 +119,62 @@ class AIGTransformAndPad(BaseTransform):
                 for j in range(self.max_nodes):
                     if i != j:  # No self-loops for "no edge" type
                         new_adj[self.no_edge_channel_idx, i, j] = 1.0
+        else:
+            warnings.warn(f"Graph {graph_id_for_error}: no_edge_channel_idx ({self.no_edge_channel_idx}) "
+                          f"is out of bounds for total_adj_channels ({self.total_adj_channels}). 'No edge' channel not set.")
+
         # Diagonals of all channels (including no_edge_channel) remain 0.
 
         # Populate explicit edge channels using data.edge_index and data.edge_attr
-        # data.edge_index: [2, num_undirected_actual_edges]
-        # data.edge_attr: [num_undirected_actual_edges, num_explicit_edge_features] (one-hot)
         if hasattr(data, 'edge_index') and data.edge_index is not None and data.edge_index.numel() > 0:
             if not hasattr(data, 'edge_attr') or data.edge_attr is None:
                 warnings.warn(
-                    f"Graph {getattr(data, 'graph_name_original', 'Unknown')} has edge_index but no edge_attr. "
+                    f"Graph {graph_id_for_error} has edge_index but no edge_attr. "
                     "Cannot determine explicit edge types for the new adjacency matrix.")
+            elif data.edge_attr.shape[0] != data.edge_index.shape[1]:
+                warnings.warn(
+                    f"Graph {graph_id_for_error}: data.edge_attr row count ({data.edge_attr.shape[0]}) "
+                    f"does not match data.edge_index column count ({data.edge_index.shape[1]}). Edge attributes may be misaligned."
+                )
             elif data.edge_attr.shape[1] != self.num_explicit_edge_features:
                 warnings.warn(
-                    f"Graph {getattr(data, 'graph_name_original', 'Unknown')} edge_attr feature dimension ({data.edge_attr.shape[1]}) "
+                    f"Graph {graph_id_for_error} edge_attr feature dimension ({data.edge_attr.shape[1]}) "
                     f"does not match configured num_explicit_edge_features ({self.num_explicit_edge_features}). "
                     "Cannot reliably populate new_adj from edge_attr.")
             else:
-                for k in range(data.edge_index.size(1)):  # Iterate over each directed edge in the undirected pair
+                for k in range(data.edge_index.size(1)):  # Iterate over each directed edge
                     u, v = data.edge_index[0, k].item(), data.edge_index[1, k].item()
 
-                    # Ensure u and v are within the bounds of actual nodes for this graph
-                    if u >= num_actual_nodes or v >= num_actual_nodes:
+                    if not (0 <= u < num_actual_nodes and 0 <= v < num_actual_nodes):
                         warnings.warn(
-                            f"Edge index ({u},{v}) in graph {getattr(data, 'graph_name_original', 'Unknown')} "
+                            f"Graph {graph_id_for_error}: Edge index ({u},{v}) "
                             f"is out of bounds for actual nodes ({num_actual_nodes}). Skipping this edge for new_adj.")
                         continue
 
-                    edge_features_one_hot = data.edge_attr[k]  # Shape: [num_explicit_edge_features]
+                    edge_features_one_hot = data.edge_attr[k]
 
                     try:
-                        # Determine the channel for this explicit edge type
                         explicit_channel_idx = torch.argmax(edge_features_one_hot).item()
                         if not (0 <= explicit_channel_idx < self.num_explicit_edge_features):
                             warnings.warn(
-                                f"Invalid explicit channel index {explicit_channel_idx} derived from edge_attr for edge ({u},{v}). Skipping.")
+                                f"Graph {graph_id_for_error}: Invalid explicit channel index {explicit_channel_idx} "
+                                f"derived from edge_attr for edge ({u},{v}). Skipping.")
                             continue
 
-                        # Set the explicit edge channel
-                        new_adj[explicit_channel_idx, u, v] = 1.0
-                        # new_adj is made symmetric by processing both (u,v) and (v,u) from edge_index
+                        if not (
+                                0 <= u < self.max_nodes and 0 <= v < self.max_nodes):  # Check against max_nodes for new_adj
+                            warnings.warn(
+                                f"Graph {graph_id_for_error}: Edge index ({u},{v}) "
+                                f"is out of bounds for new_adj (max_nodes: {self.max_nodes}). This should not happen if u,v < num_actual_nodes <= max_nodes. Skipping."
+                            )
+                            continue
 
-                        # Mark this edge as NOT a "no edge"
+                        new_adj[explicit_channel_idx, u, v] = 1.0
                         if self.no_edge_channel_idx < self.total_adj_channels:
                             new_adj[self.no_edge_channel_idx, u, v] = 0.0
                     except Exception as e:
                         warnings.warn(
-                            f"Error processing edge_attr for edge ({u},{v}) in graph {getattr(data, 'graph_name_original', 'Unknown')}: {e}. Skipping edge for new_adj.")
+                            f"Graph {graph_id_for_error}: Error processing edge_attr for edge ({u},{v}): {e}. Skipping edge for new_adj.")
                         continue
 
         # Create the transformed Data object
@@ -162,12 +183,17 @@ class AIGTransformAndPad(BaseTransform):
         transformed_data.adj = new_adj
         transformed_data.num_nodes = data.num_nodes  # Preserve actual number of nodes
 
-        # Pass through original edge_index and edge_attr if they exist and are needed by some models
-        if hasattr(data, 'edge_index'): transformed_data.edge_index = data.edge_index
-        if hasattr(data, 'edge_attr'): transformed_data.edge_attr = data.edge_attr
+        # --- ADDING ASSERTIONS HERE ---
+        expected_x_shape = (self.max_nodes, self.total_node_feature_dim)
+        assert transformed_data.x.shape == expected_x_shape, \
+            f"Graph {graph_id_for_error}: transformed_data.x shape is {transformed_data.x.shape}, expected {expected_x_shape}"
+
+        expected_adj_shape = (self.total_adj_channels, self.max_nodes, self.max_nodes)
+        assert transformed_data.adj.shape == expected_adj_shape, \
+            f"Graph {graph_id_for_error}: transformed_data.adj shape is {transformed_data.adj.shape}, expected {expected_adj_shape}"
+        # --- END OF ASSERTIONS ---
 
         # Pass through any other attributes from the original Data object
-        # MODIFICATION: Call .keys() as it's a method
         for key in data.keys():
             if key not in ['x', 'adj', 'num_nodes', 'edge_index', 'edge_attr']:
                 transformed_data[key] = data[key]
@@ -184,7 +210,7 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
                  transform: Optional[callable] = None,
                  pre_transform: Optional[callable] = None,
                  pre_filter: Optional[callable] = None,
-                 processed_file_prefix: str = "padded_aig_"):  # Added "aig" to prefix
+                 processed_file_prefix: str = "padded_aig_"):
 
         self.split = split
         self.raw_pt_input_path = osp.join(raw_pt_input_dir, raw_pt_input_filename)
@@ -194,18 +220,20 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         super().__init__(root, transform, pre_transform, pre_filter)
 
         try:
-            # InMemoryDataset's __init__ calls self.load() if processed files exist.
-            # self.load() attempts to load self.processed_paths[0]
-            # Load with weights_only=False if you trust the source
             loaded_content = torch.load(self.processed_paths[0], weights_only=False)
             if isinstance(loaded_content, tuple) and len(loaded_content) == 3:
-                 self.data, self.slices, self.graph_identifiers = loaded_content
-                 print(f"Successfully loaded processed & padded '{self.split}' AIG data from: {self.processed_paths[0]}")
-            elif isinstance(loaded_content, tuple) and len(loaded_content) == 2: # Older format without identifiers
-                 self.data, self.slices = loaded_content
-                 num_graphs = self.slices[list(self.slices.keys())[0]].size(0) - 1 if self.slices and self.slices.keys() else 0
-                 self.graph_identifiers = [f"graph_{i}" for i in range(num_graphs)]
-                 warnings.warn(f"Loaded older format (data, slices) from {self.processed_paths[0]}; graph identifiers are dummies.")
+                self.data, self.slices, self.graph_identifiers = loaded_content
+                print(f"Successfully loaded processed & padded '{self.split}' AIG data from: {self.processed_paths[0]}")
+            elif isinstance(loaded_content, tuple) and len(loaded_content) == 2:
+                self.data, self.slices = loaded_content
+                num_graphs = 0
+                if self.slices and list(self.slices.keys()):  # Check if slices is not empty
+                    slice_key = list(self.slices.keys())[0]
+                    if self.slices[slice_key].numel() > 0:  # Check if the slice tensor is not empty
+                        num_graphs = self.slices[slice_key].size(0) - 1
+                self.graph_identifiers = [f"graph_{i}" for i in range(num_graphs)]
+                warnings.warn(
+                    f"Loaded older format (data, slices) from {self.processed_paths[0]}; graph identifiers are dummies.")
             else:
                 raise TypeError(f"Loaded content from {self.processed_paths[0]} is not a recognized tuple format.")
 
@@ -217,20 +245,16 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
                 f"Could not load data from {self.processed_paths[0]} with weights_only=False: {e}. "
                 "If this is the first run, processing will be attempted. Otherwise, the file might be corrupted or incompatible.")
 
-
     @property
     def raw_file_names(self) -> List[str]:
-        # The "raw" file for this dataset is the pre-existing .pt file (e.g., aig_undirected.pt)
         return [osp.basename(self.raw_pt_input_path)]
 
     @property
     def raw_dir(self) -> str:
-        # The directory where the input .pt file is located
         return osp.dirname(self.raw_pt_input_path)
 
     @property
     def processed_file_names(self) -> str:
-        # Name of the file this dataset will create (e.g., padded_aig_train.pt)
         return f'{self.processed_file_prefix}{self.split}.pt'
 
     def download(self):
@@ -242,11 +266,10 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         print(
             f"Processing for '{self.split}' split: Loading from '{self.raw_pt_input_path}' and applying transformations...")
 
-        if not osp.exists(self.raw_pt_input_path):  # Double check before loading
+        if not osp.exists(self.raw_pt_input_path):
             raise FileNotFoundError(f"Cannot process: Raw input file {self.raw_pt_input_path} not found.")
 
         try:
-            # MODIFICATION: Set weights_only=False
             unpadded_data_list: List[Data] = torch.load(self.raw_pt_input_path, weights_only=False)
             if not isinstance(unpadded_data_list, list):
                 raise TypeError(f"Expected a list of Data objects from {self.raw_pt_input_path}, "
@@ -254,10 +277,9 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
         except Exception as e:
             raise RuntimeError(f"Error loading unpadded data from {self.raw_pt_input_path}: {e}")
 
-        # Instantiate the transformer using imported config values
         transformer = AIGTransformAndPad(
             max_nodes=MAX_NODE_COUNT,
-            num_explicit_node_features=NUM_EXPLICIT_NODE_FEATURES, # Corrected argument name
+            num_explicit_node_features=NUM_EXPLICIT_NODE_FEATURES,
             padding_node_channel_idx=PADDING_NODE_CHANNEL,
             total_node_feature_dim=NUM_NODE_ATTRIBUTES,
             num_explicit_edge_features=NUM_EXPLICIT_EDGE_FEATURES,
@@ -273,36 +295,38 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
                 warnings.warn(f"Item {i} in {self.raw_pt_input_path} is not a PyG Data object. Skipping.")
                 continue
 
-            # Important: Ensure data_obj.num_nodes is present and correct before transforming
+            graph_id_for_error_process = getattr(data_obj, 'graph_name_original', f"{self.split}_raw_graph_{i}")
+
             if not hasattr(data_obj, 'num_nodes') or data_obj.num_nodes is None:
-                warnings.warn(f"Data object {i} (name: {getattr(data_obj, 'graph_name_original', 'Unknown')}) "
+                warnings.warn(f"Data object {graph_id_for_error_process} "
                               "is missing 'num_nodes' attribute. Attempting to infer from data.x.shape[0].")
                 if hasattr(data_obj, 'x') and data_obj.x is not None:
                     data_obj.num_nodes = torch.tensor(data_obj.x.shape[0], dtype=torch.long)
                 else:
-                    warnings.warn(f"Cannot infer num_nodes for data object {i}. Skipping.")
+                    warnings.warn(f"Cannot infer num_nodes for data object {graph_id_for_error_process}. Skipping.")
                     continue
 
+            # Ensure num_nodes is not greater than max_nodes before transformation
+            if data_obj.num_nodes.item() > MAX_NODE_COUNT:
+                warnings.warn(f"Graph {graph_id_for_error_process} has {data_obj.num_nodes.item()} nodes, "
+                              f"which exceeds MAX_NODE_COUNT ({MAX_NODE_COUNT}). Skipping this graph.")
+                continue
+
             transformed_obj = transformer(data_obj)
-            if transformed_obj:  # Transformer might return None if input data is problematic
+            if transformed_obj:
                 transformed_data_list.append(transformed_obj)
                 identifier = getattr(data_obj, 'graph_name_original', f"{self.split}_graph_{i}")
                 current_graph_identifiers.append(identifier)
-                # Ensure the transformed object also carries the identifier if needed later by get()
-                if hasattr(transformed_obj, 'graph_name_original') and not transformed_obj.graph_name_original: # Check if attribute exists and is empty
+                if hasattr(transformed_obj, 'graph_name_original') and not transformed_obj.graph_name_original:
                     transformed_obj.graph_name_original = identifier
 
-
         if self.pre_filter is not None:
-            # Apply pre_filter to the transformed data
-            # Ensure identifiers list is filtered along with data_list
             filtered_indices = [i for i, data in enumerate(transformed_data_list) if self.pre_filter(data)]
             transformed_data_list = [transformed_data_list[i] for i in filtered_indices]
             current_graph_identifiers = [current_graph_identifiers[i] for i in filtered_indices]
             print(f"Applied pre_filter, {len(transformed_data_list)} graphs remaining for {self.split}.")
 
         if self.pre_transform is not None:
-            # Apply pre_transform to the already transformed (padded) data
             print(f"Applying pre_transform for {self.split}...")
             transformed_data_list = [self.pre_transform(data) for data in
                                      tqdm(transformed_data_list, desc="Pre-transforming (on padded data)")]
@@ -311,17 +335,10 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
             warnings.warn(
                 f"No data to save for split '{self.split}' after transformation. Saving empty dataset structure.")
 
-        # Collate data_list into PyG's internal storage format
-        # This creates self.data and self.slices for InMemoryDataset
         data, slices = self.collate(transformed_data_list)
-
-        # Save the processed (padded, collated) data and identifiers
-        # The path is self.processed_paths[0]
         torch.save((data, slices, current_graph_identifiers), self.processed_paths[0])
         print(
             f"Finished processing for '{self.split}'. Saved {len(transformed_data_list)} graphs to {self.processed_paths[0]}.")
-        # self.graph_identifiers is loaded in __init__ from the saved file,
-        # so no need to set it here directly after saving. It will be set on next load.
 
     def get(self, idx: int) -> Data:
         data = super().get(idx)
@@ -333,7 +350,6 @@ class AIGPaddedInMemoryDataset(InMemoryDataset):
 
     def len(self) -> int:
         if not hasattr(self, 'slices') or not self.slices: return 0
-        # Check if slices dictionary is empty
         if not self.slices: return 0
         slice_key = next(iter(self.slices.keys()), None)
         return self.slices[slice_key].size(0) - 1 if slice_key and self.slices[slice_key].numel() > 0 else 0

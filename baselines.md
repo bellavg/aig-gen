@@ -2,6 +2,16 @@
 
 Baselines to test
 
+|           |               |    |          |              |          |
+|-----------|---------------|----|----------|--------------|----------|
+| Graph-RNN | Not Running   | NA | no test  |              |          |
+| DiGress   | Running       | NA | Untested |              |          |
+| DeFoG     | trying to run | E  | untested |              |          |
+| Graph-DF  | trying to run | E  | untested | fix generate | fix eval |
+| LayerDAG  | trying to run | E  | untested |              |          |
+
+
+
 - Graph-RNN - NA - Untested
 - DiGress - Running - Untested
 - DeFoG - Trying to train - Untested

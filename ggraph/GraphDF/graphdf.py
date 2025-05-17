@@ -117,8 +117,9 @@ class GraphDF(Generator):
                 optimizer.zero_grad()
 
                 # Move data to the same device as the model
-                inp_node_features = data_batch.x.to(model_device)
-                inp_adj_features = data_batch.adj.to(model_device)
+                inp_node_features = data_batch.x.to(model_device) # Size B, N, Node_dim = 5
+
+                inp_adj_features = data_batch.adj.to(model_device) #Size, B, edge_dim, N, N edg_dim = 3
 
                 # Forward pass
                 out_z = self.model(inp_node_features, inp_adj_features)
