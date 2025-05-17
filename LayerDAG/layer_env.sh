@@ -8,7 +8,7 @@
 
 # --- Environment Setup ---
 echo "Loading base environment module..."
-module load 2024 # This module provides Python and potentially CUDA runtime
+module load 2022 # This module provides Python and potentially CUDA runtime
 module load CUDA/11.6.0
 conda create -n LayerDAG python=3.10 -y
 conda activate LayerDAG
