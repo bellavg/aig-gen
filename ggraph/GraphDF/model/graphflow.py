@@ -6,8 +6,8 @@ from .disgraphaf import DisGraphAF  # Assuming this is in the same directory
 from aig_config import (
     NUM2EDGETYPE,
     NUM2NODETYPE,
-    NO_EDGE_CHANNEL,
-    check_validity,
+    NO_EDGE_CHANNEL,  # Still used for explicit "no edge" choices
+    check_interim_validity,  # Corrected call will be used
     to_directed_aig,
     remove_padding_nodes,
     display_graph_details  # For debugging the first failure
@@ -77,7 +77,7 @@ class GraphFlowModel(nn.Module):
         if self.dp:  # Apply DataParallel if dp is True and Cuda is available
             if current_device.type == 'cuda':
                 self.flow_core = nn.DataParallel(self.flow_core)
-            else:  # Should not happen if dp is true but cuda not avail due to warning above
+            else:
                 self.dp = False
 
     def forward(self, inp_node_features, inp_adj_features):
@@ -110,204 +110,225 @@ class GraphFlowModel(nn.Module):
                            inp_node_features_one_hot, inp_adj_features_one_hot)
         return z
 
-    def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=20):
+    def generate(self, temperature=[0.3, 0.3], min_atoms=5, max_atoms=64, disconnection_patience=50):
         """
         Inverse flow to generate AIGs.
+        This version aligns more closely with the original RDKit-based generation logic
+        for self-loop adjacency initialization and validity checking.
         """
-        # This flag is checked before printing detailed failure info.
-        # It's set to True by the first graph that *does* print such details.
-        # current_graph_instance_prints_details_on_failure = not GraphFlowModel._detailed_failure_printed_for_first_graph
-
         disconnection_streak = 0
         current_device = self.node_base_log_probs.device
 
         with torch.no_grad():
-            num2bond_map = NUM2EDGETYPE
-            num2atom_map = NUM2NODETYPE
+            # AIG-specific type mappings (replaces atom_list and num2bond from RDKit original)
+            num2edge_type_map = NUM2EDGETYPE
+            num2node_type_map = NUM2NODETYPE
 
+            # Initialize feature matrices
             cur_node_features = torch.zeros([1, max_atoms, self.node_dim], device=current_device)
             cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms], device=current_device)
 
-            graph_backup = None
-            aig = nx.Graph()
+            # Backup features (similar to original)
+            node_features_each_iter_backup = cur_node_features.clone()
+            adj_features_each_iter_backup = cur_adj_features.clone()
 
-            is_continue = True
-            edge_idx_for_sampling = 0
-            total_resamples = 0
+            # AIG representation (replaces RDKit's RWMol)
+            # Using NetworkX Graph. It will be converted to DiGraph later if needed by validity checks.
+            # The original used RWMol which is mutable. NetworkX graphs are also mutable.
+            graph_representation = nx.Graph()  # Changed variable name for clarity
+            graph_backup_on_connect = None  # Backup of the graph state
+
+            is_continue_generation = True  # Renamed for clarity
+            edge_sampling_idx = 0  # Renamed for clarity
+            total_resamples_count = 0  # Renamed for clarity
+            # each_node_resample = np.zeros([max_atoms]) # This was in original, can be re-added if detailed stats are needed
 
             model_to_call = self.flow_core.module if isinstance(self.flow_core, nn.DataParallel) else self.flow_core
 
-            for i in range(max_atoms):
-                if not is_continue:
+            for i in range(max_atoms):  # Iterate up to max_atoms (potential nodes)
+                if not is_continue_generation:
                     break
 
+                # Determine how many previous nodes to consider connecting to
                 if i < self.edge_unroll:
-                    edge_total_to_consider = i
-                    source_start_offset = 0
+                    num_edges_to_consider_for_node_i = i
+                    source_node_start_index = 0
                 else:
-                    edge_total_to_consider = self.edge_unroll
-                    source_start_offset = i - self.edge_unroll
+                    num_edges_to_consider_for_node_i = self.edge_unroll
+                    source_node_start_index = i - self.edge_unroll
 
-                node_logits = self.node_base_log_probs[i].to(current_device)
-                if temperature[0] <= 0:
-                    latent_node_type_idx = torch.argmax(node_logits)
-                    latent_node_sample = torch.nn.functional.one_hot(latent_node_type_idx,
-                                                                     num_classes=self.node_dim).float().view(1, -1)
-                else:
-                    prior_node_dist = torch.distributions.OneHotCategorical(logits=node_logits / temperature[0])
-                    latent_node_sample = prior_node_dist.sample().view(1, -1)
+                # 1. Generate Node Type
 
+                prior_node_dist = torch.distributions.OneHotCategorical(logits=self.node_base_log_probs[i]*temperature[0])
+                latent_node_sample = prior_node_dist.sample().view(1, -1)
+
+                # Reverse flow for node type
                 resolved_node_type_latent = model_to_call.reverse(
                     cur_node_features, cur_adj_features, latent_node_sample, mode=0).view(-1)
 
-                node_feature_id = torch.argmax(resolved_node_type_latent).item()
+                node_feature_id = torch.argmax(resolved_node_type_latent).item()  # Get the chosen node type index
+
+                # Update node features and add node to graph
                 cur_node_features[0, i, node_feature_id] = 1.0
-                cur_adj_features[0, NO_EDGE_CHANNEL, i, i] = 1.0
 
-                node_type_str = num2atom_map.get(node_feature_id, f"UNKNOWN_NODE_ID_{node_feature_id}")
-                aig.add_node(i, type=node_type_str)
+                # ORIGINAL LOGIC FOR SELF-LOOP: Set all bond dimensions for self-loop
+                cur_adj_features[0, :, i, i] = 1.0
 
-                if i == 0:
-                    is_connect = True
-                else:
-                    is_connect = False
+                node_type_str = num2node_type_map.get(node_feature_id, f"UNKNOWN_NODE_ID_{node_feature_id}")
+                graph_representation.add_node(i, type=node_type_str)
 
-                for j_offset in range(edge_total_to_consider):
-                    actual_source_node_idx = source_start_offset + j_offset
+                # Connectivity flag for the current node
+                current_node_is_connected = (i == 0)  # First node is considered connected by default
 
-                    if actual_source_node_idx >= i or actual_source_node_idx < 0:
-                        warnings.warn(
-                            f"Invalid actual_source_node_idx {actual_source_node_idx} for target node {i}. Skipping edge.")
-                        if edge_idx_for_sampling < self.edge_base_log_probs.shape[0]:  # Check bounds
-                            edge_idx_for_sampling += 1
-                        continue
-                    if not aig.has_node(actual_source_node_idx):
-                        warnings.warn(
-                            f"Source node {actual_source_node_idx} does not exist in AIG when trying to connect to target {i}. Skipping edge.")
-                        if edge_idx_for_sampling < self.edge_base_log_probs.shape[0]:  # Check bounds
-                            edge_idx_for_sampling += 1
-                        continue
+                # 2. Generate Edges to Previous Nodes
+                for j_offset in range(num_edges_to_consider_for_node_i):
+                    actual_source_node_idx = source_node_start_index + j_offset
 
-                    if edge_idx_for_sampling >= self.edge_base_log_probs.shape[0]:
-                        warnings.warn(
-                            f"edge_idx_for_sampling {edge_idx_for_sampling} out of bounds for edge_base_log_probs size {self.edge_base_log_probs.shape[0]}. Stopping edge generation for this node.")
-                        break  # Stop trying to add edges for this node i
+                        # Edge generation loop with resampling for validity
+                    edge_successfully_placed = False
+                    resample_edge_attempts = 0
+                    # Clone base logits for current edge step to allow modification (marking invalid choices)
+                    current_edge_logits_for_sampling = self.edge_base_log_probs[edge_sampling_idx].to(
+                        current_device).clone()
+                    invalid_edge_types_tried = set()
 
-                    valid_edge_found = False
-                    resample_edge_count = 0
-                    current_edge_logits = self.edge_base_log_probs[edge_idx_for_sampling].to(current_device).clone()
-
-                    while not valid_edge_found:
-                        if resample_edge_count > 100 or torch.isneginf(current_edge_logits).all():
-                            edge_discrete_id = NO_EDGE_CHANNEL
+                    while not edge_successfully_placed:
+                        # Force NO_EDGE_CHANNEL if too many resamples or all other types are invalid
+                        if resample_edge_attempts > 50 or len(invalid_edge_types_tried) >= (
+                                self.bond_dim - 1) or torch.isneginf(current_edge_logits_for_sampling).all():
+                            chosen_edge_type_id = NO_EDGE_CHANNEL
                         else:
-                            if temperature[1] <= 0:
-                                latent_edge_idx = torch.argmax(current_edge_logits)
+                            if temperature[1] <= 0:  # Greedy edge type sampling
+                                latent_edge_idx = torch.argmax(current_edge_logits_for_sampling)
                                 latent_edge_sample = torch.nn.functional.one_hot(latent_edge_idx,
                                                                                  num_classes=self.bond_dim).float().view(
                                     1, -1)
-                            else:
+                            else:  # Sample edge type
                                 prior_edge_dist = torch.distributions.OneHotCategorical(
-                                    logits=current_edge_logits / temperature[1])
+                                    logits=current_edge_logits_for_sampling / temperature[1])
                                 latent_edge_sample = prior_edge_dist.sample().view(1, -1)
 
+                            # Reverse flow for edge type
                             resolved_edge_type_latent = model_to_call.reverse(
                                 cur_node_features, cur_adj_features, latent_edge_sample,
                                 mode=1,
                                 edge_index=torch.tensor([[actual_source_node_idx, i]], device=current_device).long()
                             ).view(-1)
-                            edge_discrete_id = torch.argmax(resolved_edge_type_latent).item()
+                            chosen_edge_type_id = torch.argmax(resolved_edge_type_latent).item()
 
-                        cur_adj_features[0, edge_discrete_id, i, actual_source_node_idx] = 1.0
-                        cur_adj_features[0, edge_discrete_id, actual_source_node_idx, i] = 1.0
+                        # Update adjacency features
+                        cur_adj_features[0, chosen_edge_type_id, i, actual_source_node_idx] = 1.0
+                        cur_adj_features[0, chosen_edge_type_id, actual_source_node_idx, i] = 1.0
 
-                        current_edge_type_str = num2bond_map.get(edge_discrete_id,
-                                                                 f"UNKNOWN_EDGE_ID_{edge_discrete_id}")
+                        current_edge_type_str = num2edge_type_map.get(chosen_edge_type_id,
+                                                                      f"UNKNOWN_EDGE_ID_{chosen_edge_type_id}")
 
-                        if edge_discrete_id == NO_EDGE_CHANNEL:
-                            valid_edge_found = True
-                        else:
-                            aig.add_edge(i, actual_source_node_idx, type=current_edge_type_str)
-                            is_structurally_valid = check_validity(aig)
+                        if chosen_edge_type_id == NO_EDGE_CHANNEL:  # No functional edge chosen
+                            edge_successfully_placed = True
+                        else:  # A functional edge type was chosen, add to graph and check validity
+                            graph_representation.add_edge(i, actual_source_node_idx, type=current_edge_type_str)
+
+                            # CORRECTED VALIDITY CHECK CALL
+                            # Pass source and target for directed graph check context
+                            is_structurally_valid = check_interim_validity(graph_representation, actual_source_node_idx,
+                                                                           i)
 
                             if is_structurally_valid:
-                                valid_edge_found = True
-                                is_connect = True
-                            else:
-                                # --- Conditional Debug Print on First Ever Failure ---
+                                edge_successfully_placed = True
+                                current_node_is_connected = True  # Mark current node `i` as connected
+                            else:  # Backtrack: remove edge, reset features, penalize this edge type choice
                                 if not GraphFlowModel._detailed_failure_printed_for_first_graph:
                                     print(
                                         f"\n--- [GraphDF First Ever Failing Edge Detail] Attempting edge ({actual_source_node_idx} -- {i}) type {current_edge_type_str} ---")
-                                    display_graph_details(aig,
-                                                          f"GraphDF state BEFORE check_validity for edge ({actual_source_node_idx}--{i}) that FAILED")
+                                    display_graph_details(graph_representation,
+                                                          f"GraphDF state BEFORE check_interim_validity for edge ({actual_source_node_idx}--{i}) that FAILED")
                                     print(
-                                        f"--- [GraphDF First Ever Failing Edge Detail] check_validity FAILED for edge ({actual_source_node_idx} -- {i}) ---")
-                                    # display_graph_details(aig, f"GraphDF state AFTER FAILED check_validity for edge ({actual_source_node_idx}--{i}) (before removal)") # Redundant if next print shows removal
-                                    GraphFlowModel._detailed_failure_printed_for_first_graph = True  # Set flag immediately
-                                # --- End Conditional Debug Print ---
+                                        f"--- [GraphDF First Ever Failing Edge Detail] check_interim_validity FAILED for edge ({actual_source_node_idx} -- {i}) ---")
+                                    GraphFlowModel._detailed_failure_printed_for_first_graph = True
 
-                                aig.remove_edge(i, actual_source_node_idx)
-                                cur_adj_features[0, edge_discrete_id, i, actual_source_node_idx] = 0.0
-                                cur_adj_features[0, edge_discrete_id, actual_source_node_idx, i] = 0.0
-                                total_resamples += 1.0
-                                resample_edge_count += 1
-                                current_edge_logits[edge_discrete_id] = -float('inf')
+                                graph_representation.remove_edge(i, actual_source_node_idx)
+                                cur_adj_features[0, chosen_edge_type_id, i, actual_source_node_idx] = 0.0
+                                cur_adj_features[0, chosen_edge_type_id, actual_source_node_idx, i] = 0.0
+                                total_resamples_count += 1.0
+                                resample_edge_attempts += 1
+                                current_edge_logits_for_sampling[chosen_edge_type_id] = -float(
+                                    'inf')  # Penalize this choice
+                                invalid_edge_types_tried.add(chosen_edge_type_id)
 
-                                # if GraphFlowModel._detailed_failure_printed_for_first_graph and not printed_for_this_call: # This logic is now simpler
-                                # display_graph_details(aig, f"GraphDF state AFTER FAILED check_validity AND edge ({actual_source_node_idx}--{i}) REMOVAL (First Failure Instance)")
+                    edge_sampling_idx += 1  # Move to the next edge slot for base probabilities
 
-                    edge_idx_for_sampling += 1
-
-                if is_connect:
-                    is_continue = True
-                    graph_backup = aig.copy()
+                # After trying to connect node `i` to all considered previous nodes
+                if current_node_is_connected:
+                    is_continue_generation = True
+                    graph_backup_on_connect = graph_representation.copy()  # Backup successful state
+                    node_features_each_iter_backup = cur_node_features.clone()
+                    adj_features_each_iter_backup = cur_adj_features.clone()
                     disconnection_streak = 0
-                elif not is_connect and disconnection_streak < disconnection_patience:
-                    is_continue = True
-                    if graph_backup is None:
-                        graph_backup = aig.copy()
+                elif not current_node_is_connected and disconnection_streak < disconnection_patience:
+                    # Node `i` was added but couldn't connect. If patience not exceeded, continue adding nodes.
+                    # The graph state remains as is (with disconnected node `i`), but backups are NOT updated.
+                    is_continue_generation = True
                     disconnection_streak += 1
-                else:
-                    is_continue = False
-                    if graph_backup is None:
-                        graph_backup = aig.copy()
+                    # Restore from backup if we want to discard the disconnected node `i` immediately.
+                    # For now, aligns with original: keep adding nodes and stop if streak too long.
+                    # If graph_backup_on_connect is None (e.g. first node was disconnected, which shouldn't happen),
+                    # then just use the current graph_representation as the backup.
+                    if graph_backup_on_connect is None: graph_backup_on_connect = graph_representation.copy()
 
-            final_graph_nx = aig
+                else:  # Node `i` is not connected AND disconnection patience exceeded
+                    is_continue_generation = False
+                    # Restore from the last known good connected state
+                    if graph_backup_on_connect is not None:
+                        graph_representation = graph_backup_on_connect.copy()
+                        cur_node_features = node_features_each_iter_backup.clone()
+                        cur_adj_features = adj_features_each_iter_backup.clone()
+                    # If graph_backup_on_connect is None (should be rare), then we might end up with a small/empty graph.
+
+            # Final processing of the generated graph
+            final_graph_nx = graph_representation  # This is the graph after the loop
             if final_graph_nx is None or final_graph_nx.number_of_nodes() == 0:
-                warnings.warn("Generated graph `aig` is empty or None at the end.")
-                final_graph_nx = graph_backup if graph_backup is not None else nx.Graph()
+                warnings.warn("Generated graph is empty or None at the end.")
+                # Try to use backup if primary is empty and backup exists
+                final_graph_nx = graph_backup_on_connect if graph_backup_on_connect is not None else nx.Graph()
                 if final_graph_nx.number_of_nodes() == 0:
-                    return None, 0, 0
+                    return None, 0, 0  # Return None if still empty
 
+            # Convert to directed AIG and remove padding (AIG-specific post-processing)
             final_aig_directed = to_directed_aig(final_graph_nx)
             if final_aig_directed:
                 final_aig_processed = remove_padding_nodes(final_aig_directed)
+                # If remove_padding_nodes returns None (e.g. empty graph after padding removal),
+                # fall back to the directed graph before padding removal.
                 if final_aig_processed is None:
                     final_aig_processed = final_aig_directed
             else:
-                warnings.warn(f"to_directed_aig failed for generated graph.")
-                final_aig_processed = final_graph_nx
+                warnings.warn(f"to_directed_aig failed for generated graph. Using original NetworkX graph.")
+                final_aig_processed = final_graph_nx  # Fallback to the undirected graph if conversion fails
 
             num_nodes_after_processing = final_aig_processed.number_of_nodes() if final_aig_processed else 0
 
+            # Check against min_atoms
             if num_nodes_after_processing < min_atoms:
-                return None, total_resamples == 0, num_nodes_after_processing
+                return None, (total_resamples_count == 0), num_nodes_after_processing
 
-            pure_valid_flag = 1.0 if total_resamples == 0 else 0.0
+            pure_valid_flag = 1.0 if total_resamples_count == 0 else 0.0
             return final_aig_processed, pure_valid_flag, num_nodes_after_processing
 
     def initialize_masks(self, max_node_unroll=38, max_edge_unroll=25):
+        # This mask initialization logic seems to be consistent with the original's intent
+        # for ordering node and edge generation steps.
+        # The calculation of num_edge_steps here should match self.latent_edge_length calculation in __init__.
         num_edge_steps = 0
         if max_node_unroll <= 0:
             num_edge_steps = 0
-        elif max_edge_unroll >= max_node_unroll - 1:  # Corrected condition
+        elif max_edge_unroll >= max_node_unroll - 1:
             num_edge_steps = int((max_node_unroll - 1) * max_node_unroll / 2) if max_node_unroll > 0 else 0
         else:
             num_edge_steps = int(
                 (max_edge_unroll - 1) * max_edge_unroll / 2 +
                 (max_node_unroll - max_edge_unroll) * max_edge_unroll
-            ) if max_edge_unroll > 0 else 0  # Ensure max_edge_unroll > 0 for first term
-            if max_edge_unroll == 0:  # if edge_unroll is 0
+            ) if max_edge_unroll > 0 else 0
+            if max_edge_unroll == 0:
                 num_edge_steps = 0
 
         node_masks_for_node_step = torch.zeros([max_node_unroll, max_node_unroll]).bool()
@@ -317,7 +338,7 @@ class GraphFlowModel(nn.Module):
             node_masks_for_edge_step = torch.zeros([num_edge_steps, max_node_unroll]).bool()
             adj_masks_for_edge_step = torch.zeros([num_edge_steps, max_node_unroll, max_node_unroll]).bool()
             link_prediction_index = torch.zeros([num_edge_steps, 2]).long()
-        else:
+        else:  # Handle cases where num_edge_steps could be 0
             node_masks_for_edge_step = torch.empty([0, max_node_unroll]).bool()
             adj_masks_for_edge_step = torch.empty([0, max_node_unroll, max_node_unroll]).bool()
             link_prediction_index = torch.empty([0, 2]).long()
@@ -327,57 +348,77 @@ class GraphFlowModel(nn.Module):
         current_node_step_idx = 0
         current_edge_step_idx = 0
 
-        for i in range(max_node_unroll):
-            if current_node_step_idx < max_node_unroll:
+        for i in range(max_node_unroll):  # For each potential node to be added
+            # === Node Generation Step Mask for node i ===
+            if current_node_step_idx < max_node_unroll:  # Should always be true within this loop
+                # Visible nodes: 0 to i-1
                 node_masks_for_node_step[current_node_step_idx, :i] = 1
+                # Visible adjacency: connections among nodes 0 to i-1
                 adj_masks_for_node_step[current_node_step_idx, :i, :i] = 1
                 current_node_step_idx += 1
 
+            # === Edge Generation Step Masks for edges connecting to node i ===
             num_sources_to_connect_to = 0
             source_start_node_idx = 0
-            if i == 0:
+            if i == 0:  # First node has no previous nodes to connect to
                 num_sources_to_connect_to = 0
-            elif i < max_edge_unroll:
+            elif i < max_edge_unroll:  # Node i connects to all previous nodes 0 to i-1
                 source_start_node_idx = 0
                 num_sources_to_connect_to = i
-            else:
+            else:  # Node i connects to `max_edge_unroll` previous nodes
                 source_start_node_idx = i - max_edge_unroll
                 num_sources_to_connect_to = max_edge_unroll
 
-            current_adj_mask_for_edges = adj_masks_for_node_step[i, :,
-                                         :].clone() if i < max_node_unroll else torch.zeros(max_node_unroll,
-                                                                                            max_node_unroll).bool()
-            current_adj_mask_for_edges[i, i] = True  # Node i itself is now known for conditioning edges
+            # This is the state of the adjacency matrix *after* node i's type is known,
+            # but *before* any of its edges (to 0..i-1) are decided.
+            # It includes connections among 0..i-1 (from node step) and self-loop for i.
+            current_adj_mask_for_edges_of_node_i = adj_masks_for_node_step[i, :,
+                                                   :].clone() if i < max_node_unroll else torch.zeros(max_node_unroll,
+                                                                                                      max_node_unroll).bool()
+            current_adj_mask_for_edges_of_node_i[i, i] = True
 
             for j_offset in range(num_sources_to_connect_to):
                 actual_source_node = source_start_node_idx + j_offset
-                if current_edge_step_idx < num_edge_steps:
-                    node_masks_for_edge_step[current_edge_step_idx, :i + 1] = 1  # Nodes 0..i are visible
 
-                    # Adjacency state for this edge step:
-                    # Includes connections among 0..i-1 (from node step)
-                    # AND connections from i to 0..actual_source_node-1 (already decided edges for node i)
-                    adj_masks_for_edge_step[current_edge_step_idx, :,
-                    :] = current_adj_mask_for_edges  # Start with adj state after node i type is known
+                if current_edge_step_idx < num_edge_steps:  # Ensure we don't exceed allocated mask size
+                    # Visible nodes: 0 to i (node i's type is now known)
+                    node_masks_for_edge_step[current_edge_step_idx, :i + 1] = 1
 
-                    link_prediction_index[current_edge_step_idx, 0] = actual_source_node
-                    link_prediction_index[current_edge_step_idx, 1] = i
-                    flow_core_edge_masks[i, actual_source_node] = 1  # (target, source)
+                    # Visible adjacency: state captured in current_adj_mask_for_edges_of_node_i
+                    adj_masks_for_edge_step[current_edge_step_idx, :, :] = current_adj_mask_for_edges_of_node_i
+
+                    link_prediction_index[
+                        current_edge_step_idx, 0] = actual_source_node  # Source of the edge being predicted
+                    link_prediction_index[current_edge_step_idx, 1] = i  # Target of the edge being predicted
+
+                    # Mark this edge (i, actual_source_node) as one that flow_core will model
+                    flow_core_edge_masks[i, actual_source_node] = 1
+
                     current_edge_step_idx += 1
 
-                    # Update current_adj_mask for the *next* edge step of this node i
-                    current_adj_mask_for_edges[i, actual_source_node] = True
-                    current_adj_mask_for_edges[actual_source_node, i] = True
+                    # Update current_adj_mask_for_edges_of_node_i for the *next* edge prediction step for node i:
+                    # The edge (i, actual_source_node) is now considered known.
+                    current_adj_mask_for_edges_of_node_i[i, actual_source_node] = True
+                    current_adj_mask_for_edges_of_node_i[actual_source_node, i] = True
+                else:
+                    # This case should ideally not be hit if num_edge_steps is calculated correctly.
+                    # If it is, it means we are trying to define more edge steps than allocated.
+                    if num_edge_steps > 0:  # Only warn if we expected edge steps
+                        warnings.warn(
+                            f"Mask Init: Trying to create edge step {current_edge_step_idx + 1} but only {num_edge_steps} are allocated. Max_node_unroll: {max_node_unroll}, Max_edge_unroll: {max_edge_unroll}")
 
+        # Final checks for mask counts
         if not (current_node_step_idx == max_node_unroll):
             warnings.warn(f"Node mask count mismatch: expected {max_node_unroll}, got {current_node_step_idx}")
         if not (current_edge_step_idx == num_edge_steps):
             warnings.warn(
                 f"Edge mask count mismatch: expected {num_edge_steps}, got {current_edge_step_idx}. This can happen if max_node_unroll is small (e.g., 0 or 1).")
 
+        # Concatenate node-step masks and edge-step masks
         node_masks_all = torch.cat((node_masks_for_node_step, node_masks_for_edge_step), dim=0)
         adj_masks_all = torch.cat((adj_masks_for_node_step, adj_masks_for_edge_step), dim=0)
 
+        # Set as non-trainable parameters
         node_masks_all = nn.Parameter(node_masks_all, requires_grad=False)
         adj_masks_all = nn.Parameter(adj_masks_all, requires_grad=False)
         link_prediction_index = nn.Parameter(link_prediction_index, requires_grad=False)
@@ -386,34 +427,46 @@ class GraphFlowModel(nn.Module):
         return node_masks_all, adj_masks_all, link_prediction_index, flow_core_edge_masks
 
     def dis_log_prob(self, z):
-        x_output, adj_output = z
-        node_base_log_probs_sm = torch.nn.functional.log_softmax(self.node_base_log_probs, dim=-1)
-        ll_node = torch.sum(x_output * node_base_log_probs_sm.unsqueeze(0), dim=(-1, -2))
+        x_output, adj_output = z  # x_output: (B, N, node_dim), adj_output: (B, num_edge_steps, bond_dim)
 
-        edge_base_log_probs_sm = torch.nn.functional.log_softmax(self.edge_base_log_probs, dim=-1)
-        if adj_output.numel() == 0 and self.edge_base_log_probs.numel() == 0:  # Handle case with no edges
-            ll_edge = torch.zeros_like(
-                ll_node)  # Or handle as appropriate (e.g. if batch size > 0, (B,) tensor of zeros)
-        elif adj_output.shape[1] == 0 and self.edge_base_log_probs.shape[0] == 0:  # No edge steps
+        # Node likelihood
+        node_base_log_probs_sm = torch.nn.functional.log_softmax(self.node_base_log_probs, dim=-1)  # (N, node_dim)
+        # Sum over node_dim and N (max_size)
+        ll_node = torch.sum(x_output * node_base_log_probs_sm.unsqueeze(0), dim=(-1, -2))  # (B)
+
+        # Edge likelihood
+        edge_base_log_probs_sm = torch.nn.functional.log_softmax(self.edge_base_log_probs,
+                                                                 dim=-1)  # (num_edge_steps, bond_dim)
+
+        if adj_output.numel() == 0 and self.edge_base_log_probs.numel() == 0:
             ll_edge = torch.zeros_like(ll_node)
-        elif adj_output.shape[1] != self.edge_base_log_probs.shape[0]:
+        elif adj_output.shape[1] == 0 and self.edge_base_log_probs.shape[0] == 0:  # No edge steps defined
+            ll_edge = torch.zeros_like(ll_node)
+        elif adj_output.shape[1] != self.edge_base_log_probs.shape[0]:  # Mismatch in number of edge steps
             warnings.warn(
-                f"Shape mismatch in dis_log_prob for edges: adj_output {adj_output.shape}, edge_base_log_probs {self.edge_base_log_probs.shape}")
-            # Fallback or error, for now, let's assume if adj_output is empty, ll_edge is 0
-            if adj_output.numel() == 0:
+                f"Shape mismatch in dis_log_prob for edges: adj_output steps {adj_output.shape[1]}, edge_base_log_probs steps {self.edge_base_log_probs.shape[0]}")
+            if adj_output.numel() == 0:  # If adj_output is empty due to no actual edges being formed in this batch/step
                 ll_edge = torch.zeros_like(ll_node)
-            else:  # This case should ideally not be hit if masks and forward pass are correct
-                ll_edge = torch.tensor(float('-inf'), device=ll_node.device).repeat(
-                    ll_node.shape[0])  # Penalize heavily
+            else:  # This is a more problematic mismatch
+                ll_edge = torch.tensor(float('-inf'), device=ll_node.device).repeat(ll_node.shape[0])
         else:
-            ll_edge = torch.sum(adj_output * edge_base_log_probs_sm.unsqueeze(0), dim=(-1, -2))
+            # Sum over bond_dim and num_edge_steps
+            ll_edge = torch.sum(adj_output * edge_base_log_probs_sm.unsqueeze(0), dim=(-1, -2))  # (B)
 
-        mean_ll = torch.mean(ll_node + ll_edge)
+        mean_ll = torch.mean(ll_node + ll_edge)  # Scalar
+
+        # Normalization factor: total number of variables predicted (nodes + edges)
+        # This should align with how latent_node_length and latent_edge_length are calculated in __init__
+        # latent_node_length = self.max_size * self.node_dim -> but here we sum over node_dim in ll_node
+        # So, for normalization, we consider number of node variables = self.max_size
+        # And number of edge variables = num_edge_steps (self.edge_base_log_probs.shape[0])
 
         num_node_variables = self.max_size
-        num_edge_variables = self.edge_base_log_probs.shape[0]
+        num_edge_variables = self.edge_base_log_probs.shape[0]  # Number of edge generation steps
 
-        if (num_node_variables + num_edge_variables) == 0:
+        total_variables = num_node_variables + num_edge_variables
+        if total_variables == 0:  # Avoid division by zero if max_size is 0
             return -torch.tensor(0.0, device=mean_ll.device) if mean_ll == 0 else -mean_ll
 
-        return -(mean_ll / (num_node_variables + num_edge_variables))
+        # Negative log-likelihood, normalized per variable
+        return -(mean_ll / total_variables)

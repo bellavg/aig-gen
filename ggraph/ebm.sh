@@ -43,7 +43,7 @@ srun python -u train_graphs.py \
 #echo "super low threshold higher number of cycles broken"
 srun python -u sample_graphs.py \
     --model 'GraphEBM' \
-    --checkpoint "./checkpoints_aig/GraphEBM_GraphEBM/GraphEBM_epoch_6.pt" \
+    --checkpoint "./checkpoints_aig/GraphEBM_GraphEBM/GraphEBM_epoch_30.pt" \
     --num_samples 1000 \
     --evaluate \
     --save
