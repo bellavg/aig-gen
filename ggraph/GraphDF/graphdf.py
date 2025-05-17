@@ -187,7 +187,7 @@ class GraphDF(Generator):
                         cnt_mol += 1
                         all_graphs.append(mol)
                         pure_valids.append(no_resample)
-                        if cnt_mol == 1:
+                        if cnt_mol % 500 == 0:
                             display_graph_details(mol)
                         if cnt_mol % 100 == 0:
                             print('Generated {}/{} Graphs'.format(cnt_mol, n_mols))

@@ -183,7 +183,7 @@ class GraphAF(Generator):
                         cnt_generated += 1
                         all_mols.append(aig_graph)
                         pure_valids.append(no_resample_flag)
-                        if cnt_generated == 1:
+                        if cnt_generated % 500 == 0:
                             display_graph_details(aig_graph)
                         if cnt_generated % 100 == 0:  # Changed from 10 to 100 for less verbose output
                             print('Generated {}/{} AIGs'.format(cnt_generated, n_mols))
