@@ -33,10 +33,10 @@ echo "Conda environment activated."
 # --- End Setup ---
 
 #
-### Call the simplified train_graphs.py script, ensuring all required args are present
-srun python -u train_graphs.py \
-    --model 'GraphAF' \
-    --use_wandb
+#### Call the simplified train_graphs.py script, ensuring all required args are present
+#srun python -u train_graphs.py \
+#    --model 'GraphAF' \
+#    --use_wandb
 
 
 
