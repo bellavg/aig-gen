@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from .graphaf import MaskedGraphAF
-from aig_config import *
-import networkx as nx
+# from aig_config import *
+# import networkx as nx
 
 
 class GraphFlowModel(nn.Module):
@@ -65,152 +65,152 @@ class GraphFlowModel(nn.Module):
         z, logdet = self.flow_core(inp_node_features, inp_adj_features, inp_node_features_cont, inp_adj_features_cont)
         return z, logdet
 
-    def generate(self, temperature=0.75, min_atoms=5, max_atoms=48,  disconnection_patience=20):
-        """
-        inverse flow to generate molecule
-        Args:
-            temp: temperature of normal distributions, we sample from (0, temp^2 * I)
-        """
-
-        prior_latent_nodes = []
-        disconnection_streak = 0
-
-        current_device = torch.device("cuda" if self.dp and torch.cuda.is_available() else "cpu")
-
-        with torch.no_grad():
-            # num2bond = {0: Chem.rdchem.BondType.SINGLE, 1: Chem.rdchem.BondType.DOUBLE, 2: Chem.rdchem.BondType.TRIPLE}
-            num2bond = NUM2EDGETYPE
-            # num2atom = {i: atom_list[i] for i in range(len(atom_list))}
-            num2atom = NUM2NODETYPE
-
-            if self.dp:
-                prior_node_dist = torch.distributions.normal.Normal(torch.zeros([self.node_dim]).cuda(),
-                                                                    temperature * torch.ones([self.node_dim]).cuda())
-                prior_edge_dist = torch.distributions.normal.Normal(torch.zeros([self.bond_dim]).cuda(),
-                                                                    temperature * torch.ones([self.bond_dim]).cuda())
-                cur_node_features = torch.zeros([1, max_atoms, self.node_dim]).cuda()
-                cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms]).cuda()
-            else:
-                prior_node_dist = torch.distributions.normal.Normal(torch.zeros([self.node_dim]),
-                                                                    temperature * torch.ones([self.node_dim]))
-                prior_edge_dist = torch.distributions.normal.Normal(torch.zeros([self.bond_dim]),
-                                                                    temperature * torch.ones([self.bond_dim]))
-                cur_node_features = torch.zeros([1, max_atoms, self.node_dim])
-                cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms])
-
-            aig = nx.DiGraph()
-            graph = None
-
-            is_continue = True
-            edge_idx = 0
-            total_resample = 0
-            # each_node_resample = np.zeros([max_atoms])
-
-            # try_times = 0
-            # max_try_times = 1
-
-            for i in range(max_atoms):
-                if not is_continue:
-                    break
-                if i < self.edge_unroll:
-                    num_edge_to_try = i  # edge to sample for current node
-                    start = 0
-                else:
-                    num_edge_to_try = self.edge_unroll
-                    start = i - self.edge_unroll
-                # first generate node
-                ## reverse flow
-                latent_node = prior_node_dist.sample().view(1, -1)  # (1, 9)
-
-                if self.dp:
-                    latent_node = self.flow_core.module.reverse(cur_node_features, cur_adj_features, latent_node,
-                                                                mode=0).view(-1)  # (9, )
-                else:
-                    latent_node = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_node, mode=0).view(
-                        -1)  # (9, )
-                ## node/adj postprocessing
-                # print(latent_node.shape) #(38, 9)
-                feature_id = torch.argmax(latent_node).item()
-                # print(num2symbol[feature_id])
-                cur_node_features[0, i, feature_id] = 1.0
-                cur_adj_features[0, :, i, i] = 1.0
-                aig.add_node(i, type=num2atom[feature_id])
-
-                # then generate edges
-                is_connect = (i == 0)
-                # cur_mol_size = mol.GetNumAtoms
-                for j in range(num_edge_to_try):
-                    source_prev_node_idx = j + start
-                    valid = False
-                    resample_edge = 0
-                    invalid_bond_type_set = set()
-
-                    while not valid:
-                        if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX+1 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
-                            latent_edge = prior_edge_dist.sample().view(1, -1)  # (1, 4)
-                            if self.dp:
-                                latent_edge = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
-                                                                            latent_edge,
-                                                                            mode=1, edge_index=torch.Tensor(
-                                        [[j + start, i]]).long().cuda()).view(-1)  # (4, )
-                            else:
-                                latent_edge = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_edge,
-                                                                     mode=1, edge_index=torch.Tensor(
-                                        [[j + start, i]]).long()).view(-1)  # (4, )
-                            edge_discrete_id = torch.argmax(latent_edge).item()
-                        else:
-                            assert resample_edge > 50 or len(invalid_bond_type_set) == NUM_EXPLICIT_EDGE_TYPES
-                            edge_discrete_id = VIRTUAL_EDGE_INDEX  # we have no choice but to choose not to add edge between (i, j+start)
-                        # cur_adj_features[0, edge_discrete_id, i, j + start] = 1.0
-                        # cur_adj_features[0, edge_discrete_id, j + start, i] = 1.0
-                        cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 1.0
-                        if edge_discrete_id == VIRTUAL_EDGE_INDEX:  # virtual edge
-                            valid = True
-                        else:  # single/double/triple bond
-
-                            aig.add_edge(source_prev_node_idx, i, type=num2bond[edge_discrete_id])
-                            valid = check_validity(aig)
-                            if valid:
-                                is_connect = True
-                                # print(num2bond_symbol[edge_discrete_id])
-                            else:  # backtrack
-                                aig.remove_edge(source_prev_node_idx, i, )
-                                cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 0.0
-                                total_resample += 1.0
-                                resample_edge += 1
-
-                                invalid_bond_type_set.add(edge_discrete_id)
-
-                    edge_idx += 1
-
-                if is_connect:  # new generated node has at least one bond with previous node, do not stop generation, backup mol from rw_mol to mol
-                    is_continue = True
-                    graph = aig.copy()
-                    disconnection_streak = 0
-                elif not is_connect and disconnection_streak < disconnection_patience:
-                    is_continue = True
-                    graph = aig.copy()
-                    disconnection_streak += 1
-                else:
-                    is_continue = False
-
-            # mol = rw_mol.GetMol() # mol backup
-            assert graph is not None, 'mol is None...'
-
-            if graph is not None and graph.number_of_nodes() >= min_atoms and check_aig_component_minimums(graph):
-                final_graph_to_return = graph
-                num_nodes = final_graph_to_return.number_of_nodes()
-            # Fallback: if the loop completed fully (is_continue still true) and `aig` is valid
-            elif is_continue and aig.number_of_nodes() >= min_atoms and check_aig_component_minimums(aig):
-                final_graph_to_return = aig
-                num_nodes = final_graph_to_return.number_of_nodes()
-            else:
-                final_graph_to_return = None
-                num_nodes = 0
-
-            pure_valid = 1.0 if total_resample == 0 else 0.0
-
-            return final_graph_to_return, pure_valid, num_nodes
+    # def generate(self, temperature=0.75, min_atoms=5, max_atoms=48,  disconnection_patience=20):
+    #     """
+    #     inverse flow to generate molecule
+    #     Args:
+    #         temp: temperature of normal distributions, we sample from (0, temp^2 * I)
+    #     """
+    #
+    #     prior_latent_nodes = []
+    #     disconnection_streak = 0
+    #
+    #     current_device = torch.device("cuda" if self.dp and torch.cuda.is_available() else "cpu")
+    #
+    #     with torch.no_grad():
+    #         # num2bond = {0: Chem.rdchem.BondType.SINGLE, 1: Chem.rdchem.BondType.DOUBLE, 2: Chem.rdchem.BondType.TRIPLE}
+    #         num2bond = NUM2EDGETYPE
+    #         # num2atom = {i: atom_list[i] for i in range(len(atom_list))}
+    #         num2atom = NUM2NODETYPE
+    #
+    #         if self.dp:
+    #             prior_node_dist = torch.distributions.normal.Normal(torch.zeros([self.node_dim]).cuda(),
+    #                                                                 temperature * torch.ones([self.node_dim]).cuda())
+    #             prior_edge_dist = torch.distributions.normal.Normal(torch.zeros([self.bond_dim]).cuda(),
+    #                                                                 temperature * torch.ones([self.bond_dim]).cuda())
+    #             cur_node_features = torch.zeros([1, max_atoms, self.node_dim]).cuda()
+    #             cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms]).cuda()
+    #         else:
+    #             prior_node_dist = torch.distributions.normal.Normal(torch.zeros([self.node_dim]),
+    #                                                                 temperature * torch.ones([self.node_dim]))
+    #             prior_edge_dist = torch.distributions.normal.Normal(torch.zeros([self.bond_dim]),
+    #                                                                 temperature * torch.ones([self.bond_dim]))
+    #             cur_node_features = torch.zeros([1, max_atoms, self.node_dim])
+    #             cur_adj_features = torch.zeros([1, self.bond_dim, max_atoms, max_atoms])
+    #
+    #         aig = nx.DiGraph()
+    #         graph = None
+    #
+    #         is_continue = True
+    #         edge_idx = 0
+    #         total_resample = 0
+    #         # each_node_resample = np.zeros([max_atoms])
+    #
+    #         # try_times = 0
+    #         # max_try_times = 1
+    #
+    #         for i in range(max_atoms):
+    #             if not is_continue:
+    #                 break
+    #             if i < self.edge_unroll:
+    #                 num_edge_to_try = i  # edge to sample for current node
+    #                 start = 0
+    #             else:
+    #                 num_edge_to_try = self.edge_unroll
+    #                 start = i - self.edge_unroll
+    #             # first generate node
+    #             ## reverse flow
+    #             latent_node = prior_node_dist.sample().view(1, -1)  # (1, 9)
+    #
+    #             if self.dp:
+    #                 latent_node = self.flow_core.module.reverse(cur_node_features, cur_adj_features, latent_node,
+    #                                                             mode=0).view(-1)  # (9, )
+    #             else:
+    #                 latent_node = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_node, mode=0).view(
+    #                     -1)  # (9, )
+    #             ## node/adj postprocessing
+    #             # print(latent_node.shape) #(38, 9)
+    #             feature_id = torch.argmax(latent_node).item()
+    #             # print(num2symbol[feature_id])
+    #             cur_node_features[0, i, feature_id] = 1.0
+    #             cur_adj_features[0, :, i, i] = 1.0
+    #             aig.add_node(i, type=num2atom[feature_id])
+    #
+    #             # then generate edges
+    #             is_connect = (i == 0)
+    #             # cur_mol_size = mol.GetNumAtoms
+    #             for j in range(num_edge_to_try):
+    #                 source_prev_node_idx = j + start
+    #                 valid = False
+    #                 resample_edge = 0
+    #                 invalid_bond_type_set = set()
+    #
+    #                 while not valid:
+    #                     if len(invalid_bond_type_set) < VIRTUAL_EDGE_INDEX+1 and resample_edge <= 50:  # haven't sampled all possible bond type or is not stuck in the loop
+    #                         latent_edge = prior_edge_dist.sample().view(1, -1)  # (1, 4)
+    #                         if self.dp:
+    #                             latent_edge = self.flow_core.module.reverse(cur_node_features, cur_adj_features,
+    #                                                                         latent_edge,
+    #                                                                         mode=1, edge_index=torch.Tensor(
+    #                                     [[j + start, i]]).long().cuda()).view(-1)  # (4, )
+    #                         else:
+    #                             latent_edge = self.flow_core.reverse(cur_node_features, cur_adj_features, latent_edge,
+    #                                                                  mode=1, edge_index=torch.Tensor(
+    #                                     [[j + start, i]]).long()).view(-1)  # (4, )
+    #                         edge_discrete_id = torch.argmax(latent_edge).item()
+    #                     else:
+    #                         assert resample_edge > 50 or len(invalid_bond_type_set) == NUM_EXPLICIT_EDGE_TYPES
+    #                         edge_discrete_id = VIRTUAL_EDGE_INDEX  # we have no choice but to choose not to add edge between (i, j+start)
+    #                     # cur_adj_features[0, edge_discrete_id, i, j + start] = 1.0
+    #                     # cur_adj_features[0, edge_discrete_id, j + start, i] = 1.0
+    #                     cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 1.0
+    #                     if edge_discrete_id == VIRTUAL_EDGE_INDEX:  # virtual edge
+    #                         valid = True
+    #                     else:  # single/double/triple bond
+    #
+    #                         aig.add_edge(source_prev_node_idx, i, type=num2bond[edge_discrete_id])
+    #                         valid = check_validity(aig)
+    #                         if valid:
+    #                             is_connect = True
+    #                             # print(num2bond_symbol[edge_discrete_id])
+    #                         else:  # backtrack
+    #                             aig.remove_edge(source_prev_node_idx, i, )
+    #                             cur_adj_features[0, edge_discrete_id, source_prev_node_idx, i] = 0.0
+    #                             total_resample += 1.0
+    #                             resample_edge += 1
+    #
+    #                             invalid_bond_type_set.add(edge_discrete_id)
+    #
+    #                 edge_idx += 1
+    #
+    #             if is_connect:  # new generated node has at least one bond with previous node, do not stop generation, backup mol from rw_mol to mol
+    #                 is_continue = True
+    #                 graph = aig.copy()
+    #                 disconnection_streak = 0
+    #             elif not is_connect and disconnection_streak < disconnection_patience:
+    #                 is_continue = True
+    #                 graph = aig.copy()
+    #                 disconnection_streak += 1
+    #             else:
+    #                 is_continue = False
+    #
+    #         # mol = rw_mol.GetMol() # mol backup
+    #         assert graph is not None, 'mol is None...'
+    #
+    #         if graph is not None and graph.number_of_nodes() >= min_atoms and check_aig_component_minimums(graph):
+    #             final_graph_to_return = graph
+    #             num_nodes = final_graph_to_return.number_of_nodes()
+    #         # Fallback: if the loop completed fully (is_continue still true) and `aig` is valid
+    #         elif is_continue and aig.number_of_nodes() >= min_atoms and check_aig_component_minimums(aig):
+    #             final_graph_to_return = aig
+    #             num_nodes = final_graph_to_return.number_of_nodes()
+    #         else:
+    #             final_graph_to_return = None
+    #             num_nodes = 0
+    #
+    #         pure_valid = 1.0 if total_resample == 0 else 0.0
+    #
+    #         return final_graph_to_return, pure_valid, num_nodes
 
 
     def initialize_masks(self, max_node_unroll=64, max_edge_unroll=25):

@@ -115,4 +115,5 @@ class GraphAF(Generator):
                     print('Generated {} molecules'.format(cnt_mol))
 
         assert cnt_mol == n_mols, 'number of generated molecules does not equal num'
+        #TODO convert to directed.
         return all_mols, pure_valids

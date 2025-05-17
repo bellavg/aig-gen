@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from .rgcn import *
 from .st_net import *
-from aig_config import VIRTUAL_EDGE_INDEX
+from aig_config import NO_EDGE_CHANNEL
 
 class MaskedGraphAF(nn.Module):
     def __init__(self, mask_node, mask_edge, index_select_edge, st_type='sigmoid', num_flow_layer=12, graph_size=38,
@@ -155,7 +155,7 @@ class MaskedGraphAF(nn.Module):
         Returns:
             graph embedding for updating node features with shape (batch, d)
         """
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 3, N, N)
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 3, N, N)
 
         node_emb = self.rgcn(x, adj)  # (batch, N, d)
         if hasattr(self, 'batchNorm'):
@@ -177,7 +177,7 @@ class MaskedGraphAF(nn.Module):
         batch_size = x.size(0)
         assert batch_size == index.size(0)
 
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 3, N, N)
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 3, N, N)
 
         node_emb = self.rgcn(x, adj)  # (batch, N, d)
         if hasattr(self, 'batchNorm'):
@@ -202,7 +202,7 @@ class MaskedGraphAF(nn.Module):
         '''
         # inputs for RelGCNs
         batch_size = x.size(0)
-        adj = adj[:, :VIRTUAL_EDGE_INDEX]  # (batch, 3, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
+        adj = adj[:, :NO_EDGE_CHANNEL]  # (batch, 3, N, N) TODO: check whether we have to use the 4-th slices(virtual bond) or not
         x = torch.where(self.mask_node, x.unsqueeze(1).repeat(1, self.repeat_num, 1, 1),
                         torch.zeros([1], device=x.device)).view(
             -1, self.graph_size, self.num_node_type)  # (batch*repeat_num, N, 9)

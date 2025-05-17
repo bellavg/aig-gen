@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00 # Keep increased time
-#SBATCH --output=../slurm_logs/sample_af_%j.out
+#SBATCH --output=./slurm_logs/af_%j.out
 
 
 # --- Configuration ---
@@ -17,7 +17,6 @@ TRAIN_SCRIPT="train_graphs.py" # The simplified script that delegates training
 
 # --- End Configuration ---
 
-cd ..
 
 # --- Setup ---
 mkdir -p slurm_logs
@@ -35,16 +34,17 @@ echo "Conda environment activated."
 
 #
 ### Call the simplified train_graphs.py script, ensuring all required args are present
-#srun python -u ggraph/train_graphs.py \
-#    --model 'GraphAF'
-#
-
-
-srun python -u ggraph/sample_graphs.py \
+srun python -u train_graphs.py \
     --model 'GraphAF' \
-    --checkpoint "./ggraph/checkpoints/GraphAF/rand_gen_ckpt_24.pth" \
-    --evaluate \
-    --save
+    --wandb
+
+
+
+#srun python -u ggraph/sample_graphs.py \
+#    --model 'GraphAF' \
+#    --checkpoint "./ggraph/checkpoints/GraphAF/rand_gen_ckpt_24.pth" \
+#    --evaluate \
+#    --save
 
 
 #

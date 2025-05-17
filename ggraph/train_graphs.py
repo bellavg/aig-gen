@@ -17,48 +17,16 @@ from GraphDF import GraphDF
 # and is in the Python path or same directory.
 try:
     # Replace 'aig_padded_inmemory_dataset_module' with the actual file name if different.
-    from aig_padded_inmemory_dataset import AIGPaddedInMemoryDataset
+    from use_dataset import AIGPaddedInMemoryDataset
 except ImportError:
     print("ERROR: Could not import AIGPaddedInMemoryDataset. "
           "Ensure 'aig_padded_inmemory_dataset.py' (from the artifact) is accessible.")
     exit(1)
 
 # Configuration import from user's aig_config.py
-try:
-    from aig_config import *  # Imports all constants like MAX_NODE_COUNT, NUM_NODE_ATTRIBUTES, base_conf, etc.
 
-    print("Successfully imported configuration from aig_config.py")
-except ImportError:
-    print("ERROR: Could not import from aig_config.py. Ensure it's in the Python path.")
-    # Define placeholders if aig_config is missing, to allow script structure to be parsed,
-    # but actual execution will likely fail.
-    base_conf = {'lr': 0.001, 'weight_decay': 0.0, 'batch_size': 32, 'max_epochs': 100, 'save_interval': 1,
-                 'grad_clip_value': 1.0,
-                 'model': {'edge_unroll': 12, 'num_flow_layer': 12, 'num_rgcn_layer': 3, 'nhid': 128, 'nout': 128,
-                           'hidden': 64, 'deq_coeff': 0.9},
-                 'ebm_lr': 0.0001, 'ebm_bs': 64}  # Minimal placeholder
-    MAX_NODE_COUNT = 64
-    NUM_EXPLICIT_NODE_FEATURES = 4  # From your aig_config.py
-    NUM_NODE_ATTRIBUTES = 5  # From your aig_config.py (NUM_EXPLICIT_NODE_FEATURES + 1)
-    NUM_EXPLICIT_EDGE_FEATURES = 2  # From your aig_config.py
-    NUM_EDGE_ATTRIBUTES = 3  # From your aig_config.py (NUM_EXPLICIT_EDGE_FEATURES + 1)
-    # NUM_ADJ_CHANNELS might be NUM_EDGE_ATTRIBUTES or NUM_EXPLICIT_EDGE_FEATURES depending on model
-    # For GraphEBM, it uses NUM_ADJ_CHANNELS from aig_config for its internal total edge channels.
-    # Let's assume NUM_ADJ_CHANNELS is defined in aig_config.py and is what GraphEBM expects for its total.
-    # If not, GraphEBM might need NUM_EDGE_ATTRIBUTES.
-    if 'NUM_ADJ_CHANNELS' not in globals():  # Check if NUM_ADJ_CHANNELS was imported
-        NUM_ADJ_CHANNELS = NUM_EDGE_ATTRIBUTES  # Fallback if not in aig_config
-        warnings.warn(
-            f"NUM_ADJ_CHANNELS not found in aig_config.py, defaulting to NUM_EDGE_ATTRIBUTES ({NUM_EDGE_ATTRIBUTES}) for GraphEBM.")
-    else:
-        # Ensure NUM_ADJ_CHANNELS from config is consistent with what GraphEBM might expect
-        # (i.e., number of explicit edge types + virtual/no-edge if GraphEBM handles it that way)
-        # GraphEBM's `n_edge_type_actual` is NUM_EXPLICIT_EDGE_FEATURES.
-        # Its internal `self.model_total_edge_channels` is NUM_ADJ_CHANNELS from aig_config.
-        # So, this should be fine if NUM_ADJ_CHANNELS in aig_config.py is indeed NUM_EXPLICIT_EDGE_FEATURES + 1.
-        pass
+from aig_config import *  # Imports all constants like MAX_NODE_COUNT, NUM_NODE_ATTRIBUTES, base_conf, etc.
 
-    warnings.warn("Using placeholder configurations as aig_config.py was not found or fully imported.")
 
 # wandb import
 try:
