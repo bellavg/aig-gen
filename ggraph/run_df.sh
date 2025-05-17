@@ -41,7 +41,7 @@ echo "Conda environment activated."
 
 
 srun python -u sample_graphs.py \
-    --checkpoint "./checkpoints_aig/GraphDF_GraphDF/GraphDF_ckpt_30.pth " \
+    --checkpoint "./checkpoints_aig/GraphDF_GraphDF/GraphDF_ckpt_30.pth" \
     --evaluate \
     --save \
 
