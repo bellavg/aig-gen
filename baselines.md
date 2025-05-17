@@ -2,13 +2,13 @@
 
 Baselines to test
 
-- Graph-RNN - Trying to train - Untested
+- Graph-RNN - NA - Untested
 - DiGress - Running - Untested
 - DeFoG - Trying to train - Untested
 - dig
-  - Graph-DF - Ready to train - fix generate - fix eval
-  - Graph-AF - Ready to train - fix generate - fix eval
-  - GraphEBM - Ready to train - fix generate - fix eval
+  - Graph-DF - Trying to train - fix generate - fix eval
+  - Graph-AF - Ready to train? - fix generate - fix eval
+  - GraphEBM - Ready to train? - fix generate - fix eval
 - LayerDAG - Trying to train - Untested
 
 
