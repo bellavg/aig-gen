@@ -9,6 +9,7 @@ from aig_config import (
     NO_EDGE_CHANNEL,  # Still used for explicit "no edge" choices
     check_interim_validity,  # This will be effectively bypassed
     to_directed_aig,
+    check_validity,
     remove_padding_nodes,
     display_graph_details
 )
@@ -220,6 +221,7 @@ class GraphFlowModel(nn.Module):
                 return None, 1.0, num_nodes_after_processing  # pure_valid_flag is 1.0 as no resampling for validity
 
             pure_valid_flag = 1.0  # No resampling based on validity
+
             return final_aig_processed, pure_valid_flag, num_nodes_after_processing
 
     def initialize_masks(self, max_node_unroll=38, max_edge_unroll=25):
