@@ -253,7 +253,8 @@ class GraphEBM(Generator):
 
         ### Initialization
         print("Initializing samples...")
-        gen_x = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
+        gen_x = torch.rand(n_samples, self.n_atom, self.n_atom_type, device=self.device) * (1 + c)
+        #gen_x = torch.rand(n_samples, self.n_atom_type, self.n_atom, device=self.device) * (1 + c)
         gen_adj = torch.rand(n_samples, self.n_edge_type, self.n_atom, self.n_atom, device=self.device)
 
         gen_x.requires_grad = True
