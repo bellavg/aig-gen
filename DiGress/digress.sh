@@ -2,8 +2,8 @@
 #SBATCH --job-name=digress_aig_train
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
-#SBATCH --time=16:10:00              # Initial requested time, adjust as needed
-#SBATCH --output=slurm_logs/undirected_digress_%j.out
+#SBATCH --time=24:10:00              # Initial requested time, adjust as needed
+#SBATCH --output=slurm_logs/dir_digress_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
@@ -12,7 +12,7 @@ export HYDRA_FULL_ERROR=1
 
 # --- Configuration ---
 CONDA_ENV_NAME="digress" # CHANGE THIS to your Conda environment name
-PROJECT_ROOT="./DiGress" # IMPORTANT: SET THIS!
+
 
 
 echo "Loading modules..."
