@@ -1,6 +1,6 @@
 general:
   dataset: aig  # Changed from tpu_tile
-  path_to_pt_file: "./all_graphs_pyg.pt" # Path to your combined AIG .pt file
+  path_to_pt_file: "./aig_directed.pt" # Path to your combined AIG .pt file
   num_node_categories: 4 # From your aig_config.py (NUM_NODE_FEATURES)
   conditional: false # Set to false for unconditional random generation
   patience: 20

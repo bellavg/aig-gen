@@ -69,6 +69,16 @@ class MultiEmbedding(nn.Module):
 
     def forward(self, x_n_cat):
         if len(x_n_cat.shape) == 1:
+            # ---- START DEBUG PRINTS ----
+            print(f"DEBUG: MultiEmbedding input x_n_cat device: {x_n_cat.device}")
+            print(f"DEBUG: MultiEmbedding input x_n_cat dtype: {x_n_cat.dtype}")
+            if x_n_cat.numel() > 0:  # Avoid errors on empty tensors
+                print(f"DEBUG: MultiEmbedding input x_n_cat min: {x_n_cat.min().item()}")
+                print(f"DEBUG: MultiEmbedding input x_n_cat max: {x_n_cat.max().item()}")
+            else:
+                print(f"DEBUG: MultiEmbedding input x_n_cat is EMPTY. Shape: {x_n_cat.shape}")
+            print(f"DEBUG: MultiEmbedding emb_list[0].num_embeddings: {self.emb_list[0].num_embeddings}")
+            # ---- END DEBUG PRINTS ----
             x_n_emb = self.emb_list[0](x_n_cat)
         else:
             x_n_emb = torch.cat([
