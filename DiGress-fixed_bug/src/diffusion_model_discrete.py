@@ -6,13 +6,15 @@ import time
 import wandb
 import os
 
-from models.transformer_model import GraphTransformer
-from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete,\
+# Corrected imports to be absolute from the 'src' package
+from src.models.transformer_model import GraphTransformer
+from src.diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete, \
     MarginalUniformTransition
-from src.diffusion import diffusion_utils
-from metrics.train_metrics import TrainLossDiscrete
-from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
-from src import utils
+from src.diffusion import diffusion_utils # This was already good
+from src.metrics.train_metrics import TrainLossDiscrete
+from src.metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
+from src import utils # This was already good
+
 
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):

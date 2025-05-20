@@ -24,10 +24,10 @@ all_raw_graphs_filename: aig_directed.pt
 force_resplit_raw: False
 
 # Target class for the DataModule
-_target_: src.datasets.aig_custom_dataset.AIGCustomDataModule
+_target_: src.datasets.aig_custom_dataset.AIGDataModule
 
 # Target class for DatasetInfos
-dataset_infos_target_class: src.datasets.aig_custom_dataset.AIGCustomDatasetInfos
+dataset_infos_target_class: src.datasets.aig_custom_dataset.AIGDatasetInfos
 
 # Configuration for extra features. 'null' for AIGs as they are processed by your scripts.
 extra_features: null
