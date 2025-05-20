@@ -17,7 +17,7 @@ datadir_for_all_raw: ./
 
 # Filename of the combined raw PyTorch Geometric Data objects list.
 # Matches combined_output_filename from your create_dataset.py script.
-all_raw_graphs_filename: aig_undirected.pt
+all_raw_graphs_filename: aig_directed.pt
 
 # If True, AIGCustomDataModule re-splits all_raw_graphs_filename into train/val/test
 # intermediate files, even if they already exist.
