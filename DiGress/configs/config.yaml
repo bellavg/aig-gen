@@ -5,12 +5,6 @@ defaults:
     - train : train_default
     - dataset : aig
 
-hydra:
-  job:
-    chdir: True
-  run:
-    dir: ./
-
 
 
 

@@ -1,0 +1,4 @@
+edge_types: This is a tensor of shape (n, n) containing class indices for each possible edge in the graph.
+Again, collapse=True results in indices rather than one-hot features. The class indices here correspond
+to the NUM_EDGE_FEATURES + 1 possible edge states (e.g., index 0 for "no specific AIG type/no edge", index 1 for
+"EDGE_REG", index 2 for "EDGE_INV").

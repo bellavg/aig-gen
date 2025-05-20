@@ -15,23 +15,21 @@ import gc
 from aig_config import NUM_NODE_FEATURES, NUM_EDGE_FEATURES
 
 
-def convert_nx_to_pyg_with_edge_index(
+def convert_nx_to_pyg_with_edge_index_directed(
         nx_graph: nx.DiGraph,
         num_node_features: int,
-        # User changed this parameter name, preserving it
         NUM_EDGE_FEATURES: int
 ) -> Data | None:
     """
-    Converts a NetworkX DiGraph to a PyTorch Geometric Data object.
-    The output PyG Data object will represent an UNDIRECTED graph.
+    Converts a NetworkX DiGraph to a PyTorch Geometric Data object
+    for DIRECTED graphs.
     Includes:
     - x: Node features (unpadded).
-    - adj: Custom adjacency tensor (N_src, N_tgt, NUM_EDGE_FEATURES), made symmetric.
-    - edge_index: Standard PyG edge index (2, Num_edges), with edges added for both directions.
+    - adj: Custom adjacency tensor (N_src, N_tgt, NUM_EDGE_FEATURES), representing directed edges.
+    - edge_index: Standard PyG edge index (2, Num_edges), representing directed edges.
     - edge_attr: Edge attributes for edge_index (Num_edges, NUM_EDGE_FEATURES).
-    Nodes are ordered topologically based on the original DiGraph.
+    Nodes are ordered based on their original node IDs (sorted numerically/lexicographically).
     Returns None if the graph cannot be processed or has validation issues.
-    Will raise an error if topological sort fails (e.g., graph has cycles).
     """
     num_nodes_in_graph = nx_graph.number_of_nodes()
 
@@ -39,13 +37,22 @@ def convert_nx_to_pyg_with_edge_index(
         warnings.warn("Skipping empty graph.")
         return None
 
-    # Perform topological sort. Halts on cycles.
-    node_list = list(nx.topological_sort(nx_graph)) # Original logic preserved
+    # --- Node Ordering based on Node ID ---
+    # MODIFICATION: Sort nodes intrinsically
+    try:
+        # Attempt to sort, assuming node IDs are sortable (e.g., integers or strings)
+        node_list = sorted(list(nx_graph.nodes()))
+    except TypeError:
+        warnings.warn(
+            f"Node IDs are not sortable (e.g. mixed types). Skipping graph. Node IDs: {list(nx_graph.nodes())[:5]}..."
+        )
+        return None
+
     node_id_map = {old_id: new_id for new_id, old_id in enumerate(node_list)}
 
     # --- Node Features (x) ---
     node_features_list = []
-    for old_node_id in node_list:
+    for old_node_id in node_list: # Iterate in the new sorted order
         attrs = nx_graph.nodes[old_node_id]
         node_type_vec_raw = attrs.get('type')
         if node_type_vec_raw is None or \
@@ -63,34 +70,37 @@ def convert_nx_to_pyg_with_edge_index(
             return None
         node_features_list.append(torch.tensor(node_type_vec, dtype=torch.float))
 
-    if not node_features_list:  # Should not happen if num_nodes_in_graph > 0
+    if not node_features_list:
         warnings.warn("Node feature list empty despite non-zero nodes. Skipping graph.")
         return None
     x_tensor = torch.stack(node_features_list)
 
-    # --- Custom Adjacency Tensor (adj) ---
-    # Modified: Removed the +1 for no_edge_channel (as per original user code)
+    # --- Custom Adjacency Tensor (adj) for DIRECTED graph ---
     adj_tensor = torch.zeros(
-        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES),  # Using user's NUM_EDGE_FEATURES
+        (num_nodes_in_graph, num_nodes_in_graph, NUM_EDGE_FEATURES),
         dtype=torch.float
     )
-    # Removed: no_edge_channel_idx and its initialization for adj_tensor (as per original user code)
 
-    # --- Edge Index and Edge Attributes ---
+    # --- Edge Index and Edge Attributes for DIRECTED graph ---
     edge_index_sources = []
     edge_index_targets = []
-    edge_attributes_list = []  # To store one-hot encoded edge type vectors
+    edge_attributes_list = []
 
     for u_old, v_old, edge_attrs in nx_graph.edges(data=True):
         edge_type_vec_raw = edge_attrs.get('type')
         if edge_type_vec_raw is None or \
                 not isinstance(edge_type_vec_raw, (list, np.ndarray)) or \
-                len(edge_type_vec_raw) != NUM_EDGE_FEATURES:  # Using user's NUM_EDGE_FEATURES
+                len(edge_type_vec_raw) != NUM_EDGE_FEATURES:
             warnings.warn(
                 f"Edge ({u_old}-{v_old}) invalid 'type' attribute. Expected {NUM_EDGE_FEATURES}-len. Skipping graph.")
             return None
 
         u_new, v_new = node_id_map.get(u_old), node_id_map.get(v_old)
+        # Check if mapping was successful (node_id might not be in node_list if graph changed during iteration - though unlikely here)
+        if u_new is None or v_new is None:
+            warnings.warn(f"Edge ({u_old}-{v_old}) contains nodes not in the mapped node list. Skipping graph.")
+            return None
+
 
         edge_type_vec = np.asarray(edge_type_vec_raw, dtype=np.float32)
         if not (np.isclose(np.sum(edge_type_vec), 1.0) and np.all((np.isclose(edge_type_vec, 0.0)) | (np.isclose(edge_type_vec, 1.0)))):
@@ -99,37 +109,31 @@ def convert_nx_to_pyg_with_edge_index(
             return None
 
         edge_channel_index = np.argmax(edge_type_vec).item()
-        if not (0 <= edge_channel_index < NUM_EDGE_FEATURES):  # Using user's NUM_EDGE_FEATURES
+        if not (0 <= edge_channel_index < NUM_EDGE_FEATURES):
             warnings.warn(
                 f"Edge ({u_old}-{v_old}) 'type' vector resulted in invalid channel index: {edge_channel_index}. Max is {NUM_EDGE_FEATURES - 1}. Skipping graph.")
             return None
 
-        # Populate custom adj tensor
+        # Populate custom adj tensor (DIRECTED)
         adj_tensor[u_new, v_new, edge_channel_index] = 1.0
-        adj_tensor[v_new, u_new, edge_channel_index] = 1.0  # MODIFICATION: Symmetrize adj_tensor
-        # Removed: adj_tensor[u_new, v_new, no_edge_channel_idx] = 0.0 (as per original user code)
+        # MODIFICATION: Removed symmetrization: adj_tensor[v_new, u_new, edge_channel_index] = 1.0
 
-        # Populate edge_index and edge_attr lists
-        current_edge_attr_as_tensor = torch.tensor(edge_type_vec, dtype=torch.float) # Store the one-hot vector
+        # Populate edge_index and edge_attr lists (DIRECTED)
+        current_edge_attr_as_tensor = torch.tensor(edge_type_vec, dtype=torch.float)
 
         edge_index_sources.append(u_new)
         edge_index_targets.append(v_new)
         edge_attributes_list.append(current_edge_attr_as_tensor)
 
-        # MODIFICATION: Add the reverse edge for undirected representation
-        edge_index_sources.append(v_new)
-        edge_index_targets.append(u_new)
-        edge_attributes_list.append(current_edge_attr_as_tensor) # Use same attributes for the reverse edge
+        # MODIFICATION: Removed adding the reverse edge for undirected representation
 
     edge_index_tensor = torch.tensor([edge_index_sources, edge_index_targets], dtype=torch.long)
 
     if edge_attributes_list:
-        edge_attr_tensor = torch.stack(edge_attributes_list)  # Shape: (Num_edges, NUM_EDGE_FEATURES)
+        edge_attr_tensor = torch.stack(edge_attributes_list)
     else:
-        # If there are no edges, create an empty tensor with the correct feature dimension
-        edge_attr_tensor = torch.empty((0, NUM_EDGE_FEATURES), dtype=torch.float)  # Using user's NUM_EDGE_FEATURES
+        edge_attr_tensor = torch.empty((0, NUM_EDGE_FEATURES), dtype=torch.float)
 
-    # Create PyG Data object
     pyg_data = Data(
         x=x_tensor,
         adj=adj_tensor,
@@ -138,7 +142,6 @@ def convert_nx_to_pyg_with_edge_index(
         num_nodes=torch.tensor(num_nodes_in_graph, dtype=torch.long)
     )
 
-    # Add optional graph-level attributes (original logic preserved)
     if 'inputs' in nx_graph.graph: pyg_data.num_inputs = torch.tensor(nx_graph.graph['inputs'], dtype=torch.long)
     if 'outputs' in nx_graph.graph: pyg_data.num_outputs = torch.tensor(nx_graph.graph['outputs'], dtype=torch.long)
     if 'gates' in nx_graph.graph: pyg_data.num_gates = torch.tensor(nx_graph.graph['gates'], dtype=torch.long)
@@ -148,7 +151,6 @@ def convert_nx_to_pyg_with_edge_index(
 
 if __name__ == "__main__":
     # --- Configuration ---
-    # IMPORTANT: Replace these with the actual paths to your .pkl files (original paths preserved)
     pkl_file_paths = [
         "../raw_data/networkx_aigs/real_aigs_part_1_of_6.pkl",
         "../raw_data/networkx_aigs/real_aigs_part_2_of_6.pkl",
@@ -158,17 +160,15 @@ if __name__ == "__main__":
         "../raw_data/networkx_aigs/real_aigs_part_6_of_6.pkl",
     ]
 
-    # Define the output directory for the processed .pt files
-    # MINIMAL MODIFICATION: Changed filenames to indicate "undirected"
-    output_pyg_dir = "./data/pyg_full_undirected"
-    intermediate_file_suffix = "_pyg_full_undirected.pt"
-    combined_output_filename = "aig_undirected.pt"
+    # MODIFICATION: Changed filenames to indicate "directed"
+    output_pyg_dir = "./data/pyg_full_directed" # MODIFIED
+    intermediate_file_suffix = "_pyg_full_directed.pt" # MODIFIED
+    combined_output_filename = "aig_directed.pt" # MODIFIED
     # --- End Configuration ---
 
-    os.makedirs(output_pyg_dir, exist_ok=True) # Original logic preserved
+    os.makedirs(output_pyg_dir, exist_ok=True)
 
-    # Original print statements preserved
-    print(f"--- AIG to Full PyG Conversion (adj, edge_index, edge_attr) ---")
+    print(f"--- AIG to Full PyG Conversion (DIRECTED GRAPHS) ---") # MODIFIED
     print(f"Using NUM_NODE_FEATURES = {NUM_NODE_FEATURES}")
     print(f"Using NUM_EDGE_FEATURES = {NUM_EDGE_FEATURES} (for edge_attr and adj channels)")
     print(f"Output directory: {osp.abspath(output_pyg_dir)}\n")
@@ -184,12 +184,18 @@ if __name__ == "__main__":
 
         print(f"Processing PKL file ({pkl_file_idx + 1}/{len(pkl_file_paths)}): {pkl_file_path}")
 
-        with open(pkl_file_path, 'rb') as f:
-            nx_graphs_in_chunk = pickle.load(f)
+        try:
+            with open(pkl_file_path, 'rb') as f:
+                # Ensure compatibility with files pickled with different protocol versions
+                nx_graphs_in_chunk = pickle.load(f, encoding='latin1') # Added encoding for broader compatibility
+        except Exception as e:
+            warnings.warn(f"Could not load pickle file {pkl_file_path}: {e}. Skipping.")
+            continue
+
 
         if not isinstance(nx_graphs_in_chunk, list):
             warnings.warn(f"Content of {pkl_file_path} is not a list. Skipping this file.")
-            del nx_graphs_in_chunk
+            if 'nx_graphs_in_chunk' in locals(): del nx_graphs_in_chunk
             gc.collect()
             continue
 
@@ -203,10 +209,11 @@ if __name__ == "__main__":
                 warnings.warn(f"Item at index {nx_graph_idx} in {pkl_file_path} is not a NetworkX DiGraph. Skipping.")
                 continue
 
-            pyg_data_item = convert_nx_to_pyg_with_edge_index(
+            # MODIFICATION: Call the new directed conversion function
+            pyg_data_item = convert_nx_to_pyg_with_edge_index_directed(
                 nx_graph,
                 NUM_NODE_FEATURES,
-                NUM_EDGE_FEATURES  # Using user's NUM_EDGE_FEATURES
+                NUM_EDGE_FEATURES
             )
 
             if pyg_data_item is not None:
@@ -223,16 +230,20 @@ if __name__ == "__main__":
             output_pt_filename = osp.splitext(base_name)[0] + intermediate_file_suffix
             output_pt_path = osp.join(output_pyg_dir, output_pt_filename)
 
-            torch.save(processed_pyg_data_list, output_pt_path)
-            print(f"  Saved {len(processed_pyg_data_list)} processed PyG Data objects to: {output_pt_path}\n")
-            successfully_saved_intermediate_pt_files.append(output_pt_path)
+            try:
+                torch.save(processed_pyg_data_list, output_pt_path)
+                print(f"  Saved {len(processed_pyg_data_list)} processed PyG Data objects to: {output_pt_path}\n")
+                successfully_saved_intermediate_pt_files.append(output_pt_path)
+            except Exception as e:
+                warnings.warn(f"Could not save intermediate file {output_pt_path}: {e}")
+
         else:
             print(
                 f"  No graphs from {osp.basename(pkl_file_path)} were successfully converted or the file was empty.\n")
 
         total_files_processed += 1
-        del nx_graphs_in_chunk
-        del processed_pyg_data_list
+        del nx_graphs_in_chunk # Ensure memory is freed
+        del processed_pyg_data_list # Ensure memory is freed
         gc.collect()
 
     print(f"\n--- Intermediate Processing Summary ---")
@@ -240,7 +251,6 @@ if __name__ == "__main__":
     print(f"Total graphs successfully converted: {total_graphs_successfully_converted_across_all_files}")
     print(f"Number of intermediate .pt files created: {len(successfully_saved_intermediate_pt_files)}")
 
-    # --- Combine all processed intermediate .pt files ---
     if successfully_saved_intermediate_pt_files:
         print(f"\n--- Combining All Processed Intermediate .pt Files ---")
         all_pyg_data_objects_combined = []
@@ -248,49 +258,51 @@ if __name__ == "__main__":
 
         for pt_file_path in tqdm(successfully_saved_intermediate_pt_files, desc="Loading intermediate .pt files",
                                  unit="file"):
-            # **FIX APPLIED HERE** (This was in user's original code, so preserved)
-            intermediate_list = torch.load(pt_file_path, weights_only=False)
-            # Set weights_only=False to allow unpickling of arbitrary objects like PyG Data
+            try:
+                intermediate_list = torch.load(pt_file_path, weights_only=False) # Preserved weights_only=False
+                all_pyg_data_objects_combined.extend(intermediate_list)
 
-            all_pyg_data_objects_combined.extend(intermediate_list)
+                for data_obj in intermediate_list:
+                    if hasattr(data_obj, 'x') and data_obj.x is not None: total_estimated_bytes += data_obj.x.nbytes
+                    if hasattr(data_obj, 'adj') and data_obj.adj is not None: total_estimated_bytes += data_obj.adj.nbytes
+                    if hasattr(data_obj, 'edge_index') and data_obj.edge_index is not None: total_estimated_bytes += data_obj.edge_index.nbytes
+                    if hasattr(data_obj, 'edge_attr') and data_obj.edge_attr is not None: total_estimated_bytes += data_obj.edge_attr.nbytes
+                    if hasattr(data_obj, 'num_nodes') and data_obj.num_nodes is not None: total_estimated_bytes += data_obj.num_nodes.nbytes
+                    for attr_name in ['num_inputs', 'num_outputs', 'num_gates']:
+                        if hasattr(data_obj, attr_name) and getattr(data_obj, attr_name) is not None:
+                            total_estimated_bytes += getattr(data_obj, attr_name).nbytes
+                del intermediate_list # Ensure memory is freed
+                gc.collect()
+            except Exception as e:
+                warnings.warn(f"Could not load or process intermediate file {pt_file_path}: {e}. Skipping this file for combination.")
 
-            for data_obj in intermediate_list: # Original estimation logic preserved
-                if hasattr(data_obj, 'x') and data_obj.x is not None: total_estimated_bytes += data_obj.x.nbytes
-                if hasattr(data_obj, 'adj') and data_obj.adj is not None: total_estimated_bytes += data_obj.adj.nbytes
-                if hasattr(data_obj,
-                           'edge_index') and data_obj.edge_index is not None: total_estimated_bytes += data_obj.edge_index.nbytes
-                if hasattr(data_obj,
-                           'edge_attr') and data_obj.edge_attr is not None: total_estimated_bytes += data_obj.edge_attr.nbytes
-                if hasattr(data_obj,
-                           'num_nodes') and data_obj.num_nodes is not None: total_estimated_bytes += data_obj.num_nodes.nbytes
-                for attr_name in ['num_inputs', 'num_outputs', 'num_gates']:  # Optional tensors
-                    if hasattr(data_obj, attr_name) and getattr(data_obj, attr_name) is not None:
-                        total_estimated_bytes += getattr(data_obj, attr_name).nbytes
-            del intermediate_list
-            gc.collect()
 
         print(f"Total graphs combined: {len(all_pyg_data_objects_combined)}")
         total_estimated_gb = total_estimated_bytes / (1024 ** 3)
         print(f"Estimated total tensor data size for combined list: {total_estimated_gb:.2f} GB")
 
-        size_limit_gb = 32.0 # Original logic preserved
+        size_limit_gb = 32.0
 
         if total_estimated_gb > size_limit_gb:
             warnings.warn(
                 f"WARNING: Estimated size ({total_estimated_gb:.2f} GB) exceeds {size_limit_gb:.1f}GB limit. Combined file NOT saved."
             )
         elif not all_pyg_data_objects_combined:
-            print("No data objects loaded. Nothing to save for the combined file.")
+            print("No data objects loaded/processed successfully. Nothing to save for the combined file.")
         else:
             combined_output_path = osp.join(output_pyg_dir, combined_output_filename)
             print(f"Estimated size within limits. Saving combined data to: {combined_output_path}")
-            torch.save(all_pyg_data_objects_combined, combined_output_path)
-            print(f"Successfully saved {len(all_pyg_data_objects_combined)} combined graphs to {combined_output_path}.")
+            try:
+                torch.save(all_pyg_data_objects_combined, combined_output_path)
+                print(f"Successfully saved {len(all_pyg_data_objects_combined)} combined graphs to {combined_output_path}.")
+            except Exception as e:
+                warnings.warn(f"Could not save combined file {combined_output_path}: {e}")
 
-        del all_pyg_data_objects_combined
+
+        del all_pyg_data_objects_combined # Ensure memory is freed
         gc.collect()
     elif total_files_processed > 0:
-        print("\nNo intermediate .pt files were successfully created. No combined file generated.")
+        print("\nNo intermediate .pt files were successfully created or loaded. No combined file generated.")
     else:
         print("\nNo PKL files processed. No combined file generated.")
 

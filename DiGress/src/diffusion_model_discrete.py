@@ -515,7 +515,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         z_T = diffusion_utils.sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
         X, E, y = z_T.X, z_T.E, z_T.y
 
-        assert (E == torch.transpose(E, 1, 2)).all()
+        # assert (E == torch.transpose(E, 1, 2)).all()
         assert number_chain_steps < self.T
         chain_X_size = torch.Size((number_chain_steps, keep_chain, X.size(1)))
         chain_E_size = torch.Size((number_chain_steps, keep_chain, E.size(1), E.size(2)))
@@ -646,7 +646,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         X_s = F.one_hot(sampled_s.X, num_classes=self.Xdim_output).float()
         E_s = F.one_hot(sampled_s.E, num_classes=self.Edim_output).float()
 
-        assert (E_s == torch.transpose(E_s, 1, 2)).all()
+        # assert (E_s == torch.transpose(E_s, 1, 2)).all()
         assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
 
         out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))

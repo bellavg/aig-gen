@@ -26,7 +26,7 @@ from src.aig_config import (
 from typing import Union, List
 
 
-def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.Graph, None]:  # Changed DiGraph to Graph
+def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.DiGraph, None]:  # Changed DiGraph to Graph
     """
     Converts a PyTorch Geometric Data object, specifically formatted for AIGs
     (with edge_attr having NUM_EDGE_FEATURES + 1 dimensions), to a NetworkX Graph (undirected)
@@ -48,7 +48,7 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.Graph, None
             f"convert_pyg_to_nx: Node feature tensor 'x' mismatch. Shape: {pyg_data.x.shape if pyg_data.x is not None else 'None'}, Expected nodes: {num_nodes}, Expected features: {NUM_NODE_FEATURES}")
         return None
 
-    nx_graph = nx.Graph()  # MODIFICATION: Changed DiGraph to Graph
+    nx_graph = nx.DiGraph()  # MODIFICATION: Changed DiGraph to Graph
 
     # Process nodes
     for i in range(num_nodes):
@@ -106,10 +106,7 @@ def convert_pyg_to_nx_for_aig_validation(pyg_data: Data) -> Union[nx.Graph, None
                     else:
                         edge_type_str = EDGE_TYPE_KEYS[actual_aig_type_index]
 
-            # For nx.Graph, add_edge(src, tgt) is the same as add_edge(tgt, src)
-            # If edge_index already contains both (src,tgt) and (tgt,src) with potentially
-            # the same attributes due to symmetrization, nx.Graph handles it by creating one edge.
-            # Attributes are updated if an edge is added that already exists.
+
             nx_graph.add_edge(src, tgt, type=edge_type_str)
 
     # Add graph-level attributes

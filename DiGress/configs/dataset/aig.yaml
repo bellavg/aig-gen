@@ -36,7 +36,7 @@ extra_features: null
 domain_features: null
 
 # Batch size for DataLoader. Can be overridden by experiment config for training.
-batch_size: 64 # This is for the dataset module itself (e.g., for validation/test loaders if not overridden)
+batch_size: 256 # This is for the dataset module itself (e.g., for validation/test loaders if not overridden)
 
 # Number of workers for DataLoader
 num_workers: 0 # Default is 0 in train_default.yaml
