@@ -16,18 +16,18 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities.warnings import PossibleUserWarning
 
+# Path setup
 CURRENT_DIR = pathlib.Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-# Adjusted imports to be relative to the 'src' directory if main.py is inside 'src'
-# If main.py is at the project root, these would be 'from src import utils', etc.
-# Assuming main.py is in the same directory as the modules it's importing from, or 'src' is in PYTHONPATH
-import utils
+sys.path.insert(0, str(PROJECT_ROOT)) # Add project root to Python path
+
+# Corrected imports:
+from src import utils # Changed from 'import utils'
 from src.metrics.abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
-from src.diffusion_model import LiftedDenoisingDiffusion  # Changed from 'from diffusion_model import ...'
-from src.diffusion_model_discrete import \
-    DiscreteDenoisingDiffusion  # Changed from 'from diffusion_model_discrete import ...'
+from src.diffusion_model import LiftedDenoisingDiffusion
+from src.diffusion_model_discrete import DiscreteDenoisingDiffusion
 from src.diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
+
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
 
