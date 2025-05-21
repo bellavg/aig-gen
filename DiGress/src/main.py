@@ -329,20 +329,7 @@ def main(cfg: DictConfig):
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")
 
     use_gpu = cfg.general.gpus > 0 and torch.cuda.is_available()
-    if hasattr(torch, 'compile') and use_gpu:
-        if cfg.general.get('local_rank', 0) == 0:
-            print("Attempting to compile the model with torch.compile(mode='reduce-overhead')...")
-        try:
-            model = torch.compile(model, mode="reduce-overhead")  # Defaulting to "reduce-overhead"
-            if cfg.general.get('local_rank', 0) == 0:
-                print(f"Model compiled successfully with mode: reduce-overhead.")
-        except Exception as e:
-            if cfg.general.get('local_rank', 0) == 0:
-                print(f"torch.compile() failed with error: {e}. Proceeding without compilation.")
-    elif not use_gpu and cfg.general.get('local_rank', 0) == 0:
-        print("Skipping torch.compile() as not running on GPU.")
-    elif not hasattr(torch, 'compile') and cfg.general.get('local_rank', 0) == 0:
-        print("Skipping torch.compile() as it's not available in this PyTorch version.")
+
 
     trainer_strategy = None
     if use_gpu:
