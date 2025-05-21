@@ -2,7 +2,7 @@
 #SBATCH --job-name=digress_aig_train
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
-#SBATCH --time=24:10:00              # Initial requested time, adjust as needed
+#SBATCH --time=16:10:00              # Initial requested time, adjust as needed
 #SBATCH --output=slurm_logs/dir_digress_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
