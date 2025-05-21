@@ -690,7 +690,8 @@ def main(args):
     print("Initializing LayerDAG model...")
     model = LayerDAG(device=device,
                      node_diffusion=node_diffusion,
-                     edge_diffusion=edge_diffusion,  # Now edge_diffusion is defined
+                     edge_diffusion=edge_diffusion,
+                     is_model_conditional=is_conditional,  # Pass the flag here
                      **model_config)
     model.to(device)
     print("LayerDAG model initialized and moved to device.")
