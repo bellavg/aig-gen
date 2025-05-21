@@ -53,8 +53,8 @@ EDGE_LABEL_ENCODING = {
 }
 
 DECODING_EDGE_TYPE_NX = {
-    [1.0, 0.0]: "EDGE_REG" ,  # Index 0 feature
-  [0.0, 1.0]:"EDGE_INV"  # Index 1 feature
+    (1.0, 0.0): "EDGE_REG" ,  # Index 0 feature
+    (0.0, 1.0) :"EDGE_INV"  # Index 1 feature
 }
 
 
