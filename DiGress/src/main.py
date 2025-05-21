@@ -360,7 +360,6 @@ def main(cfg: DictConfig):
         accelerator='gpu' if use_gpu else 'cpu',
         devices=cfg.general.gpus if use_gpu else 1,
         max_epochs=cfg.train.n_epochs,
-        precision='bf16-mixed',
         check_val_every_n_epoch=cfg.general.check_val_every_n_epochs,
         fast_dev_run=cfg.general.name == 'debug',
         enable_progress_bar=cfg.train.get('progress_bar', False),  # Use .get
