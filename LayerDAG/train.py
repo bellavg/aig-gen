@@ -10,10 +10,11 @@ from copy import deepcopy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import torch# Set matmul precision for Tensor Cores
+import torch  # Set matmul precision for Tensor Cores
+
 # Options: 'highest' (default), 'high', 'medium'
 # 'high' or 'medium' can leverage Tensor Cores for float32 matrix multiplications
-if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7: # Check for Volta or newer
+if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7:  # Check for Volta or newer
     print("Setting float32 matmul precision to 'high' for Tensor Cores.")
     torch.set_float32_matmul_precision('high')
 
@@ -66,9 +67,8 @@ def eval_node_count(device, val_loader, model, is_conditional):
         else:
             # Create an empty sparse matrix if there are no edges
             batch_A = dglsp.spmatrix(
-                torch.empty((2,0), dtype=torch.long, device=device), # Ensure it's on the correct device
+                torch.empty((2, 0), dtype=torch.long, device=device),  # Ensure it's on the correct device
                 shape=(num_nodes, num_nodes)).to(device)
-
 
         batch_x_n = batch_x_n.to(device)
         batch_abs_level = batch_abs_level.to(device)
@@ -84,7 +84,7 @@ def eval_node_count(device, val_loader, model, is_conditional):
         # Clamp label to be within the range of predicted logits
         batch_label_clamped = batch_label.clamp(max=batch_nll.shape[-1] - 1)
         # Ensure batch_size is not zero before indexing
-        if batch_size > 0 :
+        if batch_size > 0:
             batch_nll = batch_nll[torch.arange(batch_size, device=device), batch_label_clamped]
             total_nll += batch_nll.sum().item()
 
@@ -159,7 +159,7 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
                 batch_A = dglsp.spmatrix(batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
             else:
                 batch_A = dglsp.spmatrix(
-                    torch.empty((2,0), dtype=torch.long, device=device),
+                    torch.empty((2, 0), dtype=torch.long, device=device),
                     shape=(num_nodes, num_nodes)).to(device)
 
             batch_x_n = batch_x_n.to(device)
@@ -167,16 +167,6 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             batch_rel_level = batch_rel_level.to(device)
             batch_A_n2g = dglsp.spmatrix(batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
             batch_label = batch_label.to(device)
-
-            # Debug prints for node and edge indices
-            # print(f"DEBUG train.py Node Count: num_nodes (len(batch_x_n)): {len(batch_x_n)}")
-            # if batch_edge_index.numel() > 0:
-            #     print(f"DEBUG train.py Node Count: batch_edge_index device: {batch_edge_index.device}")
-            #     print(f"DEBUG train.py Node Count: batch_edge_index min: {batch_edge_index.min().item()}")
-            #     print(f"DEBUG train.py Node Count: batch_edge_index max: {batch_edge_index.max().item()}")
-            # else:
-            #     print(f"DEBUG train.py Node Count: batch_edge_index is EMPTY")
-
 
             batch_pred = model(batch_A, batch_x_n, batch_abs_level,
                                batch_rel_level, batch_A_n2g, batch_y)
@@ -200,12 +190,10 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             best_val_nll = val_nll  # Update NLL if accuracy improved
             best_state_dict = deepcopy(model.state_dict())
             num_patient_epochs = 0
-            # print(f"Node Count: New best val_acc: {best_val_acc:.4f} (NLL: {best_val_nll:.4f}) at epoch {epoch + 1}")
         elif val_acc == best_val_acc and val_nll < best_val_nll:  # If accuracy is same, check NLL
             best_val_nll = val_nll
             best_state_dict = deepcopy(model.state_dict())
-            num_patient_epochs = 0  # Reset patience as NLL improved for same accuracy
-            # print(f"Node Count: New best val_nll: {best_val_nll:.4f} (Acc: {best_val_acc:.4f}) at epoch {epoch + 1}")
+            num_patient_epochs = 0
         else:
             num_patient_epochs += 1
 
@@ -218,9 +206,8 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
         if (patience is not None) and (num_patient_epochs >= patience):
             print(f"Node Count: Early stopping after {patience} epochs without improvement.")
             break
-    if epoch == config['num_epochs'] -1 :
-         print(f"Node Count: Max epochs reached.")
-
+    if epoch == config['num_epochs'] - 1:
+        print(f"Node Count: Max epochs reached.")
 
     print(f"Node Count: Best validation accuracy: {best_val_acc:.4f}, Best NLL: {best_val_nll:.4f}")
     return best_state_dict
@@ -259,7 +246,7 @@ def eval_node_pred(device, val_loader, model, is_conditional):
                 batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
         else:
             batch_A = dglsp.spmatrix(
-                torch.empty((2,0), dtype=torch.long, device=device),
+                torch.empty((2, 0), dtype=torch.long, device=device),
                 shape=(num_nodes, num_nodes)).to(device)
 
         batch_x_n = batch_x_n.to(device)
@@ -278,16 +265,15 @@ def eval_node_pred(device, val_loader, model, is_conditional):
                                   query2g, num_query_cumsum, batch_y)
 
         num_feature_dims = len(batch_logits_list)
-        if num_feature_dims == 0: # Should not happen if model is correctly configured
+        if num_feature_dims == 0:
             continue
         current_batch_num_queries = batch_logits_list[0].shape[0]
-        if current_batch_num_queries == 0: # Skip if no queries in this batch
+        if current_batch_num_queries == 0:
             continue
-
 
         for d in range(num_feature_dims):
             batch_logits_d = batch_logits_list[d]
-            ground_truth_d = batch_z[:, d] # Ground truth attributes for dimension d
+            ground_truth_d = batch_z[:, d]
 
             batch_nll_d = -batch_logits_d.log_softmax(dim=-1)
             batch_nll_d = batch_nll_d[torch.arange(current_batch_num_queries, device=device), ground_truth_d]
@@ -329,7 +315,7 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
                     batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
             else:
                 batch_A = dglsp.spmatrix(
-                    torch.empty((2,0), dtype=torch.long, device=device),
+                    torch.empty((2, 0), dtype=torch.long, device=device),
                     shape=(num_nodes, num_nodes)).to(device)
 
             batch_x_n = batch_x_n.to(device)
@@ -349,19 +335,17 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
 
             loss = 0
             num_feature_dims = len(batch_pred_logits_list)
-            if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0 : # Check if there are queries
+            if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0:
                 for d in range(num_feature_dims):
                     loss = loss + criterion(batch_pred_logits_list[d], batch_z[:, d])
-                loss /= num_feature_dims # Average loss over feature dimensions
-            else: # If no queries or no features, loss is 0 or handle as error
+                loss /= num_feature_dims
+            else:
                 loss = torch.tensor(0.0, device=device, requires_grad=True)
 
-
             optimizer.zero_grad()
-            if loss.requires_grad: # Only backward if loss requires grad (e.g. not a zero tensor without grad)
-                 loss.backward()
-                 optimizer.step()
-
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
 
             wandb.log({'node_pred/loss': loss.item()})
 
@@ -375,7 +359,6 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
             best_val_nll = val_nll
             best_state_dict = deepcopy(model.state_dict())
             num_patient_epochs = 0
-            # print(f"Node Pred: New best val_nll: {best_val_nll:.4f} at epoch {epoch + 1}")
         else:
             num_patient_epochs += 1
 
@@ -387,8 +370,8 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
         if (patience is not None) and (num_patient_epochs >= patience):
             print(f"Node Pred: Early stopping after {patience} epochs without improvement.")
             break
-    if epoch == config['num_epochs'] -1 :
-         print(f"Node Pred: Max epochs reached.")
+    if epoch == config['num_epochs'] - 1:
+        print(f"Node Pred: Max epochs reached.")
 
     print(f"Node Pred: Best validation NLL: {best_val_nll:.4f}")
     return best_state_dict
@@ -415,9 +398,9 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
             batch_y = None
 
         num_nodes = len(batch_x_n)
-        # Handle potentially empty edge_index or noisy_edge_index
+
         if batch_edge_index.numel() == 0 and batch_noisy_edge_index.numel() == 0:
-            combined_edge_index = torch.empty((2,0), dtype=torch.long, device=device)
+            combined_edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
         elif batch_edge_index.numel() == 0:
             combined_edge_index = batch_noisy_edge_index
         elif batch_noisy_edge_index.numel() == 0:
@@ -426,14 +409,13 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
             combined_edge_index = torch.cat([batch_edge_index, batch_noisy_edge_index], dim=1)
 
         if combined_edge_index.numel() > 0:
-             batch_A = dglsp.spmatrix(
+            batch_A = dglsp.spmatrix(
                 combined_edge_index,
                 shape=(num_nodes, num_nodes)).to(device)
         else:
             batch_A = dglsp.spmatrix(
-                torch.empty((2,0), dtype=torch.long, device=device),
+                torch.empty((2, 0), dtype=torch.long, device=device),
                 shape=(num_nodes, num_nodes)).to(device)
-
 
         batch_x_n = batch_x_n.to(device)
         batch_abs_level = batch_abs_level.to(device)
@@ -448,13 +430,12 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
                              batch_query_dst, batch_y)
 
         current_batch_num_queries = batch_logits.shape[0]
-        if current_batch_num_queries > 0: # Proceed only if there are queries
+        if current_batch_num_queries > 0:
             batch_nll = -batch_logits.log_softmax(dim=-1)
             batch_nll = batch_nll[
                 torch.arange(current_batch_num_queries, device=device), batch_label]
             total_nll += batch_nll.sum().item()
             total_queries += current_batch_num_queries
-
 
     return total_nll / total_queries if total_queries > 0 else float('inf')
 
@@ -486,7 +467,7 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
 
             num_nodes = len(batch_x_n)
             if batch_edge_index.numel() == 0 and batch_noisy_edge_index.numel() == 0:
-                combined_edge_index = torch.empty((2,0), dtype=torch.long, device=device)
+                combined_edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
             elif batch_edge_index.numel() == 0:
                 combined_edge_index = batch_noisy_edge_index
             elif batch_noisy_edge_index.numel() == 0:
@@ -500,9 +481,8 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
                     shape=(num_nodes, num_nodes)).to(device)
             else:
                 batch_A = dglsp.spmatrix(
-                    torch.empty((2,0), dtype=torch.long, device=device),
+                    torch.empty((2, 0), dtype=torch.long, device=device),
                     shape=(num_nodes, num_nodes)).to(device)
-
 
             batch_x_n = batch_x_n.to(device)
             batch_abs_level = batch_abs_level.to(device)
@@ -516,16 +496,14 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
                                       batch_rel_level, batch_t, batch_query_src,
                                       batch_query_dst, batch_y)
 
-            if batch_pred_logits.shape[0] > 0: # Ensure there are predictions
+            if batch_pred_logits.shape[0] > 0:
                 loss = criterion(batch_pred_logits, batch_label)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 wandb.log({'edge_pred/loss': loss.item()})
-            else: # Handle cases with no queries/predictions if necessary
-                # print("Warning: No queries in edge_pred batch, skipping loss calculation.")
-                wandb.log({'edge_pred/loss': 0.0}) # Log 0 or skip logging
-
+            else:
+                wandb.log({'edge_pred/loss': 0.0})
 
         val_nll = eval_edge_pred(device, val_loader, model, is_conditional)
         wandb.log({
@@ -537,7 +515,6 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
             best_val_nll = val_nll
             best_state_dict = deepcopy(model.state_dict())
             num_patient_epochs = 0
-            # print(f"Edge Pred: New best val_nll: {best_val_nll:.4f} at epoch {epoch + 1}")
         else:
             num_patient_epochs += 1
 
@@ -549,9 +526,8 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
         if (patience is not None) and (num_patient_epochs >= patience):
             print(f"Edge Pred: Early stopping after {patience} epochs without improvement.")
             break
-    if epoch == config['num_epochs'] -1 :
-         print(f"Edge Pred: Max epochs reached.")
-
+    if epoch == config['num_epochs'] - 1:
+        print(f"Edge Pred: Max epochs reached.")
 
     print(f"Edge Pred: Best validation NLL: {best_val_nll:.4f}")
     return best_state_dict
@@ -575,7 +551,7 @@ def main(args):
         exit(1)
 
     dataset_name = config['general']['dataset']
-    config_df = pd.json_normalize(config, sep='/') # For wandb logging
+    config_df = pd.json_normalize(config, sep='/')  # For wandb logging
 
     ts = time.strftime('%b%d-%H%M%S', time.gmtime())
 
@@ -595,20 +571,15 @@ def main(args):
         if 'num_node_categories' not in config['general']:
             raise ValueError("'num_node_categories' missing in config for AIG dataset.")
         load_dataset_kwargs['path'] = config['general']['path_to_pt_file']
-        # num_node_categories from config is the number of actual types (e.g., 4 means types 0,1,2,3)
-        # DAGDataset internally adds 1 for a dummy category.
         load_dataset_kwargs['num_categories_actual'] = config['general']['num_node_categories']
     elif dataset_name == 'tpu_tile':
-        pass # tpu_tile specific args if any, currently none needed for load_dataset
+        pass
     else:
         raise ValueError(f"Unsupported dataset name in config: {dataset_name}")
 
     print(f"Loading dataset: {dataset_name} (Conditional: {is_conditional})")
-    # The load_dataset function should return train_set, val_set, test_set
-    # test_set is currently unused in this training script but good to maintain the interface
     train_set, val_set, _ = load_dataset(dataset_name, **load_dataset_kwargs)
     print(f"Train set size: {len(train_set)}, Val set size: {len(val_set)}")
-
 
     # --- Create LayerDAG specific datasets ---
     print("Preparing LayerDAG-specific datasets...")
@@ -621,8 +592,6 @@ def main(args):
 
     if not hasattr(train_node_pred_dataset, 'x_n_marginal') or not train_node_pred_dataset.x_n_marginal:
         raise ValueError("x_n_marginal is empty or not set in train_node_pred_dataset. Check dataset processing.")
-    # print(f"Node prediction dataset: Marginal distribution computed. Max level from train: {train_node_pred_dataset.input_level.max().item()}")
-
 
     node_diffusion_config = {
         'marginal_list': train_node_pred_dataset.x_n_marginal,
@@ -634,8 +603,16 @@ def main(args):
 
     train_edge_pred_dataset = LayerDAGEdgePredDataset(train_set, conditional=is_conditional)
     val_edge_pred_dataset = LayerDAGEdgePredDataset(val_set, conditional=is_conditional)
-    # print(f"Edge prediction dataset: Avg in-degree from train: {train_edge_pred_dataset.avg_in_deg:.4f}")
 
+    # --- MODIFICATION START: Initialize edge_diffusion ---
+    edge_diffusion_config = {
+        'avg_in_deg': train_edge_pred_dataset.avg_in_deg,
+        'T': config['edge_pred']['T']
+    }
+    edge_diffusion = EdgeDiscreteDiffusion(**edge_diffusion_config)
+    train_edge_pred_dataset.edge_diffusion = edge_diffusion
+    val_edge_pred_dataset.edge_diffusion = edge_diffusion
+    # --- MODIFICATION END ---
 
     # --- Create DataLoaders ---
     print("Creating DataLoaders...")
@@ -691,15 +668,11 @@ def main(args):
     )
     print("DataLoaders created.")
 
-
     # --- Model Configuration & Initialization ---
-    # train_set.num_categories should be (actual_node_types + 1 for dummy)
     model_num_x_n_cat = train_set.num_categories
-    # print(f"Model config: num_x_n_cat (node types including dummy) = {model_num_x_n_cat}")
-
 
     model_config = {
-        'num_x_n_cat': model_num_x_n_cat, # This should be a LongTensor or list for MultiEmbedding
+        'num_x_n_cat': model_num_x_n_cat,
         'node_count_encoder_config': config['node_count']['model'],
         'max_layer_size': train_node_count_dataset.max_layer_size,
         'node_pred_graph_encoder_config': config['node_pred']['graph_encoder'],
@@ -709,23 +682,20 @@ def main(args):
         'max_level': max(train_node_pred_dataset.input_level.max().item(),
                          val_node_pred_dataset.input_level.max().item())
     }
-    # Ensure num_x_n_cat is a tensor if it's a single int, as expected by MultiEmbedding
     if isinstance(model_config['num_x_n_cat'], int):
         model_config['num_x_n_cat'] = torch.LongTensor([model_config['num_x_n_cat']])
     elif isinstance(model_config['num_x_n_cat'], list):
-         model_config['num_x_n_cat'] = torch.LongTensor(model_config['num_x_n_cat'])
-
+        model_config['num_x_n_cat'] = torch.LongTensor(model_config['num_x_n_cat'])
 
     print("Initializing LayerDAG model...")
-    # REMOVED is_conditional from LayerDAG constructor
     model = LayerDAG(device=device,
                      node_diffusion=node_diffusion,
-                     edge_diffusion=edge_diffusion,
+                     edge_diffusion=edge_diffusion,  # Now edge_diffusion is defined
                      **model_config)
     model.to(device)
     print("LayerDAG model initialized and moved to device.")
 
-    patience_val = config['general'].get('patience', 10) # Default patience if not in config
+    patience_val = config['general'].get('patience', 10)
 
     # --- Training Sub-models ---
     print("\n--- Training Node Count Model ---")
@@ -757,16 +727,18 @@ def main(args):
 
     # --- Save Model ---
     save_path = f'model_{dataset_name}_{ts}.pth'
+    # --- MODIFICATION START: Include edge_diffusion_config in saved checkpoint ---
     torch.save({
         'dataset': dataset_name,
         'node_diffusion_config': node_diffusion_config,
-        'edge_diffusion_config': edge_diffusion_config,
-        'model_config': model_config, # Save the constructed model_config
-        'is_conditional': is_conditional, # Save this for sampling if needed
+        'edge_diffusion_config': edge_diffusion_config,  # Add this
+        'model_config': model_config,
+        'is_conditional': is_conditional,
         'model_state_dict': model.state_dict()
     }, save_path)
+    # --- MODIFICATION END ---
     print(f"Model saved to {save_path}")
-    wandb.save(save_path) # Save model to wandb
+    wandb.save(save_path)
     wandb.finish()
 
 
@@ -775,7 +747,8 @@ if __name__ == '__main__':
 
     parser = ArgumentParser(description="Train LayerDAG model.")
     parser.add_argument("--config_file", type=str, required=True, help="Path to the YAML configuration file.")
-    parser.add_argument("--num_threads", type=int, default=1, help="Number of CPU threads for PyTorch (DGL recommendation is often 1 for GNNs to avoid overhead).")
+    parser.add_argument("--num_threads", type=int, default=1,
+                        help="Number of CPU threads for PyTorch (DGL recommendation is often 1 for GNNs to avoid overhead).")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility.")
     args = parser.parse_args()
 
