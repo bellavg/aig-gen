@@ -9,3 +9,5 @@ setup(
     description='Discrete denoising diffusion for graph generation',
     packages=find_packages()
 )
+
+#FIX?
