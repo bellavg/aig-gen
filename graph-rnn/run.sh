@@ -2,7 +2,7 @@
 #SBATCH --job-name=rnn
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
-#SBATCH --time=16:10:00              # Initial requested time, adjust as needed
+#SBATCH --time=08:10:00              # Initial requested time, adjust as needed
 #SBATCH --output=slurm_logs/rnn_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
