@@ -260,7 +260,7 @@ def sample_discrete_features(probX, probE, node_mask):
 
     # Sample E
     E_t = probE.multinomial(1).reshape(bs, n, n)   # (bs, n, n)
-    E_t = torch.triu(E_t, diagonal=1)
+    # E_t = torch.triu(E_t, diagonal=1)
     # E_t = (E_t + torch.transpose(E_t, 1, 2))
 
     return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
