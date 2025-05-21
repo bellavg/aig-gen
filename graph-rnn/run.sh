@@ -38,7 +38,7 @@ echo "----------------------------------------"
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 
-srun python -u train.py configs/config_aig_typed_baseline.yaml
+srun python -u train.py configs/aig_typed_baseline.yaml
     # Add any other specific Hydra overrides here if needed, e.g.:
     # general.resume=outputs/YYYY-MM-DD/HH-MM-SS-aig_resume/checkpoints/last-epoch=XXXX.ckpt
     # train.n_epochs=6000 # To override the config file value
