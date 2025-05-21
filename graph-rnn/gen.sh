@@ -2,7 +2,7 @@
 #SBATCH --job-name=rnn
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
-#SBATCH --time=08:10:00              # Initial requested time, adjust as needed
+#SBATCH --time=04:10:00              # Initial requested time, adjust as needed
 #SBATCH --output=slurm_logs/rnn_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
@@ -38,11 +38,10 @@ echo "----------------------------------------"
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 
-python generate_and_evaluate_aigs.py configs/checkpoints_aig_typed_baseline/checkpoint_step_30000.pth \
+python gen_eval_aig.py configs/checkpoints_aig_typed_baseline/checkpoint_step_30000.pth \
     --num_graphs 10 \
     --max_nodes_generate 64 \
     --min_nodes_generate 5 \
-    --train_set_pkl  \
     --results_file my_aig_evaluation.txt \
     --output_generated_pkl generated_aigs_sample.pkl
 

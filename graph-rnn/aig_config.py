@@ -26,7 +26,19 @@ NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
 EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
 
 
+NODE_TYPE_ENCODING = {
+    "NODE_CONST0": [1.0, 0.0, 0.0, 0.0],
+    "NODE_PI":     [0.0, 1.0, 0.0, 0.0],
+    "NODE_AND":    [0.0, 0.0, 1.0, 0.0],
+    "NODE_PO":     [0.0, 0.0, 0.0, 1.0]
+}
 
+DECODING_NODE_TYPE_NX = {
+    (1.0, 0.0, 0.0, 0.0): "NODE_CONST0",
+    (0.0, 1.0, 0.0, 0.0): "NODE_PI",
+    (0.0, 0.0, 1.0, 0.0): "NODE_AND",
+    (0.0, 0.0, 0.0, 1.0): "NODE_PO"
+}
 # Derive feature counts from the size of the derived vocabularies
 NUM_NODE_FEATURES = len(NODE_TYPE_KEYS) # Should be 4
 NUM_EDGE_FEATURES = len(EDGE_TYPE_KEYS) # Should be 2
