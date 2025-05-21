@@ -4,9 +4,8 @@ import torch.nn as nn
 from torchmetrics import Metric, MeanSquaredError, MetricCollection
 import time
 import wandb
-from src.metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchMSE, SumExceptBatchKL, CrossEntropyMetric, \
+from .abstract_metrics import SumExceptBatchMetric, SumExceptBatchMSE, SumExceptBatchKL, CrossEntropyMetric, \
     ProbabilityMetric, NLL
-
 
 class NodeMSE(MeanSquaredError):
     def __init__(self, *args):
