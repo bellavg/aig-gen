@@ -35,6 +35,8 @@ if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7: # C
     print("Setting float32 matmul precision to 'high' for Tensor Cores.")
     torch.set_float32_matmul_precision('high')
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
 
