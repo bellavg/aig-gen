@@ -44,14 +44,6 @@ NUM_NODE_FEATURES = len(NODE_TYPE_KEYS) # Should be 4
 NUM_EDGE_FEATURES = len(EDGE_TYPE_KEYS) # Should be 2
 
 
-# Define one-hot encodings (Keep these hardcoded as they define the feature representation)
-NODE_TYPE_ENCODING = {
-    # Map "NODE_CONST0" to the first encoding vector (index 0), etc.
-    "NODE_CONST0": [1.0, 0.0, 0.0, 0.0], # Index 0 feature
-    "NODE_PI":     [0.0, 1.0, 0.0, 0.0], # Index 1 feature
-    "NODE_AND":    [0.0, 0.0, 1.0, 0.0], # Index 2 feature
-    "NODE_PO":     [0.0, 0.0, 0.0, 1.0]  # Index 3 feature
-}
 
 # IMPORTANT: Ensure keys/order match EDGE_TYPE_VOCAB derivation and NUM_EDGE_FEATURES
 # The order here should ideally match the order in EDGE_TYPE_KEYS
@@ -59,6 +51,12 @@ EDGE_LABEL_ENCODING = {
     "EDGE_REG": [1.0, 0.0],  # Index 0 feature
     "EDGE_INV": [0.0, 1.0]   # Index 1 feature
 }
+
+DECODING_EDGE_TYPE_NX = {
+    [1.0, 0.0]: "EDGE_REG" ,  # Index 0 feature
+  [0.0, 1.0]:"EDGE_INV"  # Index 1 feature
+}
+
 
 # --- Final Vocab Size Calculation ---
 # Determine the highest ID used across both the main vocab and special tokens
