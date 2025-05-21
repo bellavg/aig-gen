@@ -878,3 +878,81 @@ class SBMSamplingMetrics(SpectreSamplingMetrics):
         super().__init__(datamodule=datamodule,
                          compute_emd=False,
                          metrics_list=['degree', 'clustering', 'orbit', 'spectre', 'sbm'])
+
+
+# In src/analysis/spectre_utils.py (or a new helper file)
+import numpy as np
+import networkx as nx
+from src.analysis.dist_helper import compute_mmd, gaussian_emd  # Or your preferred kernel
+
+
+def directed_degree_worker(G_directed: nx.DiGraph):
+    """Calculates in-degree and out-degree histograms for a directed graph."""
+    if not G_directed.is_directed():
+        # Fallback or error if a non-directed graph is passed unexpectedly
+        G_directed = nx.DiGraph(G_directed)  # Ensure it's directed
+
+    in_degrees = [d for _, d in G_directed.in_degree()]
+    out_degrees = [d for _, d in G_directed.out_degree()]
+
+    # Determine max degree for histogram bins dynamically or use a fixed reasonable max
+    # For simplicity, using numpy's auto-binning based on max degree found
+    max_in_degree = 0
+    if in_degrees:  # Check if list is not empty
+        max_in_degree = np.max(in_degrees) if in_degrees else 0
+
+    max_out_degree = 0
+    if out_degrees:  # Check if list is not empty
+        max_out_degree = np.max(out_degrees) if out_degrees else 0
+
+    # Ensure there's at least one bin even if all degrees are 0 (e.g. for a graph with one node)
+    in_hist = np.histogram(in_degrees, bins=np.arange(0, max_in_degree + 2))[0]
+    out_hist = np.histogram(out_degrees, bins=np.arange(0, max_out_degree + 2))[0]
+
+    return {'in_degree_hist': in_hist, 'out_degree_hist': out_hist}
+
+
+def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
+                              graph_pred_list: List[nx.DiGraph],
+                              kernel=gaussian_emd,  # Or your preferred kernel from dist_helper
+                              is_parallel=True,
+                              compute_emd=False,  # This arg might be redundant if kernel implies emd
+                              **kwargs):
+    """
+    Computes MMD for in-degree and out-degree distributions between two lists of directed graphs.
+    """
+    sample_ref_in_hists = []
+    sample_ref_out_hists = []
+    sample_pred_in_hists = []
+    sample_pred_out_hists = []
+
+    graph_pred_list_remove_empty = [G for G in graph_pred_list if G.number_of_nodes() > 0]
+
+    if is_parallel:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for res_list in executor.map(directed_degree_worker, graph_ref_list):
+                sample_ref_in_hists.append(res_list['in_degree_hist'])
+                sample_ref_out_hists.append(res_list['out_degree_hist'])
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for res_list in executor.map(directed_degree_worker, graph_pred_list_remove_empty):
+                sample_pred_in_hists.append(res_list['in_degree_hist'])
+                sample_pred_out_hists.append(res_list['out_degree_hist'])
+    else:
+        for G_ref in graph_ref_list:
+            hists = directed_degree_worker(G_ref)
+            sample_ref_in_hists.append(hists['in_degree_hist'])
+            sample_ref_out_hists.append(hists['out_degree_hist'])
+        for G_pred in graph_pred_list_remove_empty:
+            hists = directed_degree_worker(G_pred)
+            sample_pred_in_hists.append(hists['in_degree_hist'])
+            sample_pred_out_hists.append(hists['out_degree_hist'])
+
+    mmd_in_degree = -1.0
+    mmd_out_degree = -1.0
+
+    if sample_ref_in_hists and sample_pred_in_hists:
+        mmd_in_degree = compute_mmd(sample_ref_in_hists, sample_pred_in_hists, kernel=kernel, **kwargs)
+    if sample_ref_out_hists and sample_pred_out_hists:
+        mmd_out_degree = compute_mmd(sample_ref_out_hists, sample_pred_out_hists, kernel=kernel, **kwargs)
+
+    return {'in_degree_mmd': mmd_in_degree, 'out_degree_mmd': mmd_out_degree}

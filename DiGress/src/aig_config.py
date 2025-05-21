@@ -51,125 +51,80 @@ EDGE_LABEL_ENCODING = {
 
 # --- Final Vocab Size Calculation ---
 # Determine the highest ID used across both the main vocab and special tokens
+# In src/aig_config.py
+
+import networkx as nx
+from typing import Union
+
+# Make sure NODE_TYPE_KEYS, EDGE_TYPE_KEYS are defined as before
+# NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
+# EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
 
 
+# Define these keys globally or ensure they are accessible
+VALIDITY_ERROR_KEYS = [
+    "VALID", "NOT_DAG", "MISSING_NODE_TYPE", "UNKNOWN_NODE_TYPE_ATTR",
+    "INVALID_NODE_TYPE_KEY", "CONST0_IN_DEGREE", "PI_IN_DEGREE",
+    "AND_IN_DEGREE", "PO_IN_DEGREE", "PO_OUT_DEGREE", "MISSING_EDGE_TYPE",
+    "UNKNOWN_EDGE_TYPE_ATTR", "INVALID_EDGE_TYPE_KEY", "NOT_DIGRAPH"
+]
 
-def check_validity(graph: Union[nx.Graph, nx.DiGraph]) -> bool: # Changed type hint
+
+def check_validity(graph: Union[nx.Graph, nx.DiGraph], return_error_code: bool = False) -> Union[bool, str]:
     """
-    Checks the structural validity of a (potentially partially built) AIG.
-    If the input graph is undirected, it's first converted to a directed graph
-    where edges go from smaller node ID to larger node ID.
-
-    Args:
-        graph (Union[nx.Graph, nx.DiGraph]): The AIG graph to validate.
-                                             Node and edge 'type' attributes are assumed
-                                             to be strings.
-
-    Returns:
-        bool: True if the graph is currently valid according to AIG rules, False otherwise.
+    Checks the structural validity of an AIG.
+    If return_error_code is True, returns a string code from VALIDITY_ERROR_KEYS.
+    Otherwise, returns bool.
     """
-    if not graph: # Handle empty graph case
-        return True
+    error_code_mode = return_error_code  # Store for clarity
 
-    working_graph = nx.DiGraph() # Ensure we are working with a DiGraph
+    if not isinstance(graph, nx.DiGraph):
+        return VALIDITY_ERROR_KEYS[13] if error_code_mode else False  # "NOT_DIGRAPH"
 
-    if isinstance(graph, nx.Graph) and not graph.is_directed():
-        # Input is undirected, convert to directed (smaller_id -> larger_id)
-        working_graph.add_nodes_from(graph.nodes(data=True)) # Copy nodes and their attributes
-        for u, v, data in graph.edges(data=True):
-            # data is a dictionary of edge attributes, make sure to copy them
-            edge_attrs = data.copy()
-            if u < v:
-                working_graph.add_edge(u, v, **edge_attrs)
-            else: # v < u (or u == v for self-loops, though less common for AIG edges from undirected)
-                working_graph.add_edge(v, u, **edge_attrs)
-    elif isinstance(graph, nx.DiGraph):
-        working_graph = graph # Use the graph directly if it's already a DiGraph
-    else:
-        # Should not happen if type hint is respected, but as a safeguard
-        print("Debug: Validity Check Failed - Input graph is neither nx.Graph nor nx.DiGraph.")
-        return False
+    working_graph = graph
 
-
-    # 1. Check DAG property (on the now guaranteed DiGraph)
     if not nx.is_directed_acyclic_graph(working_graph):
-        # print("Debug: Validity Check Failed - Not a DAG")
-        return False
+        return VALIDITY_ERROR_KEYS[1] if error_code_mode else False  # "NOT_DAG"
 
-    # Ensure NODE_TYPE_KEYS and EDGE_TYPE_KEYS are accessible
-    # These constants should be defined in your aig_config.py or globally
-    # For example:
-    # NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-    # EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
-
-    # It's safer to ensure they are defined, or pass them as arguments,
-    # but following the original structure:
-    try:
-        NODE_CONST0_STR = NODE_TYPE_KEYS[0]
-        NODE_PI_STR = NODE_TYPE_KEYS[1]
-        NODE_AND_STR = NODE_TYPE_KEYS[2]
-        NODE_PO_STR = NODE_TYPE_KEYS[3]
-    except (NameError, IndexError) as e:
-        print(f"Debug: Validity Check Failed - NODE_TYPE_KEYS not properly defined or accessible: {e}")
-        return False
-
-
+    # Node checks
     for node, data in working_graph.nodes(data=True):
         if 'type' not in data:
-            print(f"Debug: Validity Check Failed - Node {node} is missing 'type' attribute.")
-            return False
+            return VALIDITY_ERROR_KEYS[2] if error_code_mode else False  # "MISSING_NODE_TYPE"
         node_type = data['type']
 
-        # This check was "UNKNOWN_TYPE_ATTRIBUTE", which might be too specific if 'type' is just missing
-        # Keeping similar logic for now.
-        if node_type == "UNKNOWN_TYPE_ATTRIBUTE": # Consider changing this if 'type' can be missing
-            print(f"Debug: Validity Check Failed - Node {node} has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
-            return False
+        if node_type == "UNKNOWN_TYPE_ATTRIBUTE":  # Ensure this matches how unknown types are marked
+            return VALIDITY_ERROR_KEYS[3] if error_code_mode else False
         if node_type not in NODE_TYPE_KEYS:
-            print(f"Debug: Validity Check Failed - Node {node} has type '{node_type}' not in defined NODE_TYPE_KEYS.")
-            return False
+            return VALIDITY_ERROR_KEYS[4] if error_code_mode else False
 
         in_degree = working_graph.in_degree(node)
         out_degree = working_graph.out_degree(node)
 
-        if node_type == NODE_CONST0_STR:
+        if node_type == NODE_TYPE_KEYS[0]:  # NODE_CONST0
             if in_degree != 0:
-                # print(f"Debug: Validity Check Failed - CONST0 node {node} (type: {node_type}) has in-degree {in_degree} (should be 0).")
-                return False
-        elif node_type == NODE_PI_STR:
+                return VALIDITY_ERROR_KEYS[5] if error_code_mode else False
+        elif node_type == NODE_TYPE_KEYS[1]:  # NODE_PI
             if in_degree != 0:
-                # print(f"Debug: Validity Check Failed - PI node {node} (type: {node_type}) has in-degree {in_degree} (should be 0).")
-                return False
-        elif node_type == NODE_AND_STR:
-            if in_degree > 2:
-                # print(f"Debug: Validity Check Failed - AND node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 2).")
-                return False
-        elif node_type == NODE_PO_STR:
-            if in_degree > 1:
-                # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has in-degree {in_degree} (should be <= 1).")
-                return False
+                return VALIDITY_ERROR_KEYS[6] if error_code_mode else False
+        elif node_type == NODE_TYPE_KEYS[2]:  # NODE_AND
+            if in_degree > 2:  # Or == 2 if strictly two inputs
+                return VALIDITY_ERROR_KEYS[7] if error_code_mode else False
+        elif node_type == NODE_TYPE_KEYS[3]:  # NODE_PO
+            if in_degree > 1:  # Or == 1
+                return VALIDITY_ERROR_KEYS[8] if error_code_mode else False
             if out_degree != 0:
-                # print(f"Debug: Validity Check Failed - PO node {node} (type: {node_type}) has out-degree {out_degree} (should be 0).")
-                return False
+                return VALIDITY_ERROR_KEYS[9] if error_code_mode else False
 
-    # 3. Check Edge Types
-    try:
-        _ = EDGE_TYPE_KEYS # Check if EDGE_TYPE_KEYS is defined
-    except NameError as e:
-        print(f"Debug: Validity Check Failed - EDGE_TYPE_KEYS not defined or accessible: {e}")
-        return False
-
+    # Edge checks
     for u, v, data in working_graph.edges(data=True):
         if 'type' not in data:
-            print(f"Debug: Validity Check Failed - Edge ({u}-{v}) is missing 'type' attribute.")
-            return False
+            return VALIDITY_ERROR_KEYS[10] if error_code_mode else False  # "MISSING_EDGE_TYPE"
         edge_type = data['type']
-
-        if edge_type == "UNKNOWN_TYPE_ATTRIBUTE": # Similar to node type check
-            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has explicit 'UNKNOWN_TYPE_ATTRIBUTE': {data}")
-            return False
+        # Assuming "EDGE_GENERIC_OR_PADDING" is filtered out before this check by the converter
         if edge_type not in EDGE_TYPE_KEYS:
-            # print(f"Debug: Validity Check Failed - Edge ({u}-{v}) has type '{edge_type}' not in defined EDGE_TYPE_KEYS.")
-            return False
+            return VALIDITY_ERROR_KEYS[12] if error_code_mode else False  # "INVALID_EDGE_TYPE_KEY"
 
-    return True
+    return VALIDITY_ERROR_KEYS[0] if error_code_mode else True  # "VALID"
+
+# You might also want to pass NODE_TYPE_KEYS and EDGE_TYPE_KEYS explicitly
+# or ensure they are correctly imported within check_validity if it's complex.
