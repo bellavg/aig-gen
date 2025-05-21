@@ -41,7 +41,7 @@ echo "----------------------------------------"
 python gen_eval_aig.py configs/checkpoints_aig_typed_baseline/checkpoint_step_30000.pth \
     --num_graphs 10 \
     --max_nodes_generate 64 \
-    --min_nodes_generate 5 \
+    --min_nodes_generate 8 \
     --results_file my_aig_evaluation.txt \
     --output_generated_pkl generated_aigs_sample.pkl
 
