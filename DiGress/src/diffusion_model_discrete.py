@@ -6,13 +6,15 @@ import time
 import wandb
 import os
 
-from models.transformer_model import GraphTransformer
-from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete,\
+# Corrected imports to be absolute from the 'src' package
+from src.models.transformer_model import GraphTransformer
+from src.diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete, \
     MarginalUniformTransition
-from src.diffusion import diffusion_utils
-from src.train_metrics import TrainLossDiscrete
-from src.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
-from src import utils
+from src.diffusion import diffusion_utils # This was already good
+from src.metrics.train_metrics import TrainLossDiscrete
+from src.metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
+from src import utils # This was already good
+
 
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
@@ -130,7 +132,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             utils.setup_wandb(self.cfg)
 
     def on_train_epoch_start(self) -> None:
-        #self.print("Starting train epoch...")
+        self.print("Starting train epoch...")
         self.start_epoch_time = time.time()
         self.train_loss.reset()
         self.train_metrics.reset()
@@ -143,10 +145,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                       f" -- {time.time() - self.start_epoch_time:.1f}s ")
         epoch_at_metrics, epoch_bond_metrics = self.train_metrics.log_epoch_metrics()
         self.print(f"Epoch {self.current_epoch}: {epoch_at_metrics} -- {epoch_bond_metrics}")
-        # if torch.cuda.is_available():
-        #     print(torch.cuda.memory_summary())
-        # else:
-        #     print("CUDA is not available. Skipping memory summary.")
 
     def on_validation_epoch_start(self) -> None:
         self.val_nll.reset()
@@ -332,7 +330,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist_X, reduction='none')
         kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist_E, reduction='none')
-
         return diffusion_utils.sum_except_batch(kl_distance_X) + \
                diffusion_utils.sum_except_batch(kl_distance_E)
 
@@ -408,8 +405,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         """ Sample noise and apply it to the data. """
 
         # Sample a timestep t.
-        # When evaluating, the loss for t=0 is computed separately
-        lowest_t = 0 if self.training else 1
+        lowest_t = 1
         t_int = torch.randint(lowest_t, self.T + 1, size=(X.size(0), 1), device=X.device).float()  # (bs, 1)
         s_int = t_int - 1
 
@@ -569,29 +565,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             molecule_list.append([atom_types, edge_types])
 
         # Visualize chains
-        # if self.visualization_tools is not None:
-        #     self.print('Visualizing chains...')
-        #     current_path = os.getcwd()
-        #     num_molecules = chain_X.size(1)       # number of molecules
-        #     for i in range(num_molecules):
-        #         result_path = os.path.join(current_path, f'chains/{self.cfg.general.name}/'
-        #                                                  f'epoch{self.current_epoch}/'
-        #                                                  f'chains/molecule_{batch_id + i}')
-        #         if not os.path.exists(result_path):
-        #             os.makedirs(result_path)
-        #             _ = self.visualization_tools.visualize_chain(result_path,
-        #                                                          chain_X[:, i, :].numpy(),
-        #                                                          chain_E[:, i, :].numpy())
-        #         self.print('\r{}/{} complete'.format(i+1, num_molecules), end='', flush=True)
-        #     self.print('\nVisualizing molecules...')
-        #
-        #     # Visualize the final molecules
-        #     current_path = os.getcwd()
-        #     result_path = os.path.join(current_path,
-        #                                f'graphs/{self.name}/epoch{self.current_epoch}_b{batch_id}/')
-        #     self.visualization_tools.visualize(result_path, molecule_list, save_final)
-        #     self.print("Done.")
-        #
+        if self.visualization_tools is not None:
+            self.print('Visualizing chains...')
+            current_path = os.getcwd()
+            num_molecules = chain_X.size(1)       # number of molecules
+            for i in range(num_molecules):
+                result_path = os.path.join(current_path, f'chains/{self.cfg.general.name}/'
+                                                         f'epoch{self.current_epoch}/'
+                                                         f'chains/molecule_{batch_id + i}')
+                if not os.path.exists(result_path):
+                    os.makedirs(result_path)
+                    _ = self.visualization_tools.visualize_chain(result_path,
+                                                                 chain_X[:, i, :].numpy(),
+                                                                 chain_E[:, i, :].numpy())
+                self.print('\r{}/{} complete'.format(i+1, num_molecules), end='', flush=True)
+            self.print('\nVisualizing molecules...')
+
+            # Visualize the final molecules
+            current_path = os.getcwd()
+            result_path = os.path.join(current_path,
+                                       f'graphs/{self.name}/epoch{self.current_epoch}_b{batch_id}/')
+            self.visualization_tools.visualize(result_path, molecule_list, save_final)
+            self.print("Done.")
+
         return molecule_list
 
     def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):

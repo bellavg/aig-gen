@@ -1,7 +1,5 @@
 # DiGress: Discrete Denoising diffusion models for graph generation
 
-Update (Nov 20th, 2023): Working with large graphs (more than 100-200 nodes)? Consider using SparseDiff, a sparse version of DiGress: https://github.com/qym7/SparseDiff
-
 Update (July 11th, 2023): the code now supports multi-gpu. Please update all libraries according to the instructions. 
 All datasets should now download automatically
 
@@ -45,6 +43,23 @@ This code was tested with PyTorch 2.0.1, cuda 11.8 and torch_geometrics 2.3.1
     
      ```g++ -O2 -std=c++11 -o orca orca.cpp```
 
+
+## Download the data
+
+  - QM9 and Guacamol should download by themselves when you run the code.
+  - For the community, SBM and planar datasets, data can be found at https://github.com/KarolisMart/SPECTRE/tree/main/data
+     - For SBM, you can use: `wget https://raw.githubusercontent.com/KarolisMart/SPECTRE/main/data/sbm_200.pt`
+     - For planar, `wget https://raw.githubusercontent.com/KarolisMart/SPECTRE/main/data/planar_64_200.pt`
+    Download the files and simply place them in the `data` folder.
+  - Moses dataset can be found at https://github.com/molecularsets/moses/tree/master/data
+  
+If you want to run Guacamol on the filtered data, either download it from https://drive.switch.ch/index.php/s/pjlZ8A7PADiBGrr
+or follow these instructions:
+  - Set filter_dataset=True in `guacamol_dataset.py`
+  - Run main.py with cfg.dataset.filtered=False
+  - Delete data/guacamol/guacamol_pyg/processed
+  - Run main.py with cfg.dataset.filtered=True
+
 Note: graph_tool and torch_geometric currently seem to conflict on MacOS, I have not solved this issue yet.
 
 ## Run the code
@@ -60,22 +75,27 @@ of datasets that are currently available
     
 ## Checkpoints
 
-**My drive account has unfortunately been deleted, and I have lost access to the checkpoints. If you happen to have a downloaded checkpoint stored locally, I would be glad if you could send me an email at vignac.clement@gmail.com or raise a Github issue.**
-
 The following checkpoints should work with the latest commit:
 
-  - [QM9 (heavy atoms only)](https://drive.switch.ch/index.php/s/8IhyGE4giIW1wV3) \\
-  
-  - [Planar](https://drive.switch.ch/index.php/s/8IhyGE4giIW1wV3) \\
+  - Planar: https://drive.switch.ch/index.php/s/hRWLp8gOGOGFzgR \\
+    Performance of this checkpoint: 
+    - Test NLL: 1135.6080 
+    - `{'spectre': 0.006211824145982536, 'clustering': 0.0563302653184386, 'orbit': 0.00980205113753696, 'planar_acc': 0.85, 'sampling/frac_unique': 1.0, 'sampling/frac_unique_non_iso': 1.0, 'sampling/frac_unic_non_iso_valid': 0.85, 'sampling/frac_non_iso': 1.0} `
 
-  - MOSES (the model in the paper was trained a bit longer than this one): https://drive.google.com/file/d/1LUVzdZQRwyZWWHJFKLsovG9jqkehcHYq/view?usp=sharing -- This checkpoint has been sent to me, but I have not tested it. \\
+  - MOSES (the model in the paper was trained a bit longer than this one): https://drive.switch.ch/index.php/s/DBbvfMmezjg6KUm \\
+    Performance of this checkpoint:
+    - Test NLL: 203.8171 
+    - `{'valid': 0.86032, 'unique@1000': 1.0, 'unique@10000': 0.9999, 'FCD/Test': 0.6176261401223826, 'SNN/Test': 0.5493580505032953, 'Frag/Test': 0.9986637035374839, 'Scaf/Test': 0.8997144919185305, 'FCD/TestSF': 1.2799741890619032, 'SNN/TestSF': 0.5231424506655995, 'Frag/TestSF': 0.9968362360368359, 'Scaf/TestSF': 0.11830576038721641, 'IntDiv': 0.8550915438149056, 'IntDiv2': 0.8489191659624407, 'Filters': 0.9707550678817184, 'logP': 0.02719348046624242, 'SA': 0.05725088257521343, 'QED': 0.0043940205061221965, 'weight': 0.7913020095007184, 'Novelty': 0.9442790697674419}`
 
-  - SBM: ~~https://drive.switch.ch/index.php/s/rxWFVQX4Cu4Vq5j~~ \\
+  - SBM: https://drive.switch.ch/index.php/s/rxWFVQX4Cu4Vq5j \\
     Performance of this checkpoint:
     - Test NLL: 4757.903
     - `{'spectre': 0.0060240439382095445, 'clustering': 0.05020166160905111, 'orbit': 0.04615866844490847, 'sbm_acc': 0.675, 'sampling/frac_unique': 1.0, 'sampling/frac_unique_non_iso': 1.0, 'sampling/frac_unic_non_iso_valid': 0.625, 'sampling/frac_non_iso': 1.0}`
 
-  - Guacamol: https://drive.google.com/file/d/1KHNCnPJmPjIlmhnJh1RAvhmVBssKPqF4/view?usp=sharing -- This checkpoint has been sent to me, but I have not tested it.
+
+The following checkpoints require to revert to commit `682e59019dd33073b1f0f4d3aaba7de6a308602e` and run `pip install -e .`:
+
+  - Guacamol: https://drive.switch.ch/index.php/s/jjM3pIHdxWrUGOH
 
 ## Generated samples
 

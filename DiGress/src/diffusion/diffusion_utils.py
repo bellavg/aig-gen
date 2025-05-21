@@ -194,16 +194,15 @@ def sample_feature_noise(X_size, E_size, y_size, node_mask):
     epsE = epsE.type_as(float_mask)
     epsy = epsy.type_as(float_mask)
 
-    # TODO make non symmetric
-    # Get upper triangular part of edge noise, without main diagonal
+    # # Get upper triangular part of edge noise, without main diagonal
     # upper_triangular_mask = torch.zeros_like(epsE)
     # indices = torch.triu_indices(row=epsE.size(1), col=epsE.size(2), offset=1)
     # upper_triangular_mask[:, indices[0], indices[1], :] = 1
     #
     # epsE = epsE * upper_triangular_mask
     # epsE = (epsE + torch.transpose(epsE, 1, 2))
-
-    #assert (epsE == torch.transpose(epsE, 1, 2)).all() #check for symmetry removal
+    #
+    # assert (epsE == torch.transpose(epsE, 1, 2)).all()
 
     return PlaceHolder(X=epsX, E=epsE, y=epsy).mask(node_mask)
 
@@ -261,7 +260,7 @@ def sample_discrete_features(probX, probE, node_mask):
 
     # Sample E
     E_t = probE.multinomial(1).reshape(bs, n, n)   # (bs, n, n)
-    # E_t = torch.triu(E_t, diagonal=1) # remove symmetry
+    E_t = torch.triu(E_t, diagonal=1)
     # E_t = (E_t + torch.transpose(E_t, 1, 2))
 
     return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
@@ -382,7 +381,6 @@ def sample_discrete_feature_noise(limit_dist, node_mask):
     U_X = F.one_hot(U_X, num_classes=x_limit.shape[-1]).float()
     U_E = F.one_hot(U_E, num_classes=e_limit.shape[-1]).float()
 
-    # removed symmetry
     # # Get upper triangular part of edge noise, without main diagonal
     # upper_triangular_mask = torch.zeros_like(U_E)
     # indices = torch.triu_indices(row=U_E.size(1), col=U_E.size(2), offset=1)

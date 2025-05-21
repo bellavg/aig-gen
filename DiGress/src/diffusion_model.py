@@ -10,8 +10,8 @@ import wandb
 from models.transformer_model import GraphTransformer
 from diffusion.noise_schedule import PredefinedNoiseSchedule
 from src.diffusion import diffusion_utils
-from train_metrics import TrainLoss
-from abstract_metrics import SumExceptBatchMetric, SumExceptBatchMSE, NLL
+from metrics.train_metrics import TrainLoss
+from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchMSE, NLL
 from src import utils
 
 
@@ -593,7 +593,7 @@ class LiftedDenoisingDiffusion(pl.LightningModule):
                                                    node_mask=node_mask)
         X, E, y = z_T.X, z_T.E, z_T.y
 
-        assert (E == torch.transpose(E, 1, 2)).all()
+
         assert number_chain_steps < self.T
         chain_X_size = torch.Size((number_chain_steps, keep_chain, X.size(1)))
         chain_E_size = torch.Size((number_chain_steps, keep_chain, E.size(1), E.size(2)))
@@ -630,7 +630,7 @@ class LiftedDenoisingDiffusion(pl.LightningModule):
         # Finally sample the discrete data given the last latent code z0
         final_graph = self.sample_discrete_graph_given_z0(X, E, y, node_mask)
         X, E, y = final_graph.X, final_graph.E, final_graph.y
-        assert (E == torch.transpose(E, 1, 2)).all()
+
 
         print("Examples of generated graphs:")
         for i in range(min(5, X.shape[0])):
@@ -705,10 +705,10 @@ class LiftedDenoisingDiffusion(pl.LightningModule):
         pred_X = 1. / alpha_0 * (X_0 - sigma_0 * eps0.X)
         pred_E = 1. / alpha_0.unsqueeze(1) * (E_0 - sigma_0.unsqueeze(1) * eps0.E)
         pred_y = 1. / alpha_0.squeeze(1) * (y_0 - sigma_0.squeeze(1) * eps0.y)
-        assert (pred_E == torch.transpose(pred_E, 1, 2)).all()
+
 
         sampled = diffusion_utils.sample_normal(pred_X, pred_E, pred_y, sigma, node_mask).type_as(pred_X)
-        assert (sampled.E == torch.transpose(sampled.E, 1, 2)).all()
+
 
         sampled = utils.unnormalize(sampled.X, sampled.E, sampled.y, self.norm_values,
                                     self.norm_biases, node_mask, collapse=True)
@@ -725,7 +725,7 @@ class LiftedDenoisingDiffusion(pl.LightningModule):
         sigma_s = diffusion_utils.sigma(gamma_s, target_shape=X_t.size())
         sigma_t = diffusion_utils.sigma(gamma_t, target_shape=X_t.size())
 
-        E_t = (E_t + E_t.transpose(1, 2)) / 2
+
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t}
         extra_data = self.compute_extra_data(noisy_data)
         eps = self.forward(noisy_data, extra_data, node_mask)
