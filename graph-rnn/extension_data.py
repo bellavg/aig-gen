@@ -151,9 +151,17 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
 
         print(f"Loading PyG data from: {pyg_file_path}")
         try:
-            self.pyg_data_list = torch.load(pyg_file_path, map_location='cpu')
+            # MODIFICATION: Added weights_only=False
+            self.pyg_data_list = torch.load(pyg_file_path, map_location='cpu', weights_only=False)
             if not isinstance(self.pyg_data_list, list):
-                raise TypeError(f"Expected {pyg_file_path} to contain a list of PyG Data objects.")
+                # It's possible torch.load returns a single Data object if the .pt file contained only one.
+                # If so, wrap it in a list.
+                if 'torch_geometric.data.data.Data' in str(type(self.pyg_data_list)):  # Basic check
+                    print("Note: Loaded a single PyG Data object, wrapping it in a list.")
+                    self.pyg_data_list = [self.pyg_data_list]
+                else:
+                    raise TypeError(
+                        f"Expected {pyg_file_path} to contain a list of PyG Data objects, but got {type(self.pyg_data_list)}.")
             print(f"Loaded {len(self.pyg_data_list)} PyG Data objects.")
         except FileNotFoundError:
             raise FileNotFoundError(f"The PyG data file was not found at {pyg_file_path}")
@@ -213,21 +221,15 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
             }
 
         if self.dataset_type == 'aig-custom-topsort':
-            # MODIFICATION: Use the inherent node order (0 to N-1) as the topological sort
-            # This assumes the PyG data (and thus 'g') has nodes 0..N-1 in the desired topological order.
             if not nx.is_directed_acyclic_graph(g):
                 print(
                     f"Warning: Graph (from PyG index {original_pyg_idx}) is not a DAG, though node order is preserved. "
                     "Sequential processing might be problematic.")
-                # Depending on severity, you might return empty or try to proceed.
-                # For now, we'll proceed, but this is a critical assumption for GraphRNN.
 
-            # The nodes in 'g' are 0, 1, ..., num_nodes_in_graph - 1.
-            # This list will serve as the processing order.
             processing_node_order = list(range(num_nodes_in_graph))
 
             node_attr_list = []
-            for node_id in processing_node_order:  # Iterate in the 0 to N-1 order
+            for node_id in processing_node_order:
                 try:
                     attr = g.nodes[node_id]['type']
                     if not isinstance(attr, (list, np.ndarray)) or len(attr) != self.num_node_features:
@@ -244,13 +246,9 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
                 padded_node_attr_onehot[:num_nodes_in_graph] = stacked_node_attrs
 
             x_adj_list = []
-            # For node 'i' in the processing_node_order (which is node with original label 'i')
-            # its connections S_i are to predecessors p_window_idx in that same order.
             for i_idx_in_order, current_node_label in enumerate(processing_node_order):
                 s_i = torch.zeros(self.m, self.num_edge_features, dtype=torch.float)
-                for p_window_idx in range(self.m):  # p_window_idx is 0 for immediate predecessor, 1 for next, etc.
-                    # The actual label of the predecessor node in the processing_node_order
-                    # is processing_node_order[i_idx_in_order - 1 - p_window_idx]
+                for p_window_idx in range(self.m):
                     pred_relative_idx = i_idx_in_order - 1 - p_window_idx
 
                     if pred_relative_idx >= 0:
@@ -263,8 +261,6 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
                                         edge_attr) != self.num_edge_features:
                                     raise ValueError(
                                         f"Edge ({predecessor_node_label}-{current_node_label}) 'type' (from PyG index {original_pyg_idx}) has wrong format/length ({len(edge_attr)}). Expected {self.num_edge_features}")
-                                # s_i stores connection to (immediate pred, pred-1, pred-2, ...)
-                                # So s_i[0] is connection to immediate predecessor (p_window_idx=0)
                                 s_i[p_window_idx, :] = torch.tensor(edge_attr, dtype=torch.float)
                             except KeyError:
                                 raise ValueError(
