@@ -22,7 +22,7 @@ node_count:
 node_pred:
   T: 64 # Number of diffusion timesteps for node attributes
   loader:
-    batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
+    batch_size: 128
     num_workers: 0
   num_epochs: 700
   graph_encoder:

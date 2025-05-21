@@ -12,7 +12,7 @@ module load CUDA/11.6.0
 
 source activate LayerDAG
 # Clear pip's cache
-
+export CUDA_LAUNCH_BLOCKING=1 # Add this line
 # --- Training Command ---
 echo "Starting LayerDAG Training (Config: configs/LayerDAG/aig.yaml)"
 srun python -u train.py \

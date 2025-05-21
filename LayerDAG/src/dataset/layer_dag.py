@@ -176,6 +176,47 @@ class LayerDAGNodeCountDataset(LayerDAGBaseDataset):
         input_n_start = self.input_n_start[index]
         input_n_end = self.input_n_end[index]
 
+        # --- BEGIN ADDED DEBUG BLOCK ---
+        # These are the 'raw' node attributes and edges for this specific training instance / step
+        # before they go into the collate function.
+        # self.input_x_n contains all node attributes for all graphs processed so far,
+        # so we slice it for the current sample.
+        current_sample_input_x_n = self.input_x_n[input_n_start:input_n_end]
+        num_nodes_for_this_sample_slice = len(current_sample_input_x_n)
+
+        current_sample_src_edges = self.input_src[input_e_start:input_e_end]
+        current_sample_dst_edges = self.input_dst[input_e_start:input_e_end]
+
+        if num_nodes_for_this_sample_slice == 0 and (len(current_sample_src_edges) > 0 or len(current_sample_dst_edges) > 0):
+            print(f"DEBUG LayerDAGNodeCountDataset [Index: {index}]: "
+                  f"Zero nodes for this sample slice but edges are present! "
+                  f"input_n_start={input_n_start}, input_n_end={input_n_end}")
+            # This case should ideally not happen if there's always at least a dummy node.
+
+        if len(current_sample_src_edges) > 0: # Only check if there are edges
+            max_src_idx = current_sample_src_edges.max().item()
+            min_src_idx = current_sample_src_edges.min().item()
+            max_dst_idx = current_sample_dst_edges.max().item()
+            min_dst_idx = current_sample_dst_edges.min().item()
+
+            # The node IDs (t, u) stored in self.input_src/dst are 1-indexed during graph processing.
+            # And self.input_x_n is indexed such that index 'k' corresponds to node ID 'k'.
+            # So, max_src_idx and max_dst_idx must be < num_nodes_for_this_sample_slice.
+            # And min_src_idx and min_dst_idx must be >= 0 (dummy node is at index 0).
+            if max_src_idx >= num_nodes_for_this_sample_slice or \
+               max_dst_idx >= num_nodes_for_this_sample_slice or \
+               min_src_idx < 0 or min_dst_idx < 0:
+                print(f"CRITICAL DEBUG LayerDAGNodeCountDataset [Index: {index}]: Out-of-bounds edge index detected LOCALLY.")
+                print(f"  Num nodes in this sample's slice (len(self.input_x_n[slice])): {num_nodes_for_this_sample_slice}")
+                print(f"  Edge src indices: min={min_src_idx}, max={max_src_idx}")
+                print(f"  Edge dst indices: min={min_dst_idx}, max={max_dst_idx}")
+                print(f"  Slice details: input_n_start={input_n_start}, input_n_end={input_n_end}, "
+                      f"input_e_start={input_e_start}, input_e_end={input_e_end}")
+                # To further debug, you might want to save these specific slices or raise an error
+                # raise ValueError(f"Local out-of-bounds edge index at dataset index {index}")
+        # --- END ADDED DEBUG BLOCK ---
+
+
         # Absolute and relative (with respect to the new layer) layer idx
         # for potential extra encodings.
         input_abs_level = self.input_level[input_n_start:input_n_end]
@@ -183,6 +224,11 @@ class LayerDAGNodeCountDataset(LayerDAGBaseDataset):
 
         if self.conditional:
             input_g = self.input_g[index]
+            # Ensure input_g is a valid index for self.input_y
+            if not (0 <= input_g < len(self.input_y)):
+                print(
+                    f"CRITICAL DEBUG LayerDAGNodeCountDataset [Index: {index}]: Invalid input_g index {input_g} for self.input_y length {len(self.input_y)}")
+                # Handle error appropriately
             input_y = self.input_y[input_g].item()
 
             return self.input_src[input_e_start:input_e_end],\

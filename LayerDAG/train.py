@@ -116,12 +116,40 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
                 batch_y = None
 
             num_nodes = len(batch_x_n)
+
+            if batch_edge_index.numel() > 0:
+                max_val_in_edge_index = batch_edge_index.max().item()
+                min_val_in_edge_index = batch_edge_index.min().item()
+                if max_val_in_edge_index >= num_nodes or min_val_in_edge_index < 0:
+                    error_msg = (
+                        f"CRITICAL ERROR in batch for Node Count training:\n"
+                        f"  batch_edge_index.max() ({max_val_in_edge_index}) >= num_nodes ({num_nodes}) OR "
+                        f"batch_edge_index.min() ({min_val_in_edge_index}) < 0.\n"
+                        f"  batch_x_n.shape: {batch_x_n.shape}\n"
+                        f"  batch_edge_index.shape: {batch_edge_index.shape}\n"
+                        # Consider printing parts of batch_edge_index or saving the problematic batch_data
+                    )
+                    print(error_msg)
+                    # To find the problematic graph(s) within the batch, you'd need to inspect
+                    # the components of `batch_data` that formed this `batch_edge_index` and `batch_x_n`
+                    # before collation, or save `batch_data` itself.
+                    raise ValueError("Invalid edge index detected for spmatrix, halting.")
+            # ---- END ADDED DEBUG ----
+
             batch_A = dglsp.spmatrix(batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
             batch_x_n = batch_x_n.to(device)
             batch_abs_level = batch_abs_level.to(device)
             batch_rel_level = batch_rel_level.to(device)
             batch_A_n2g = dglsp.spmatrix(batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
             batch_label = batch_label.to(device)
+
+            print(f"DEBUG train.py: num_nodes (len(batch_x_n)): {len(batch_x_n)}")
+            if batch_edge_index.numel() > 0:
+                print(f"DEBUG train.py: batch_edge_index device: {batch_edge_index.device}")
+                print(f"DEBUG train.py: batch_edge_index min: {batch_edge_index.min().item()}")
+                print(f"DEBUG train.py: batch_edge_index max: {batch_edge_index.max().item()}")
+            else:
+                print(f"DEBUG train.py: batch_edge_index is EMPTY")
 
             batch_pred = model(batch_A, batch_x_n, batch_abs_level,
                                batch_rel_level, batch_A_n2g, batch_y)
