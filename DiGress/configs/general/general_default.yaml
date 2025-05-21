@@ -11,7 +11,7 @@ test_only: null         # Use absolute path
 check_val_every_n_epochs: 10
 sample_every_val: 4
 val_check_interval: null
-samples_to_generate: 256       # We advise to set it to 2 x batch_size maximum
+samples_to_generate: 64      # We advise to set it to 2 x batch_size maximum
 samples_to_save: 0
 chains_to_save: 0
 log_every_steps: 50

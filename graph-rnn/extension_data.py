@@ -1,8 +1,10 @@
+#extension_data.py
 import numpy as np
 import networkx as nx
 import torch
 import random
 from aig_config import NUM_EDGE_FEATURES, NUM_NODE_FEATURES
+import os
 
 
 # It's good practice to have these defined or passed if they vary

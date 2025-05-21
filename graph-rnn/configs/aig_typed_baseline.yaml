@@ -1,0 +1,54 @@
+# config_aig_typed_baseline.yaml
+
+model:
+  # Mode for directed graph generation, using topological sort.
+  # This should match the 'dataset_type' in DirectedGraphDataSet and your processing logic.
+  mode: 'aig-custom-topsort'
+  edge_model: "rnn"  # Using RNN for edge prediction as a common baseline
+
+  GraphRNN:
+    embedding_size: 32  # Common default
+    hidden_size: 64     # Common default
+    num_layers: 4       # Common default
+    # CRUCIAL: Set these based on your aig_config.py
+    num_node_classes: 4 # e.g., 4 if you have 4 node types (PI, PO, AND, CONST0)
+    edge_feature_len: 2  # e.g., 2 if you have 2 edge types (REG, INV)
+
+  EdgeRNN: # Configuration for the edge-level RNN
+    embedding_size: 16  # Common default, smaller than GraphRNN's embedding
+    hidden_size: 32     # Common default, smaller than GraphRNN's hidden
+    num_layers: 4       # Common default
+    # CRUCIAL: Set this based on your aig_config.py
+    edge_feature_len: 2 # Must match GraphRNN.edge_feature_len
+
+data:
+  # 'dataset' can be a descriptive name. The actual data loading
+  # will depend on how you pass your list of nx.DiGraph objects to DirectedGraphDataSet.
+  dataset: 'aig_typed'
+  # 'dataset_type' can be used by DirectedGraphDataSet to select
+  # the correct data processing logic (e.g. 'aig-custom-topsort').
+  # This is already handled by model.mode if your train script aligns them.
+  # bfs: false # Not strictly BFS for topological sort; this flag's effect depends on DirectedGraphDataSet logic.
+             # The 'aig-custom-topsort' in your extension_data.py uses nx.topological_sort.
+  m: 30      # M-window size. Default from config_dag.yaml.
+             # Consider calculating an optimal M for your AIGs (e.g., using calculate_m_values.py).
+             # config_dag_aig.yaml uses m: 63, choose based on your AIG characteristics. Let's start with a moderate 30.
+  train_split: 0.8 # Common default
+
+  # These might be passed to DirectedGraphDataSet if your train.py script is set up to do so.
+  # However, the model configuration for num_node_classes and edge_feature_len is primary.
+  # num_node_features: YOUR_NUM_NODE_FEATURES # From aig_config.py
+  # num_edge_features: YOUR_NUM_EDGE_FEATURES # From aig_config.py
+
+train:
+  steps: 96000  # Default from various configs
+  batch_size: 32 # Default from various configs
+  lr: 0.003      # Default from various configs
+  lr_schedule_milestones: [24000, 48000, 72000] # Adjusted proportionally from [2400, 3000] for longer training
+                                                # Or keep as [2400, 3000] if preferred for quicker LR drops.
+  lr_schedule_gamma: 0.3  # Default from various configs
+  print_iter: 100         # Default from various configs
+  checkpoint_iter: 10000  # Default from various configs
+  checkpoint_dir: "./checkpoints_aig_typed_baseline"
+  log_dir: "./log_aig_typed_baseline"
+  node_attribute_loss_weight: 1.0 # Weight for the node attribute prediction loss vs edge prediction loss. Default to 1.0.

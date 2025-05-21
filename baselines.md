@@ -5,7 +5,7 @@ Baselines to test
 |           |                     |    |               |                     |                |
 |-----------|---------------------|----|---------------|---------------------|----------------|
 | Graph-RNN | Not Running         | NA | no test       |                     |                |
-| DiGress   | trying to run       | NA | Untested      |                     | eval fucked    |
+| DiGress   | Running...          | NA | Untested      |                     | eval fucked    |
 | LayerDAG  | trying to run train |    | untested      |                     |                |
 
 

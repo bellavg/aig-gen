@@ -28,6 +28,13 @@ from src.diffusion_model import LiftedDenoisingDiffusion
 from src.diffusion_model_discrete import DiscreteDenoisingDiffusion
 from src.diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
 #
+import torch# Set matmul precision for Tensor Cores
+# Options: 'highest' (default), 'high', 'medium'
+# 'high' or 'medium' can leverage Tensor Cores for float32 matrix multiplications
+if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7: # Check for Volta or newer
+    print("Setting float32 matmul precision to 'high' for Tensor Cores.")
+    torch.set_float32_matmul_precision('high')
+
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
 
@@ -320,6 +327,20 @@ def main(cfg: DictConfig):
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")
 
     use_gpu = cfg.general.gpus > 0 and torch.cuda.is_available()
+    if hasattr(torch, 'compile') and use_gpu:
+        if cfg.general.get('local_rank', 0) == 0:
+            print("Attempting to compile the model with torch.compile(mode='reduce-overhead')...")
+        try:
+            model = torch.compile(model, mode="reduce-overhead")  # Defaulting to "reduce-overhead"
+            if cfg.general.get('local_rank', 0) == 0:
+                print(f"Model compiled successfully with mode: reduce-overhead.")
+        except Exception as e:
+            if cfg.general.get('local_rank', 0) == 0:
+                print(f"torch.compile() failed with error: {e}. Proceeding without compilation.")
+    elif not use_gpu and cfg.general.get('local_rank', 0) == 0:
+        print("Skipping torch.compile() as not running on GPU.")
+    elif not hasattr(torch, 'compile') and cfg.general.get('local_rank', 0) == 0:
+        print("Skipping torch.compile() as it's not available in this PyTorch version.")
 
     trainer_strategy = None
     if use_gpu:
@@ -337,6 +358,7 @@ def main(cfg: DictConfig):
         accelerator='gpu' if use_gpu else 'cpu',
         devices=cfg.general.gpus if use_gpu else 1,
         max_epochs=cfg.train.n_epochs,
+        precision='bf16-mixed',
         check_val_every_n_epoch=cfg.general.check_val_every_n_epochs,
         fast_dev_run=cfg.general.name == 'debug',
         enable_progress_bar=cfg.train.get('progress_bar', False),  # Use .get

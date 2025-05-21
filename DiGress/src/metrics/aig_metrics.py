@@ -28,7 +28,8 @@ from src.datasets.aig_custom_dataset import convert_pyg_to_nx_for_aig_validation
 
 
 # --- Helper functions for Directed Degree Statistics ---
-# Ideally, these would go into src/analysis/spectre_utils.py or src/analysis/dist_helper.py
+# These are defined here for self-containment but would ideally be in a utils file.
+# Note: These degree helpers are currently NOT called if degree MMD is disabled.
 
 def directed_degree_worker(G_directed: nx.DiGraph) -> Dict[str, np.ndarray]:
     """
@@ -36,7 +37,6 @@ def directed_degree_worker(G_directed: nx.DiGraph) -> Dict[str, np.ndarray]:
     Returns a dictionary with 'in_degree_hist' and 'out_degree_hist'.
     """
     if not isinstance(G_directed, nx.DiGraph):
-        # This case should ideally not be hit if inputs are correct
         warnings.warn("directed_degree_worker received a non-DiGraph. Attempting conversion.")
         G_directed = nx.DiGraph(G_directed)
 
@@ -45,15 +45,12 @@ def directed_degree_worker(G_directed: nx.DiGraph) -> Dict[str, np.ndarray]:
 
     max_in_degree = 0
     if in_degrees:
-        max_in_degree = np.max(in_degrees)
+        max_in_degree = np.max(in_degrees) if in_degrees else 0
 
     max_out_degree = 0
     if out_degrees:
-        max_out_degree = np.max(out_degrees)
+        max_out_degree = np.max(out_degrees) if out_degrees else 0
 
-    # np.arange creates bins up to max_degree + 1, so histogram covers up to max_degree
-    # Bins are [0,1), [1,2), ..., [max_degree, max_degree+1)
-    # The length of the histogram will be max_degree + 1
     in_hist = np.histogram(in_degrees, bins=np.arange(0, max_in_degree + 2), density=False)[0]
     out_hist = np.histogram(out_degrees, bins=np.arange(0, max_out_degree + 2), density=False)[0]
 
@@ -62,7 +59,7 @@ def directed_degree_worker(G_directed: nx.DiGraph) -> Dict[str, np.ndarray]:
 
 def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
                               graph_pred_list: List[nx.DiGraph],
-                              kernel_func=gaussian_emd,  # Pass the actual kernel function
+                              kernel_func=gaussian_emd,
                               is_parallel=True,
                               **kernel_kwargs) -> Dict[str, float]:
     """
@@ -73,12 +70,10 @@ def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
     sample_pred_in_hists = []
     sample_pred_out_hists = []
 
-    # Filter out empty graphs to prevent errors in degree calculation
     graph_ref_list_non_empty = [G for G in graph_ref_list if G.number_of_nodes() > 0]
     graph_pred_list_non_empty = [G for G in graph_pred_list if G.number_of_nodes() > 0]
 
     if not graph_ref_list_non_empty or not graph_pred_list_non_empty:
-        warnings.warn("One or both graph lists are empty after filtering, cannot compute directed degree MMDs.")
         return {'in_degree_mmd': -1.0, 'out_degree_mmd': -1.0}
 
     if is_parallel:
@@ -91,6 +86,7 @@ def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
                 sample_pred_in_hists.append(res_dict['in_degree_hist'])
                 sample_pred_out_hists.append(res_dict['out_degree_hist'])
     else:
+        # Sequential execution
         for G_ref in graph_ref_list_non_empty:
             hists = directed_degree_worker(G_ref)
             sample_ref_in_hists.append(hists['in_degree_hist'])
@@ -103,9 +99,9 @@ def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
     mmd_in_degree = -1.0
     mmd_out_degree = -1.0
 
-    if sample_ref_in_hists and sample_pred_in_hists:  # Ensure lists are not empty
+    if sample_ref_in_hists and sample_pred_in_hists:
         mmd_in_degree = compute_mmd(sample_ref_in_hists, sample_pred_in_hists, kernel=kernel_func, **kernel_kwargs)
-    if sample_ref_out_hists and sample_pred_out_hists:  # Ensure lists are not empty
+    if sample_ref_out_hists and sample_pred_out_hists:
         mmd_out_degree = compute_mmd(sample_ref_out_hists, sample_pred_out_hists, kernel=kernel_func, **kernel_kwargs)
 
     return {'in_degree_mmd': mmd_in_degree, 'out_degree_mmd': mmd_out_degree}
@@ -124,7 +120,6 @@ def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
             node_features_tensor.ndim == 2 and
             node_features_tensor.shape[0] == num_nodes_int and
             node_features_tensor.shape[1] == NUM_NODE_FEATURES):
-        # warnings.warn(f"Convert Model Output (to NX): Node features tensor incorrect format.") # Reduced verbosity
         return None
 
     for i in range(num_nodes_int):
@@ -146,12 +141,10 @@ def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
     if num_edges_in_prediction > 0:
         if not (isinstance(edge_index_tensor, torch.Tensor) and edge_index_tensor.ndim == 2 and edge_index_tensor.shape[
             0] == 2):
-            # warnings.warn(f"Convert Model Output (to NX): Edge index tensor incorrect dimensions.")
             return None
         if not (isinstance(edge_features_tensor, torch.Tensor) and edge_features_tensor.ndim == 2 and
                 edge_features_tensor.shape[0] == num_edges_in_prediction and
                 edge_features_tensor.shape[1] == expected_edge_feature_dim):
-            # warnings.warn(f"Convert Model Output (to NX): Edge features tensor incorrect shape.")
             return None
 
         for i in range(num_edges_in_prediction):
@@ -165,7 +158,7 @@ def convert_raw_model_output_to_nx_aig(node_features_tensor: torch.Tensor,
             shifted_type_index = np.argmax(edge_feature_vector_one_hot)
 
             if shifted_type_index == 0:
-                continue  # Class 0 is "EDGE_GENERIC_OR_PADDING" or "no edge", so don't add
+                continue
             else:
                 actual_aig_type_index = shifted_type_index - 1
                 if not (0 <= actual_aig_type_index < len(EDGE_TYPE_KEYS)):
@@ -182,13 +175,16 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, datamodule: Any):
         nn.Module.__init__(self)
         self.compute_emd = datamodule.cfg.model.get('compute_emd_metrics', False)
-        self.metrics_list = ['aig_structural_validity', 'aig_acyclicity', 'degree', 'aig_validity_breakdown']
+        # Define all potential metrics; actual computation will be conditional
+        self.metrics_list = ['aig_structural_validity', 'aig_acyclicity',
+                             'aig_validity_breakdown', 'sampling_quality']
+        # 'degree' metric is removed as per user request
+
         self.local_rank = datamodule.cfg.general.get('local_rank', 0)
         self.train_graphs: List[nx.DiGraph] = []
         self.val_graphs: List[nx.DiGraph] = []
         self.test_graphs: List[nx.DiGraph] = []
 
-        # Load reference graphs
         if hasattr(datamodule, 'train_dataloader') and datamodule.train_dataloader() is not None:
             if self.local_rank == 0: print("AIGSamplingMetrics: Loading training reference graphs...")
             self.train_graphs = self.loader_to_nx(datamodule.train_dataloader())
@@ -240,7 +236,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
             if not isinstance(node_indices_tensor, torch.Tensor) or not isinstance(edge_indices_matrix, torch.Tensor):
                 if local_rank == 0: warnings.warn(f"AIGMetrics (Graph {i}): Data not in tensor format. Skipping.")
                 continue
-            if node_indices_tensor.ndim == 0 or node_indices_tensor.shape[0] == 0:  # Check for 0-dim or 0-size
+            if node_indices_tensor.ndim == 0 or node_indices_tensor.shape[0] == 0:
                 if local_rank == 0: warnings.warn(
                     f"AIGMetrics (Graph {i}): Graph has 0 nodes or scalar node tensor. Skipping.")
                 continue
@@ -268,7 +264,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
                         actual_aig_edges_formed += 1
                         adj_edges_list.append([u_idx, v_idx])
                         if not (0 <= edge_class_idx < expected_edge_feature_output_dim):
-                            if local_rank == 0:  # Log only on rank 0 to avoid spam
+                            if local_rank == 0:
                                 warnings.warn(
                                     f"AIGMetrics (Graph {i}, Edge {u_idx}->{v_idx}): Invalid edge_class_idx {edge_class_idx}. Defaulting to padding-like one-hot.")
                             edge_one_hot_np = np.zeros(expected_edge_feature_output_dim)
@@ -312,12 +308,13 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         validity_error_counts = Counter()
         num_total_generated = len(generated_graphs_nx_directed)
 
+        # --- Always compute these validity metrics ---
         for g in generated_graphs_nx_directed:
             error_code_or_true = aig_check_validity_with_code(g, return_error_code=True)
-            if isinstance(error_code_or_true, str):  # Should be a string if return_error_code=True
+            if isinstance(error_code_or_true, str):
                 validity_error_counts[error_code_or_true] += 1
-            elif error_code_or_true is True:  # Fallback if it returns boolean
-                validity_error_counts[VALIDITY_ERROR_KEYS[0]] += 1  # Count as "VALID"
+            elif error_code_or_true is True:
+                validity_error_counts[VALIDITY_ERROR_KEYS[0]] += 1
 
         if 'aig_structural_validity' in self.metrics_list:
             num_structurally_valid = validity_error_counts.get(VALIDITY_ERROR_KEYS[0], 0)
@@ -327,13 +324,13 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
                 wandb.summary[f'{name}_aig_structural_validity_fraction'] = structural_validity_fraction
 
         if 'aig_acyclicity' in self.metrics_list:
-            # Assuming VALIDITY_ERROR_KEYS[1] is "NOT_DAG" or similar
-            # If not, this part needs adjustment based on your actual error keys.
-            not_dag_key = "NOT_DAG"  # Default, adjust if your key is different
-            if len(VALIDITY_ERROR_KEYS) > 1 and VALIDITY_ERROR_KEYS[1] == not_dag_key:  # Check if it's the expected key
-                num_non_dag = validity_error_counts.get(not_dag_key, 0)
-            else:  # Fallback if "NOT_DAG" key is not as expected or VALIDITY_ERROR_KEYS is short
+            not_dag_key = "NOT_DAG"
+            if not_dag_key not in VALIDITY_ERROR_KEYS:
+                if local_rank == 0: warnings.warn(
+                    f"'{not_dag_key}' not in VALIDITY_ERROR_KEYS. Acyclicity might be miscalculated based on direct check.")
                 num_non_dag = sum(1 for g in generated_graphs_nx_directed if not nx.is_directed_acyclic_graph(g))
+            else:
+                num_non_dag = validity_error_counts.get(not_dag_key, 0)
 
             num_acyclic = num_total_generated - num_non_dag
             acyclicity_fraction = num_acyclic / num_total_generated if num_total_generated > 0 else 0.0
@@ -347,7 +344,7 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
                 count = validity_error_counts.get(err_key, 0)
                 fraction = count / num_total_generated if num_total_generated > 0 else 0.0
                 to_log[f'aig_validity_errors/{err_key}'] = fraction
-                if local_rank == 0 and count > 0:
+                if local_rank == 0 and (count > 0 or err_key == VALIDITY_ERROR_KEYS[0]):
                     print(f"  {err_key}: {count} ({fraction:.2%})")
             if local_rank == 0: print("------------------------------------\n")
 
@@ -355,57 +352,50 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         to_log['aig_metrics/frac_graphs_mostly_padding_edges'] = frac_mostly_padding_edges
         avg_actual_edges = actual_aig_edges_formed / num_total_generated if num_total_generated > 0 else 0.0
         to_log['aig_metrics/avg_actual_aig_edges_formed'] = avg_actual_edges
+        # --- End of always-computed metrics ---
 
-        if 'degree' in self.metrics_list:
-            current_ref_graphs = self.test_graphs if test else self.val_graphs
-            if current_ref_graphs and generated_graphs_nx_directed:
-                # Use the new directed_degree_stats_mmd
-                degree_mmds = directed_degree_stats_mmd(
-                    current_ref_graphs,
-                    generated_graphs_nx_directed,
-                    is_parallel=True,  # Ensure your helper supports this
-                    # kernel_func=gaussian_emd, # Pass the kernel function explicitly
-                    # compute_emd=self.compute_emd # This might be redundant if kernel implies it
-                )
-                to_log['graph_stats/in_degree_mmd'] = degree_mmds.get('in_degree_mmd', -1.0)
-                to_log['graph_stats/out_degree_mmd'] = degree_mmds.get('out_degree_mmd', -1.0)
-                if wandb.run and local_rank == 0:
-                    wandb.summary[f'{name}_in_degree_mmd'] = degree_mmds.get('in_degree_mmd', -1.0)
-                    wandb.summary[f'{name}_out_degree_mmd'] = degree_mmds.get('out_degree_mmd', -1.0)
-            else:
-                to_log['graph_stats/in_degree_mmd'] = -1.0
-                to_log['graph_stats/out_degree_mmd'] = -1.0
+        # --- Compute these metrics ONLY during final testing ---
+        if test:
+            # Degree MMD metrics are now removed as per user request.
+            # if 'degree' in self.metrics_list:
+            #    pass # Degree MMD removed
 
-        def combined_aig_validity_for_eval_fractions(g_eval_nx: nx.DiGraph) -> bool:
-            return aig_check_validity_with_code(g_eval_nx, return_error_code=False)
+            if 'sampling_quality' in self.metrics_list:
+                if local_rank == 0: print("Calculating sampling quality metrics (VUN - test time)...")
 
-        eval_generated_graphs_nx = [g for g in generated_graphs_nx_directed if g.number_of_nodes() > 0]
-        eval_train_graphs_nx = [g for g in self.train_graphs if g.number_of_nodes() > 0]
-        frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = 0.0, 0.0, 0.0
-        frac_non_iso_to_train = 0.0
+                def combined_aig_validity_for_eval_fractions(g_eval_nx: nx.DiGraph) -> bool:
+                    return aig_check_validity_with_code(g_eval_nx, return_error_code=False)
 
-        if not eval_generated_graphs_nx:
-            if local_rank == 0: print("AIGMetrics: No non-empty generated graphs for uniqueness/novelty checks.")
-        elif not eval_train_graphs_nx:
-            if local_rank == 0: print(
-                "AIGMetrics: No training graphs for novelty. Calculating uniqueness/validity of generated set only.")
-            frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
-                eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, [],
-                                                          validity_func=combined_aig_validity_for_eval_fractions)
-            frac_non_iso_to_train = 1.0
-        else:
-            frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
-                eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, eval_train_graphs_nx,
-                                                          validity_func=combined_aig_validity_for_eval_fractions)
-            isomorphic_fraction = eval_fraction_isomorphic(eval_generated_graphs_nx, eval_train_graphs_nx)
-            frac_non_iso_to_train = 1.0 - isomorphic_fraction
+                eval_generated_graphs_nx = [g for g in generated_graphs_nx_directed if g.number_of_nodes() > 0]
+                eval_train_graphs_nx = [g for g in self.train_graphs if g.number_of_nodes() > 0]
+                frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = 0.0, 0.0, 0.0
+                frac_non_iso_to_train = 0.0
 
-        to_log.update({
-            'sampling_quality/frac_unique_aigs': frac_unique,
-            'sampling_quality/frac_unique_non_iso_aigs': frac_unique_non_iso,
-            'sampling_quality/frac_unique_non_iso_structurally_valid_aigs': frac_unique_non_iso_valid,
-            'sampling_quality/frac_non_iso_to_train_aigs': frac_non_iso_to_train
-        })
+                if not eval_generated_graphs_nx:
+                    if local_rank == 0: print(
+                        "AIGMetrics: No non-empty generated graphs for uniqueness/novelty checks.")
+                elif not eval_train_graphs_nx:  # No training graphs for novelty
+                    if local_rank == 0: print(
+                        "AIGMetrics: No training graphs for novelty. Calculating uniqueness/validity of generated set only.")
+                    frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
+                        eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, [],
+                                                                  validity_func=combined_aig_validity_for_eval_fractions)
+                    frac_non_iso_to_train = 1.0  # All are novel if no train graphs
+                else:  # Both generated and training graphs are available
+                    frac_unique, frac_unique_non_iso, frac_unique_non_iso_valid = \
+                        eval_fraction_unique_non_isomorphic_valid(eval_generated_graphs_nx, eval_train_graphs_nx,
+                                                                  validity_func=combined_aig_validity_for_eval_fractions)
+                    isomorphic_fraction = eval_fraction_isomorphic(eval_generated_graphs_nx, eval_train_graphs_nx)
+                    frac_non_iso_to_train = 1.0 - isomorphic_fraction  # Novelty
+
+                to_log.update({
+                    'sampling_quality/frac_unique_aigs': frac_unique,
+                    'sampling_quality/frac_unique_non_iso_aigs': frac_unique_non_iso,  # Uniqueness among non-isomorphic
+                    'sampling_quality/frac_unique_non_iso_structurally_valid_aigs': frac_unique_non_iso_valid,
+                    # Validity of unique, non-isomorphic
+                    'sampling_quality/frac_non_iso_to_train_aigs': frac_non_iso_to_train  # Novelty
+                })
+        # --- End of test-only metrics ---
 
         if wandb.run and local_rank == 0:
             wandb_log_data = {f"{name}_{k.replace('/', '_')}": v for k, v in to_log.items()}
@@ -414,8 +404,8 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         if local_rank == 0:
             print(f"\n--- AIGMetrics Results Epoch {current_epoch} ({'Test' if test else 'Val'}) ---")
             for key, val in to_log.items():
-                # Only print validity errors that actually occurred, or the "VALID" count
-                if 'aig_validity_errors/' in key and val == 0.0 and not key.endswith('/VALID'): continue
+                if 'aig_validity_errors/' in key and val == 0.0 and not key.endswith(
+                    f'/{VALIDITY_ERROR_KEYS[0]}'): continue
                 print(f"  {key}: {val:.4f}")
             print("-----------------------------------------------------\n")
 
@@ -425,5 +415,3 @@ class AIGSamplingMetrics(SpectreSamplingMetrics):
         if hasattr(super(), 'reset') and callable(super().reset):
             super().reset()
         pass
-
-#
