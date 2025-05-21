@@ -34,7 +34,7 @@ extra_features: null
 
 # Configuration for domain-specific features. 'null' for AIGs.
 domain_features: null
-
+#
 # Batch size for DataLoader. Can be overridden by experiment config for training.
 batch_size: 256 # This is for the dataset module itself (e.g., for validation/test loaders if not overridden)
 

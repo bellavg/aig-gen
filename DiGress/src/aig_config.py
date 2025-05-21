@@ -11,7 +11,7 @@ dataset = 'aig'
 # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Gets G2PT directory
 # data_dir = os.path.join(base_dir, 'datasets', 'aig')
 # tokenizer_path = os.path.join(base_dir, 'tokenizers', 'aig')
-
+#
 
 # AIG constraint constants
 MAX_NODE_COUNT = 64

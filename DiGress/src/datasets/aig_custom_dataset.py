@@ -440,3 +440,4 @@ class AIGDatasetInfos(AbstractDatasetInfos):
         # Check for E output dimension
         if self.output_dims['E'] != (NUM_EDGE_FEATURES + 1):
              warnings.warn(f"Output E dim ({self.output_dims['E']}) mismatch with NUM_EDGE_FEATURES+1 ({NUM_EDGE_FEATURES+1}).")
+#

@@ -956,3 +956,5 @@ def directed_degree_stats_mmd(graph_ref_list: List[nx.DiGraph],
         mmd_out_degree = compute_mmd(sample_ref_out_hists, sample_pred_out_hists, kernel=kernel, **kwargs)
 
     return {'in_degree_mmd': mmd_in_degree, 'out_degree_mmd': mmd_out_degree}
+
+#

@@ -3,7 +3,7 @@ import torch
 from src import utils
 from src.diffusion import diffusion_utils
 
-
+#
 class PredefinedNoiseSchedule(torch.nn.Module):
     """
     Predefined noise schedule. Essentially creates a lookup array for predefined (non-learned) noise schedules.

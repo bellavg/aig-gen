@@ -7,7 +7,7 @@ gpus: 1                     # Multi-gpu is not implemented on this branch
 
 resume: null            # If resume, path to ckpt file from outputs directory in main directory
 test_only: null         # Use absolute path
-
+#
 check_val_every_n_epochs: 10
 sample_every_val: 4
 val_check_interval: null

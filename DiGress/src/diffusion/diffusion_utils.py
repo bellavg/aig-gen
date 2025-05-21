@@ -4,7 +4,7 @@ import numpy as np
 import math
 
 from src.utils import PlaceHolder
-
+#
 
 def sum_except_batch(x):
     return x.reshape(x.size(0), -1).sum(dim=-1)

@@ -8,7 +8,7 @@ from torch_geometric.data import InMemoryDataset, download_url
 
 from src.datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 
-
+#
 class SpectreGraphDataset(InMemoryDataset):
     def __init__(self, dataset_name, split, root, transform=None, pre_transform=None, pre_filter=None):
         self.sbm_file = 'sbm_200.pt'

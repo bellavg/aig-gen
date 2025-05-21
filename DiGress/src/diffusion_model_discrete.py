@@ -15,7 +15,7 @@ from src.metrics.train_metrics import TrainLossDiscrete
 from src.metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from src import utils # This was already good
 
-
+#
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
     def __init__(self, cfg, dataset_infos, train_metrics, sampling_metrics, visualization_tools, extra_features,
