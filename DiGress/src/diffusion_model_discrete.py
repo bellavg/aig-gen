@@ -662,6 +662,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         extra_y = torch.cat((extra_features.y, extra_molecular_features.y), dim=-1)
 
         t = noisy_data['t']
-        extra_y = torch.cat((extra_y, t), dim=1)
+        extra_y = torch.cat((extra_y.clone(), t), dim=1)
+        # extra_y = torch.cat((extra_y, t), dim=1)
 
         return utils.PlaceHolder(X=extra_X, E=extra_E, y=extra_y)

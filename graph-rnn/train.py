@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 # Import the new DirectedGraphDataSet
-from extension_data import DirectedGraphDataSet  # Assuming extension_data_no_shuffle.py is the filename
+from extension_data_no_shuffle import DirectedGraphDataSet  # Assuming extension_data_no_shuffle.py is the filename
 # Removed: from data import GraphDataSet
 
 # Make sure this model.py is the one with node attribute prediction
