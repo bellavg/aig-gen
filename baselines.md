@@ -2,11 +2,11 @@
 
 Baselines to test
 
-|           |                     |    |               |                     |                |
-|-----------|---------------------|----|---------------|---------------------|----------------|
-| Graph-RNN | Not Running         | NA | no test       |                     |                |
-| DiGress   | Running...          | NA | Untested      |                     | eval fucked    |
-| LayerDAG  | trying to run train |    | untested      |                     |                |
+|           |             |          |             |                     |             |
+|-----------|-------------|----------|-------------|---------------------|-------------|
+| Graph-RNN | Not Running | NA       | no test yet |                     |             |
+| DiGress   | Running...  | NA       | Untested    |                     | eval fucked |
+| LayerDAG  | Running...  | untested |             |                     |             |
 
 
 

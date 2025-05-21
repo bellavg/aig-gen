@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_h100          # Or your specific H100 partition
 #SBATCH --gpus=1
 #SBATCH --time=16:10:00              # Initial requested time, adjust as needed
-#SBATCH --output=slurm_logs/digress_%j.out
+#SBATCH --output=slurm_logs/rnn_%j.out
 
 # Ensure WANDB_API_KEY is set in your environment or you have logged in via `wandb login`
 export WANDB_API_KEY="725d958326cb39d0ba89d73b557c294f85ecbf83" # Added your W&B API Key
@@ -28,28 +28,21 @@ source activate "${CONDA_ENV_NAME}"
 # --- Training Command ---
 echo ""
 echo "========================================"
-echo "Starting DiGress AIG Training"
+echo "Starting RNN AIG Training"
 echo "========================================"
 echo "Running command:"
 echo "----------------------------------------"
-pip install -e .
+
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
 # Execute the training script
 # The -u flag is for unbuffered Python output, good for logs
-srun python -u train.py \
-    +experiment=aig.yaml \
-    dataset=aig
+srun python -u train.py
     # Add any other specific Hydra overrides here if needed, e.g.:
     # general.resume=outputs/YYYY-MM-DD/HH-MM-SS-aig_resume/checkpoints/last-epoch=XXXX.ckpt
     # train.n_epochs=6000 # To override the config file value
 
 # --- Completion ---
-echo ""
-echo "========================================"
-echo "DiGress AIG Training Script Finished"
-echo "Job ID: $SLURM_JOB_ID"
-echo "========================================"
 
 # Deactivate conda environment
 conda deactivate

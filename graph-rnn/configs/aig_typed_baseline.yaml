@@ -33,7 +33,7 @@ data:
   m: 30      # M-window size. Default from config_dag.yaml.
              # Consider calculating an optimal M for your AIGs (e.g., using calculate_m_values.py).
              # config_dag_aig.yaml uses m: 63, choose based on your AIG characteristics. Let's start with a moderate 30.
-  train_split: 0.8 # Common default
+  train_split: 0.7 # Common default
 
   # These might be passed to DirectedGraphDataSet if your train.py script is set up to do so.
   # However, the model configuration for num_node_classes and edge_feature_len is primary.
