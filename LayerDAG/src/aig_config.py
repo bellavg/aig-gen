@@ -24,7 +24,7 @@ MIN_AND_COUNT = 1 # Assuming at least one AND gate needed
 
 
 NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+EDGE_TYPE_KEYS = ["EDGE_REG"]
 
 
 
@@ -45,10 +45,8 @@ NODE_TYPE_ENCODING = {
 # IMPORTANT: Ensure keys/order match EDGE_TYPE_VOCAB derivation and NUM_EDGE_FEATURES
 # The order here should ideally match the order in EDGE_TYPE_KEYS
 EDGE_LABEL_ENCODING = {
-    "EDGE_REG": [1.0, 0.0],  # Index 0 feature
-    "EDGE_INV": [0.0, 1.0]   # Index 1 feature
+    "EDGE_REG": [1.0] # Or simply ensure "EDGE_REG" string is used
 }
-
 # --- Final Vocab Size Calculation ---
 # Determine the highest ID used across both the main vocab and special tokens
 

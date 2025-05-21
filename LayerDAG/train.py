@@ -10,6 +10,13 @@ from copy import deepcopy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import torch# Set matmul precision for Tensor Cores
+# Options: 'highest' (default), 'high', 'medium'
+# 'high' or 'medium' can leverage Tensor Cores for float32 matrix multiplications
+if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7: # Check for Volta or newer
+    print("Setting float32 matmul precision to 'high' for Tensor Cores.")
+    torch.set_float32_matmul_precision('high')
+
 from setup_utils import set_seed, load_yaml
 # Ensure your dataset components are correctly imported
 from src.dataset import (

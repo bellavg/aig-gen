@@ -53,7 +53,8 @@ def convert_sample_to_nx(edge_index_tensor, node_features_tensor, conditional_in
         sources = edge_index_tensor[1].cpu().tolist()
         destinations = edge_index_tensor[0].cpu().tolist()
         for src, dst in zip(sources, destinations):
-            G.add_edge(src, dst)  # AIGs typically have untyped edges from this model's perspective
+            # G.add_edge(src, dst) # Original
+            G.add_edge(src, dst, type="EDGE_REG")  # MODIFIED: Assign default edge type
 
     # Optionally, add conditional info as a graph-level attribute
     if conditional_info_tensor is not None:

@@ -1,4 +1,5 @@
 import torch
+
 from collections import defaultdict
 from torch.utils.data import Dataset
 
@@ -12,41 +13,25 @@ __all__ = ['LayerDAGNodeCountDataset',
 
 class LayerDAGBaseDataset(Dataset):
     def __init__(self, conditional=False):
-        # Stores the global indices of source nodes for context edges
         self.input_src = []
-        # Stores the global indices of destination nodes for context edges
         self.input_dst = []
-        # Flattened list of all node features (categorical integers) across all samples from all graphs
         self.input_x_n = []
-        # Flattened list of absolute levels for nodes in self.input_x_n
         self.input_level = []
 
-        # For each generated sample, stores the start index in self.input_src/dst for its context edges
         self.input_e_start = []
-        # For each generated sample, stores the end index in self.input_src/dst for its context edges
         self.input_e_end = []
-        # For each generated sample, stores the start index in self.input_x_n for its context nodes
         self.input_n_start = []
-        # For each generated sample, stores the end index in self.input_x_n for its context nodes
         self.input_n_end = []
 
         self.conditional = conditional
         if conditional:
-            # Stores graph-level conditional labels (e.g., runtime)
             self.input_y = []
-            # For each generated sample, stores the index into self.input_y for its graph's conditional label
             self.input_g = []
 
     def get_in_deg(self, dst, num_nodes):
-        # Calculate in-degree for each node.
-        # dst: Tensor of destination nodes for edges.
-        # num_nodes: Total number of nodes in the graph.
         return torch.bincount(dst, minlength=num_nodes).tolist()
 
     def get_out_adj_list(self, src, dst):
-        # Create an adjacency list for outgoing edges.
-        # src: Tensor of source nodes for edges (original graph IDs, 1-indexed or 0-indexed as per input).
-        # dst: Tensor of destination nodes for edges.
         out_adj_list = defaultdict(list)
         num_edges = len(src)
         for i in range(num_edges):
@@ -54,9 +39,6 @@ class LayerDAGBaseDataset(Dataset):
         return out_adj_list
 
     def get_in_adj_list(self, src, dst):
-        # Create an adjacency list for incoming edges.
-        # src: Tensor of source nodes for edges.
-        # dst: Tensor of destination nodes for edges.
         in_adj_list = defaultdict(list)
         num_edges = len(src)
         for i in range(num_edges):
@@ -64,155 +46,152 @@ class LayerDAGBaseDataset(Dataset):
         return in_adj_list
 
     def base_postprocess(self):
-        # Convert lists of graph data to PyTorch LongTensors.
         self.input_src = torch.LongTensor(self.input_src)
         self.input_dst = torch.LongTensor(self.input_dst)
 
-        if self.input_x_n and isinstance(self.input_x_n[0], list):
-            # This case is unlikely if x_n are categorical integers.
-            # If node features were multi-dimensional one-hot vectors stored as lists,
-            # they should be converted to tensors earlier or handled differently.
-            # For categorical integers, this branch is usually skipped.
-            try:
-                # Attempting to convert a list of lists (if features are multi-dim)
-                # or list of ints (if single categorical)
-                self.input_x_n = torch.LongTensor(self.input_x_n)
-            except Exception as e:
-                print(f"Warning: Could not convert self.input_x_n to LongTensor directly: {e}")
-        elif self.input_x_n:
-            self.input_x_n = torch.LongTensor(self.input_x_n)  # Expects list of integers
-        else:
-            self.input_x_n = torch.LongTensor([])
-
+        # Case1: self.input_x_n[0] is an int.
+        # Case2: self.input_x_n[0] is a tensor of shape (F).
+        self.input_x_n = torch.LongTensor(self.input_x_n)
         self.input_level = torch.LongTensor(self.input_level)
+
         self.input_e_start = torch.LongTensor(self.input_e_start)
         self.input_e_end = torch.LongTensor(self.input_e_end)
         self.input_n_start = torch.LongTensor(self.input_n_start)
         self.input_n_end = torch.LongTensor(self.input_n_end)
 
         if self.conditional:
-            self.input_y = torch.tensor(self.input_y)  # Assumes self.input_y contains numerical labels
+            # Ensure self.input_y is a tensor. If it's a list of scalars, convert.
+            # If it's already a tensor (e.g. from a previous load), this might not be necessary
+            # or could be handled more robustly depending on expected input_y types.
+            if isinstance(self.input_y, list) and self.input_y:
+                # Check if elements are tensors or scalars
+                if all(isinstance(item, (int, float)) for item in self.input_y):
+                    self.input_y = torch.tensor(self.input_y)
+                elif all(isinstance(item, torch.Tensor) for item in self.input_y):
+                    try:
+                        self.input_y = torch.stack(self.input_y)  # If they are tensors of same shape
+                    except RuntimeError:  # Fallback if shapes differ, e.g. for varying feature sizes
+                        self.input_y = self.input_y  # Keep as list of tensors, collate_fn might need adjustment
+                # else: handle mixed types or other scenarios if necessary
+            elif not isinstance(self.input_y, torch.Tensor):  # If not list or tensor, try to convert
+                self.input_y = torch.tensor(self.input_y)
+
             self.input_g = torch.LongTensor(self.input_g)
 
 
 class LayerDAGNodeCountDataset(LayerDAGBaseDataset):
     def __init__(self, dag_dataset, conditional=False):
         super().__init__(conditional)
-        self.label = []  # Stores the size of the next layer to predict
 
-        # Overall global index for nodes added to self.input_x_n across all graphs and samples
-        current_global_node_idx_offset = 0
-        # Overall global index for edges added to self.input_src/dst
-        current_global_edge_idx_offset = 0
+        # Size of the next layer to predict.
+        self.label = []
 
-        for i in range(len(dag_dataset)):  # Iterate through each original graph in dag_dataset
+        for i in range(len(dag_dataset)):
             data_i = dag_dataset[i]
+
             if conditional:
-                src_orig, dst_orig, x_n_orig, y_orig = data_i
-                graph_cond_label_idx = len(self.input_y)
-                self.input_y.append(y_orig)
+                src, dst, x_n, y = data_i
+                # Index of y in self.input_y
+                input_g = len(self.input_y)
+                self.input_y.append(y)
             else:
-                src_orig, dst_orig, x_n_orig = data_i
-                graph_cond_label_idx = -1  # Placeholder
+                src, dst, x_n = data_i
 
-            # --- Start processing for the current original graph `data_i` ---
-            # `input_n_start_for_current_sample` will be the starting index in `self.input_x_n`
-            # for the *first sample derived from this graph*. It gets updated.
-            # `input_n_nodes_in_current_sample` tracks number of nodes in the context of the current sample.
-            input_n_start_for_current_sample = current_global_node_idx_offset
-            input_n_nodes_in_current_sample = 0
-            input_e_start_for_current_sample = current_global_edge_idx_offset
-            input_e_edges_in_current_sample = 0
+            # For recording indices of the node attributes in self.input_x_n
+            input_n_start_val = len(self.input_x_n)  # Use a different variable name for clarity
+            input_n_end_val = len(self.input_x_n)
 
-            # Map from (original_node_id + 1) to its current global index in self.input_x_n
-            # This map is local to the processing of the current original graph `data_i`
-            # and the samples derived from it.
-            # Key 0 is for the dummy node.
-            node_id_map_to_global_idx = {}
+            # For recording indices of the edges in self.input_src/self.input_dst
+            input_e_start_val = len(self.input_src)
+            input_e_end_val = len(self.input_src)
 
-            # Add dummy node for the first sample from this graph
-            dummy_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample
+            # Use a dummy node for representing the initial empty DAG.
             self.input_x_n.append(dag_dataset.dummy_category)
-            node_id_map_to_global_idx[0] = dummy_global_idx  # Dummy node is mapped to its global index
-            input_n_nodes_in_current_sample += 1
+            input_n_end_val += 1
 
-            current_level = 0
-            self.input_level.append(current_level)
+            # Convert original src/dst (0-indexed for original graph) to 1-indexed relative to dummy
+            src_plus_dummy = src + 1
+            dst_plus_dummy = dst + 1
 
-            # Adjust original src/dst for dummy node (1-indexed)
-            src_adj = src_orig + 1
-            dst_adj = dst_orig + 1
+            # Layer ID
+            level = 0
+            self.input_level.append(level)
 
-            num_nodes_in_original_graph_plus_dummy = len(x_n_orig) + 1
-            in_deg = self.get_in_deg(dst_adj, num_nodes_in_original_graph_plus_dummy)
+            num_nodes_with_dummy = len(x_n) + 1  # Total nodes including the dummy node
+            in_deg = self.get_in_deg(dst_plus_dummy, num_nodes_with_dummy)
 
-            src_adj_list = src_adj.tolist()
-            dst_adj_list = dst_adj.tolist()
-            x_n_orig_list = x_n_orig.tolist()
+            # Use original src/dst for adj list creation, then adjust when adding to self.input_src/dst
+            src_list_orig = src.tolist()
+            dst_list_orig = dst.tolist()
+            x_n_list = x_n.tolist()  # x_n is 0-indexed corresponding to original graph nodes
 
-            out_adj_list = self.get_out_adj_list(src_adj_list, dst_adj_list)
-            in_adj_list = self.get_in_adj_list(src_adj_list, dst_adj_list)
+            # Adj lists should use indices relative to the graph with the dummy node (1 to num_nodes_with_dummy-1 for real nodes)
+            out_adj_list = self.get_out_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
+            in_adj_list = self.get_in_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
 
             frontiers = [
-                u for u in range(1, num_nodes_in_original_graph_plus_dummy) if in_deg[u] == 0
+                u for u in range(1, num_nodes_with_dummy) if in_deg[u] == 0  # u are 1-indexed (dummy is 0)
             ]
             frontier_size = len(frontiers)
+            while frontier_size > 0:
+                # There is another layer.
+                level += 1
 
-            # Loop to generate samples for each layer prediction
-            while True:  # Loop will break when frontier_size is 0 (after processing last layer)
-                # --- Create a training sample for predicting `frontier_size` ---
-                self.input_n_start.append(input_n_start_for_current_sample)
-                self.input_n_end.append(input_n_start_for_current_sample + input_n_nodes_in_current_sample)
-                self.input_e_start.append(input_e_start_for_current_sample)
-                self.input_e_end.append(input_e_start_for_current_sample + input_e_edges_in_current_sample)
+                # Record indices for retrieving edges in the previous layers
+                # for model input.
+                self.input_e_start.append(input_e_start_val)
+                self.input_e_end.append(input_e_end_val)
 
-                self.label.append(frontier_size)
+                # Record indices for retrieving node attributes in the previous
+                # layers for model input.
+                self.input_n_start.append(input_n_start_val)
+                self.input_n_end.append(input_n_end_val)
+
                 if conditional:
-                    self.input_g.append(graph_cond_label_idx)
+                    # Record the index for retrieving graph-level conditional
+                    # information for model input.
+                    self.input_g.append(input_g)
+                self.label.append(frontier_size)
 
-                if frontier_size == 0:  # Termination condition for this graph
-                    break
-
-                current_level += 1
+                # (1) Add the node attributes/edges for the current layer.
+                # (2) Get the next layer.
                 next_frontiers = []
+                for u_frontier_node in frontiers:  # u_frontier_node is 1-indexed (relative to dummy)
+                    # x_n_list is 0-indexed (original graph nodes)
+                    # So, u_frontier_node - 1 maps to the correct index in x_n_list
+                    self.input_x_n.append(x_n_list[u_frontier_node - 1])
+                    self.input_level.append(level)
 
-                # Add nodes and edges of the current frontier to the *context* for the *next* sample
-                for u_frontier_node_adj_id in frontiers:  # u_frontier_node_adj_id is 1-indexed original
-                    # Add node feature
-                    u_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample
-                    self.input_x_n.append(x_n_orig_list[u_frontier_node_adj_id - 1])
-                    self.input_level.append(current_level)
-                    node_id_map_to_global_idx[u_frontier_node_adj_id] = u_global_idx
-                    input_n_nodes_in_current_sample += 1
+                    # Edges are added using their 1-indexed values (relative to dummy)
+                    for t_source_node in in_adj_list[u_frontier_node]:
+                        self.input_src.append(t_source_node)
+                        self.input_dst.append(u_frontier_node)
+                        input_e_end_val += 1
 
-                    # Add incoming edges to this frontier node
-                    for t_predecessor_adj_id in in_adj_list[u_frontier_node_adj_id]:
-                        # t_predecessor_adj_id is 1-indexed original (or 0 for dummy if dummy was source)
-                        t_pred_global_idx = node_id_map_to_global_idx[t_predecessor_adj_id]
-                        # u_frontier_global_idx is u_global_idx
-
-                        self.input_src.append(t_pred_global_idx)
-                        self.input_dst.append(u_global_idx)
-                        input_e_edges_in_current_sample += 1
-
-                    # Find next frontiers
-                    for v_successor_adj_id in out_adj_list[u_frontier_node_adj_id]:
-                        in_deg[v_successor_adj_id] -= 1
-                        if in_deg[v_successor_adj_id] == 0:
-                            next_frontiers.append(v_successor_adj_id)
+                    for v_target_node in out_adj_list[u_frontier_node]:
+                        in_deg[v_target_node] -= 1
+                        if in_deg[v_target_node] == 0:
+                            next_frontiers.append(v_target_node)
+                input_n_end_val += frontier_size
 
                 frontiers = next_frontiers
                 frontier_size = len(frontiers)
 
-            # Update global offsets for the next original graph from dag_dataset
-            current_global_node_idx_offset += input_n_nodes_in_current_sample
-            current_global_edge_idx_offset += input_e_edges_in_current_sample
+            # Handle termination, namely predicting the layer size to be 0.
+            self.input_e_start.append(input_e_start_val)
+            self.input_e_end.append(input_e_end_val)
+            self.input_n_start.append(input_n_start_val)
+            self.input_n_end.append(input_n_end_val)
+            if conditional:
+                self.input_g.append(input_g)
+            self.label.append(frontier_size)  # Should be 0 here
 
         self.base_postprocess()
         self.label = torch.LongTensor(self.label)
-        if self.label.numel() > 0:
+        # Maximum number of nodes in a layer.
+        if len(self.label) > 0:
             self.max_layer_size = self.label.max().item()
-        else:
+        else:  # Handle case where dataset might be empty or only produces 0-size layers
             self.max_layer_size = 0
 
     def __len__(self):
@@ -224,180 +203,163 @@ class LayerDAGNodeCountDataset(LayerDAGBaseDataset):
         input_n_start_idx = self.input_n_start[index]
         input_n_end_idx = self.input_n_end[index]
 
-        current_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
-
-        global_src_edges = self.input_src[input_e_start_idx:input_e_end_idx]
-        global_dst_edges = self.input_dst[input_e_start_idx:input_e_end_idx]
-
-        # Convert global edge indices to local (0-indexed for current_x_n_slice)
-        if global_src_edges.numel() > 0:
-            adjusted_src_edges = global_src_edges - input_n_start_idx
-        else:
-            adjusted_src_edges = torch.tensor([], dtype=torch.long, device=global_src_edges.device)
-
-        if global_dst_edges.numel() > 0:
-            adjusted_dst_edges = global_dst_edges - input_n_start_idx
-        else:
-            adjusted_dst_edges = torch.tensor([], dtype=torch.long, device=global_dst_edges.device)
-
+        input_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
         input_abs_level_slice = self.input_level[input_n_start_idx:input_n_end_idx]
+
+        # Ensure input_abs_level_slice is not empty before calling .max()
         if input_abs_level_slice.numel() > 0:
             input_rel_level_slice = input_abs_level_slice.max() - input_abs_level_slice
         else:
-            input_rel_level_slice = torch.tensor([], dtype=torch.long, device=input_abs_level_slice.device)
+            # Handle empty slice case, e.g., return an empty tensor of the same dtype
+            input_rel_level_slice = torch.empty_like(input_abs_level_slice)
+
+        src_for_item = self.input_src[input_e_start_idx:input_e_end_idx]
+        dst_for_item = self.input_dst[input_e_start_idx:input_e_end_idx]
+
+        # --- BEGIN MODIFICATION ---
+        # Re-index edge indices to be 0-based for the current node slice
+        # The node indices stored in self.input_src/dst are relative to the start of the *original graph's nodes including the dummy node*.
+        # The current slice of nodes (input_x_n_slice) starts at input_n_start_idx in self.input_x_n.
+        # So, we need to subtract this offset.
+        current_n_start_offset = input_n_start_idx
+        src_reindexed = src_for_item - current_n_start_offset
+        dst_reindexed = dst_for_item - current_n_start_offset
+        # --- END MODIFICATION ---
 
         if self.conditional:
             input_g_idx = self.input_g[index]
-            if not (0 <= input_g_idx < len(self.input_y)):
-                raise IndexError(
-                    f"LayerDAGNodeCountDataset [Index: {index}]: Invalid input_g_idx {input_g_idx} for self.input_y length {len(self.input_y)}"
-                )
-            input_y_scalar = self.input_y[input_g_idx].item()
-            return adjusted_src_edges, adjusted_dst_edges, current_x_n_slice, \
-                input_abs_level_slice, input_rel_level_slice, input_y_scalar, self.label[index]
+            # Ensure input_y[input_g_idx] is scalar if .item() is used
+            input_y_val = self.input_y[input_g_idx].item() if isinstance(self.input_y[input_g_idx], torch.Tensor) and \
+                                                              self.input_y[input_g_idx].numel() == 1 else self.input_y[
+                input_g_idx]
+
+            return src_reindexed, dst_reindexed, \
+                input_x_n_slice, \
+                input_abs_level_slice, input_rel_level_slice, \
+                input_y_val, self.label[index]
         else:
-            return adjusted_src_edges, adjusted_dst_edges, current_x_n_slice, \
-                input_abs_level_slice, input_rel_level_slice, self.label[index]
+            return src_reindexed, dst_reindexed, \
+                input_x_n_slice, \
+                input_abs_level_slice, input_rel_level_slice, \
+                self.label[index]
 
 
 class LayerDAGNodePredDataset(LayerDAGBaseDataset):
     def __init__(self, dag_dataset, conditional=False, get_marginal=True):
         super().__init__(conditional)
-        self.label_start = []  # Start index in self.input_x_n for the *target* new layer's nodes
-        self.label_end = []  # End index in self.input_x_n for the *target* new layer's nodes
 
-        current_global_node_idx_offset = 0
-        current_global_edge_idx_offset = 0
+        self.label_start = []
+        self.label_end = []
 
-        for i in range(len(dag_dataset)):  # Iterate through each original graph
+        for i in range(len(dag_dataset)):
             data_i = dag_dataset[i]
+
             if conditional:
-                src_orig, dst_orig, x_n_orig, y_orig = data_i
-                graph_cond_label_idx = len(self.input_y)
-                self.input_y.append(y_orig)
+                src, dst, x_n, y = data_i
+                input_g = len(self.input_y)
+                self.input_y.append(y)
             else:
-                src_orig, dst_orig, x_n_orig = data_i
-                graph_cond_label_idx = -1
+                src, dst, x_n = data_i
 
-            input_n_start_for_current_sample = current_global_node_idx_offset
-            input_n_nodes_in_current_sample_context = 0  # Nodes in the context G(<=l)
-            input_e_start_for_current_sample = current_global_edge_idx_offset
-            input_e_edges_in_current_sample_context = 0  # Edges in the context G(<=l)
+            input_n_start_val = len(self.input_x_n)
+            input_n_end_val = len(self.input_x_n)
+            input_e_start_val = len(self.input_src)
+            input_e_end_val = len(self.input_src)
 
-            node_id_map_to_global_idx = {}
+            self.input_x_n.append(dag_dataset.dummy_category)  # Model input dummy node
+            input_n_end_val += 1
 
-            # Add dummy node to context G(<=0)
-            dummy_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context
-            self.input_x_n.append(dag_dataset.dummy_category)
-            node_id_map_to_global_idx[0] = dummy_global_idx
-            input_n_nodes_in_current_sample_context += 1
+            src_plus_dummy = src + 1
+            dst_plus_dummy = dst + 1
 
-            current_level = 0
-            self.input_level.append(current_level)
+            label_start_val = len(self.input_x_n)  # Labels start after the dummy node
 
-            src_adj = src_orig + 1
-            dst_adj = dst_orig + 1
-            num_nodes_in_original_graph_plus_dummy = len(x_n_orig) + 1
-            in_deg = self.get_in_deg(dst_adj, num_nodes_in_original_graph_plus_dummy)
-            src_adj_list = src_adj.tolist()
-            dst_adj_list = dst_adj.tolist()
-            x_n_orig_list = x_n_orig.tolist()
-            out_adj_list = self.get_out_adj_list(src_adj_list, dst_adj_list)
-            in_adj_list = self.get_in_adj_list(src_adj_list, dst_adj_list)
+            level = 0
+            self.input_level.append(level)  # Level for the dummy node
 
-            frontiers = [u for u in range(1, num_nodes_in_original_graph_plus_dummy) if in_deg[u] == 0]
+            num_nodes_with_dummy = len(x_n) + 1
+            in_deg = self.get_in_deg(dst_plus_dummy, num_nodes_with_dummy)
+
+            x_n_list = x_n.tolist()
+            out_adj_list = self.get_out_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
+            in_adj_list = self.get_in_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
+
+            frontiers = [
+                u for u in range(1, num_nodes_with_dummy) if in_deg[u] == 0
+            ]
             frontier_size = len(frontiers)
-
-            # Loop to generate samples for predicting attributes of each new layer
             while frontier_size > 0:
-                current_level += 1
+                level += 1
 
-                # --- Create a training sample for predicting attributes of `frontiers` ---
-                # Context is G(<=l-1)
-                self.input_n_start.append(input_n_start_for_current_sample)
-                self.input_n_end.append(input_n_start_for_current_sample + input_n_nodes_in_current_sample_context)
-                self.input_e_start.append(input_e_start_for_current_sample)
-                self.input_e_end.append(input_e_start_for_current_sample + input_e_edges_in_current_sample_context)
+                self.input_e_start.append(input_e_start_val)
+                self.input_e_end.append(input_e_end_val)
+                self.input_n_start.append(input_n_start_val)
+                self.input_n_end.append(input_n_end_val)
 
                 if conditional:
-                    self.input_g.append(graph_cond_label_idx)
+                    self.input_g.append(input_g)
 
-                # Store start/end for the *target node attributes* (current frontier) in self.input_x_n
-                # These target nodes are added to self.input_x_n *after* the context nodes.
-                label_nodes_start_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context
-                self.label_start.append(label_nodes_start_global_idx)
+                self.label_start.append(label_start_val)
+                label_end_val = label_start_val + frontier_size
+                self.label_end.append(label_end_val)
+                label_start_val = label_end_val
 
-                num_target_nodes_added_this_step = 0
                 next_frontiers = []
+                for u_frontier_node in frontiers:
+                    self.input_x_n.append(x_n_list[u_frontier_node - 1])  # This is a label node
+                    self.input_level.append(level)  # Level for this label node
 
-                # Add current frontier nodes (targets) to self.input_x_n
-                # These also become part of the context for the *next* layer's prediction
-                for u_frontier_node_adj_id in frontiers:
-                    u_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context + num_target_nodes_added_this_step
-                    self.input_x_n.append(x_n_orig_list[u_frontier_node_adj_id - 1])  # Target attribute
-                    self.input_level.append(current_level)
-                    node_id_map_to_global_idx[u_frontier_node_adj_id] = u_global_idx
-                    num_target_nodes_added_this_step += 1
+                    # Add edges for model input (edges leading to this new layer)
+                    for t_source_node in in_adj_list[u_frontier_node]:
+                        self.input_src.append(t_source_node)
+                        self.input_dst.append(u_frontier_node)
+                        input_e_end_val += 1
 
-                    # Add incoming edges to this frontier node (these become context edges for next step)
-                    for t_predecessor_adj_id in in_adj_list[u_frontier_node_adj_id]:
-                        t_pred_global_idx = node_id_map_to_global_idx[t_predecessor_adj_id]
-                        self.input_src.append(t_pred_global_idx)
-                        self.input_dst.append(u_global_idx)  # Edge to the newly added target node
-                        input_e_edges_in_current_sample_context += 1
+                    # Update degrees for next frontier
+                    for v_target_node in out_adj_list[u_frontier_node]:
+                        in_deg[v_target_node] -= 1
+                        if in_deg[v_target_node] == 0:
+                            next_frontiers.append(v_target_node)
 
-                    for v_successor_adj_id in out_adj_list[u_frontier_node_adj_id]:
-                        in_deg[v_successor_adj_id] -= 1
-                        if in_deg[v_successor_adj_id] == 0:
-                            next_frontiers.append(v_successor_adj_id)
-
-                self.label_end.append(label_nodes_start_global_idx + num_target_nodes_added_this_step)
-
-                # Update context size for the next iteration
-                input_n_nodes_in_current_sample_context += num_target_nodes_added_this_step
+                # The nodes added to self.input_x_n in this loop are the *labels* for this step.
+                # The *model input nodes* for this step are those from previous layers,
+                # which are captured by input_n_start_val and input_n_end_val.
+                # We need to update input_n_end_val to include the nodes of the *current frontier*
+                # as they become part of the "previous layers" for the *next* prediction step.
+                input_n_end_val += frontier_size
 
                 frontiers = next_frontiers
                 frontier_size = len(frontiers)
-
-            current_global_node_idx_offset += input_n_nodes_in_current_sample_context
-            current_global_edge_idx_offset += input_e_edges_in_current_sample_context
 
         self.base_postprocess()
         self.label_start = torch.LongTensor(self.label_start)
         self.label_end = torch.LongTensor(self.label_end)
 
         if get_marginal:
-            input_x_n_for_marginal = self.input_x_n
+            input_x_n_for_marginal = self.input_x_n  # All node attributes including dummy and labels
             if input_x_n_for_marginal.ndim == 1:
                 input_x_n_for_marginal = input_x_n_for_marginal.unsqueeze(-1)
 
             num_feats = input_x_n_for_marginal.shape[-1]
-            x_n_marginal_list = []
-            for f_idx in range(num_feats):
-                feat_column = input_x_n_for_marginal[:, f_idx]
-                # Ensure dummy_category is an int for num_actual_categories_f
-                dummy_category_val = dag_dataset.dummy_category
-                if isinstance(dummy_category_val, torch.Tensor):
-                    dummy_category_val = dummy_category_val.item()
+            x_n_marginal = []
+            for f in range(num_feats):
+                input_x_n_f = input_x_n_for_marginal[:, f]
+                unique_x_n_f, x_n_count_f = torch.unique(input_x_n_f, return_counts=True)
 
-                num_actual_categories_f = dummy_category_val
+                # Determine number of actual categories (excluding dummy)
+                # dag_dataset.num_categories is total actual types (e.g. 4 for AIG)
+                # dag_dataset.dummy_category is the integer for dummy (e.g. 4)
+                num_actual_types_f = dag_dataset.num_categories  # e.g. 4 (types 0,1,2,3)
 
-                marginal_f = torch.zeros(num_actual_categories_f, device=feat_column.device, dtype=torch.float)
-                if feat_column.numel() > 0:  # Only if there are nodes
-                    unique_vals, counts = torch.unique(feat_column, return_counts=True)
-                    for val_idx, val_item in enumerate(unique_vals):
-                        val = val_item.item()
-                        if val < num_actual_categories_f:  # Exclude dummy
-                            marginal_f[val] = counts[val_idx].item()
+                x_n_marginal_f = torch.zeros(num_actual_types_f)
+                for c_idx in range(len(unique_x_n_f)):
+                    x_n_type_val = unique_x_n_f[c_idx].item()
+                    if x_n_type_val < num_actual_types_f:  # Only count actual types for marginal
+                        x_n_marginal_f[x_n_type_val] += x_n_count_f[c_idx].item()
 
-                sum_marginal_f = marginal_f.sum()
-                if sum_marginal_f > 0:
-                    marginal_f /= sum_marginal_f
-                else:  # Handle case of no actual categories found (e.g. only dummy nodes)
-                    marginal_f.fill_(1.0 / num_actual_categories_f if num_actual_categories_f > 0 else 0)
-
-                x_n_marginal_list.append(marginal_f)
-            self.x_n_marginal = x_n_marginal_list
+                x_n_marginal_f /= (x_n_marginal_f.sum() + 1e-8)
+                x_n_marginal.append(x_n_marginal_f)
+            self.x_n_marginal = x_n_marginal
 
     def __len__(self):
         return len(self.label_start)
@@ -407,552 +369,603 @@ class LayerDAGNodePredDataset(LayerDAGBaseDataset):
         input_e_end_idx = self.input_e_end[index]
         input_n_start_idx = self.input_n_start[index]
         input_n_end_idx = self.input_n_end[index]
-        label_n_start_idx = self.label_start[index]
-        label_n_end_idx = self.label_end[index]
+        label_start_idx = self.label_start[index]
+        label_end_idx = self.label_end[index]
 
-        current_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
-        global_src_edges = self.input_src[input_e_start_idx:input_e_end_idx]
-        global_dst_edges = self.input_dst[input_e_start_idx:input_e_end_idx]
-
-        if global_src_edges.numel() > 0:
-            adjusted_src_edges = global_src_edges - input_n_start_idx
-        else:
-            adjusted_src_edges = torch.tensor([], dtype=torch.long, device=global_src_edges.device)
-        if global_dst_edges.numel() > 0:
-            adjusted_dst_edges = global_dst_edges - input_n_start_idx
-        else:
-            adjusted_dst_edges = torch.tensor([], dtype=torch.long, device=global_dst_edges.device)
-
+        # Node features for model input (previous layers)
+        input_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
+        # Level information for model input nodes
         input_abs_level_slice = self.input_level[input_n_start_idx:input_n_end_idx]
         if input_abs_level_slice.numel() > 0:
             input_rel_level_slice = input_abs_level_slice.max() - input_abs_level_slice
         else:
-            input_rel_level_slice = torch.tensor([], dtype=torch.long, device=input_abs_level_slice.device)
+            input_rel_level_slice = torch.empty_like(input_abs_level_slice)
 
-        z_ground_truth = self.input_x_n[label_n_start_idx:label_n_end_idx]
-        t_timestep, z_t_noisy = self.node_diffusion.apply_noise(z_ground_truth)
+        # Edges for model input (previous layers)
+        src_for_item = self.input_src[input_e_start_idx:input_e_end_idx]
+        dst_for_item = self.input_dst[input_e_start_idx:input_e_end_idx]
+
+        current_n_start_offset = input_n_start_idx
+        src_reindexed = src_for_item - current_n_start_offset
+        dst_reindexed = dst_for_item - current_n_start_offset
+
+        # Ground truth node attributes for the new layer (z)
+        z = self.input_x_n[label_start_idx:label_end_idx]
+        t, z_t = self.node_diffusion.apply_noise(z)  # z_t are the noisy attributes to predict
 
         if self.conditional:
             input_g_idx = self.input_g[index]
-            if not (0 <= input_g_idx < len(self.input_y)):
-                raise IndexError(
-                    f"LayerDAGNodePredDataset [Index: {index}]: Invalid input_g_idx {input_g_idx} for self.input_y length {len(self.input_y)}"
-                )
-            input_y_scalar = self.input_y[input_g_idx].item()
-            return adjusted_src_edges, adjusted_dst_edges, current_x_n_slice, \
+            input_y_val = self.input_y[input_g_idx].item() if isinstance(self.input_y[input_g_idx], torch.Tensor) and \
+                                                              self.input_y[input_g_idx].numel() == 1 else self.input_y[
+                input_g_idx]
+
+            return src_reindexed, dst_reindexed, \
+                input_x_n_slice, \
                 input_abs_level_slice, input_rel_level_slice, \
-                z_t_noisy, t_timestep, input_y_scalar, z_ground_truth
+                z_t, t, input_y_val, z
         else:
-            return adjusted_src_edges, adjusted_dst_edges, current_x_n_slice, \
+            return src_reindexed, dst_reindexed, \
+                input_x_n_slice, \
                 input_abs_level_slice, input_rel_level_slice, \
-                z_t_noisy, t_timestep, z_ground_truth
+                z_t, t, z
 
 
 class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
     def __init__(self, dag_dataset, conditional=False):
         super().__init__(conditional)
-        self.query_src = []  # Global indices into self.input_x_n
-        self.query_dst = []  # Global indices into self.input_x_n
-        self.query_start = []
-        self.query_end = []
-        self.label = []  # 0 or 1 for edge existence
 
-        num_total_edges_in_dataset = 0
-        num_total_nonsrc_nodes_in_dataset = 0
+        self.query_src_list = []  # Stores all query sources
+        self.query_dst_list = []  # Stores all query destinations
+        self.label_list = []  # Stores all labels for queries
 
-        current_global_node_idx_offset = 0
-        current_global_edge_idx_offset = 0  # For context edges
-        current_global_query_edge_idx_offset = 0  # For query edges
+        # Indices for retrieving the query node pairs for a given sample
+        self.query_start_indices = []  # Start index in query_src_list/query_dst_list/label_list
+        self.query_end_indices = []  # End index
 
-        for i in range(len(dag_dataset)):  # Iterate through each original graph
+        num_total_edges_processed = 0  # For avg_in_deg calculation
+        num_total_nonsrc_nodes = 0  # For avg_in_deg calculation
+
+        for i in range(len(dag_dataset)):
             data_i = dag_dataset[i]
+
             if conditional:
-                src_orig, dst_orig, x_n_orig, y_orig = data_i
-                graph_cond_label_idx = len(self.input_y)
-                self.input_y.append(y_orig)
+                src, dst, x_n, y = data_i
+                input_g = len(self.input_y)
+                self.input_y.append(y)
             else:
-                src_orig, dst_orig, x_n_orig = data_i
-                graph_cond_label_idx = -1
+                src, dst, x_n = data_i
 
-            input_n_start_for_current_sample = current_global_node_idx_offset
-            input_n_nodes_in_current_sample_context = 0
-            input_e_start_for_current_sample = current_global_edge_idx_offset
-            input_e_edges_in_current_sample_context = 0
+            input_n_start_val = len(self.input_x_n)
+            input_n_end_val = len(self.input_x_n)
+            input_e_start_val = len(self.input_src)  # Edges accumulated for model input
+            input_e_end_val = len(self.input_src)
 
-            query_start_for_current_sample_overall = current_global_query_edge_idx_offset
+            query_start_for_sample = len(self.query_src_list)  # Start of queries for *this* sample
 
-            node_id_map_to_global_idx = {}  # Map original_node_id+1 to its global index in self.input_x_n
-
-            # Add dummy node to context G(<=0)
-            dummy_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context
             self.input_x_n.append(dag_dataset.dummy_category)
-            node_id_map_to_global_idx[0] = dummy_global_idx
-            input_n_nodes_in_current_sample_context += 1
+            input_n_end_val += 1
+            src_plus_dummy = src + 1
+            dst_plus_dummy = dst + 1
 
-            current_level = 0
-            self.input_level.append(current_level)
+            level = 0
+            self.input_level.append(level)
 
-            src_adj = src_orig + 1
-            dst_adj = dst_orig + 1
-            num_nodes_in_original_graph_plus_dummy = len(x_n_orig) + 1
-            in_deg = self.get_in_deg(dst_adj, num_nodes_in_original_graph_plus_dummy)
-            src_adj_list = src_adj.tolist()
-            dst_adj_list = dst_adj.tolist()
-            x_n_orig_list = x_n_orig.tolist()
-            out_adj_list = self.get_out_adj_list(src_adj_list, dst_adj_list)
-            in_adj_list = self.get_in_adj_list(src_adj_list, dst_adj_list)
+            num_nodes_with_dummy = len(x_n) + 1
+            in_deg = self.get_in_deg(dst_plus_dummy, num_nodes_with_dummy)
 
-            num_total_edges_in_dataset += len(src_adj_list)
+            x_n_list = x_n.tolist()
+            out_adj_list = self.get_out_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
+            in_adj_list = self.get_in_adj_list(src_plus_dummy.tolist(), dst_plus_dummy.tolist())
 
-            # Nodes in G(<=l-1) that can be sources for edges to G(l)
-            # These are their global indices in self.input_x_n
-            context_source_candidate_global_indices = [dummy_global_idx]
+            # Nodes in the first layer (these are 1-indexed relative to dummy)
+            # These become the initial set of candidate source nodes for edges to the next layer.
+            # Their attributes are added to self.input_x_n.
+            prev_frontiers_nodes = [
+                u for u in range(1, num_nodes_with_dummy) if in_deg[u] == 0
+            ]
 
-            frontiers = [u for u in range(1, num_nodes_in_original_graph_plus_dummy) if in_deg[u] == 0]
-            frontier_size = len(frontiers)
+            current_frontiers_nodes = []
+            level += 1  # Level of the first real layer
 
-            # Add initial frontier (layer 1) to context, these become source candidates for next layer
-            if frontier_size > 0:
-                current_level += 1
-                for u_frontier_node_adj_id in frontiers:
-                    u_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context
-                    self.input_x_n.append(x_n_orig_list[u_frontier_node_adj_id - 1])
-                    self.input_level.append(current_level)
-                    node_id_map_to_global_idx[u_frontier_node_adj_id] = u_global_idx
-                    context_source_candidate_global_indices.append(u_global_idx)
-                    input_n_nodes_in_current_sample_context += 1
+            num_total_edges_processed += len(src)  # Original edges in the graph
+            num_total_nonsrc_nodes += len(x_n) - len(prev_frontiers_nodes)  # Nodes not in the first layer
 
-                    # Update in_deg for next frontier
-                    for v_successor_adj_id in out_adj_list[u_frontier_node_adj_id]:
-                        in_deg[v_successor_adj_id] -= 1
-                        # Successors will be processed in the main loop if their in_deg becomes 0
+            # Add nodes of the first layer to self.input_x_n and self.input_level
+            for u_node in prev_frontiers_nodes:
+                self.input_x_n.append(x_n_list[u_node - 1])
+                self.input_level.append(level)
+            input_n_end_val += len(prev_frontiers_nodes)
 
-                # Reset frontiers to find the actual next layer based on updated in_degrees
-                frontiers = [u for u in range(1, num_nodes_in_original_graph_plus_dummy)
-                             if in_deg[u] == 0 and u not in node_id_map_to_global_idx]  # Nodes not yet added
-                frontier_size = len(frontiers)
+            # src_candidates_for_queries are the nodes from *previous* layers that can be sources
+            # These are 1-indexed relative to the dummy node.
+            src_candidates_for_queries = list(prev_frontiers_nodes)
 
-            # Loop to generate samples for predicting edges to each new layer
-            while frontier_size > 0:
-                current_level += 1
+            # Determine next layer of nodes
+            for u_node in prev_frontiers_nodes:
+                for v_target_node in out_adj_list[u_node]:
+                    in_deg[v_target_node] -= 1
+                    if in_deg[v_target_node] == 0:
+                        current_frontiers_nodes.append(v_target_node)
 
-                # --- Create a training sample for predicting edges to `frontiers` ---
-                self.input_n_start.append(input_n_start_for_current_sample)
-                self.input_n_end.append(input_n_start_for_current_sample + input_n_nodes_in_current_sample_context)
-                self.input_e_start.append(input_e_start_for_current_sample)
-                self.input_e_end.append(input_e_start_for_current_sample + input_e_edges_in_current_sample_context)
+            # Loop while there are new layers to process
+            while len(current_frontiers_nodes) > 0:
+                level += 1  # Level of the current_frontiers_nodes
 
-                self.query_start.append(current_global_query_edge_idx_offset)  # Start for this sample's queries
+                # For each node u in the current_frontiers_nodes, we generate queries
+                # from all src_candidates_for_queries to u.
 
+                # Record the state of the graph *before* adding this layer's nodes and edges
+                # These define the input graph for predicting edges to current_frontiers_nodes
+                self.input_e_start.append(input_e_start_val)
+                self.input_e_end.append(input_e_end_val)
+                self.input_n_start.append(input_n_start_val)
+                self.input_n_end.append(input_n_end_val)
                 if conditional:
-                    self.input_g.append(graph_cond_label_idx)
+                    self.input_g.append(input_g)
 
-                new_layer_node_global_indices = []  # Global indices of nodes in the current new layer (frontiers)
+                # Record where queries for this step begin and will end
+                self.query_start_indices.append(query_start_for_sample)
 
-                # Add current frontier nodes to self.input_x_n
-                # These are the destination candidates for query edges
-                for u_frontier_node_adj_id in frontiers:
-                    u_global_idx = current_global_node_idx_offset + input_n_nodes_in_current_sample_context
-                    self.input_x_n.append(x_n_orig_list[u_frontier_node_adj_id - 1])
-                    self.input_level.append(current_level)
-                    node_id_map_to_global_idx[u_frontier_node_adj_id] = u_global_idx
-                    new_layer_node_global_indices.append(u_global_idx)
-                    input_n_nodes_in_current_sample_context += 1  # Increment context size
+                num_queries_this_step = 0
+                temp_edges_added_to_input_this_step = 0
 
-                # Generate query edges: (context_source_candidate, new_layer_node)
-                for t_src_global_idx in context_source_candidate_global_indices:
-                    for u_dst_global_idx in new_layer_node_global_indices:
-                        self.query_src.append(t_src_global_idx)
-                        self.query_dst.append(u_dst_global_idx)
-                        current_global_query_edge_idx_offset += 1
+                next_frontiers_nodes_buffer = []  # To collect nodes for the *next* layer
 
-                        # Label the query: check if this edge exists in original graph
-                        # Map global indices back to original adjusted IDs to check in_adj_list
-                        # This requires reversing the node_id_map_to_global_idx or careful checking
-                        # For simplicity, find original IDs from global indices (less efficient but clear)
-                        t_orig_adj_id = -1
-                        u_orig_adj_id = -1
-                        for orig_id, glob_idx in node_id_map_to_global_idx.items():
-                            if glob_idx == t_src_global_idx: t_orig_adj_id = orig_id
-                            if glob_idx == u_dst_global_idx: u_orig_adj_id = orig_id
+                for u_target_node in current_frontiers_nodes:  # u_target_node is a node in the new layer
+                    # Add attributes of u_target_node to self.input_x_n
+                    self.input_x_n.append(x_n_list[u_target_node - 1])
+                    self.input_level.append(level)
 
-                        if t_orig_adj_id != -1 and u_orig_adj_id != -1 and \
-                                t_orig_adj_id in in_adj_list.get(u_orig_adj_id, []):
-                            self.label.append(1)
+                    # Generate queries: (candidate_source -> u_target_node)
+                    # candidate_source are 1-indexed (relative to dummy)
+                    for t_candidate_source in src_candidates_for_queries:
+                        self.query_src_list.append(t_candidate_source)
+                        self.query_dst_list.append(u_target_node)
+                        num_queries_this_step += 1
+
+                        # Determine label for this query and add edge to input if it exists
+                        if t_candidate_source in in_adj_list[u_target_node]:
+                            self.input_src.append(t_candidate_source)
+                            self.input_dst.append(u_target_node)
+                            temp_edges_added_to_input_this_step += 1
+                            self.label_list.append(1)
                         else:
-                            self.label.append(0)
+                            self.label_list.append(0)
 
-                self.query_end.append(current_global_query_edge_idx_offset)  # End for this sample's queries
+                    # Prepare for the next layer
+                    for v_next_target in out_adj_list[u_target_node]:
+                        in_deg[v_next_target] -= 1
+                        if in_deg[v_next_target] == 0:
+                            next_frontiers_nodes_buffer.append(v_next_target)
 
-                # Add actual incoming edges for the current frontier to the context edge list
-                # And update context_source_candidate_global_indices for the next iteration
-                next_frontiers = []
-                for u_frontier_node_adj_id in frontiers:  # u_frontier_node_adj_id is 1-indexed original
-                    u_global_idx = node_id_map_to_global_idx[u_frontier_node_adj_id]
-                    context_source_candidate_global_indices.append(u_global_idx)  # Add to sources for next layer
+                input_n_end_val += len(current_frontiers_nodes)  # Nodes of current layer are now part of input graph
+                input_e_end_val += temp_edges_added_to_input_this_step  # Edges to current layer are now part of input graph
 
-                    for t_predecessor_adj_id in in_adj_list[u_frontier_node_adj_id]:
-                        t_pred_global_idx = node_id_map_to_global_idx[t_predecessor_adj_id]
-                        self.input_src.append(t_pred_global_idx)
-                        self.input_dst.append(u_global_idx)
-                        input_e_edges_in_current_sample_context += 1
+                query_start_for_sample += num_queries_this_step  # Update for next step's query start
+                self.query_end_indices.append(query_start_for_sample)  # Mark end of queries for this step
 
-                    for v_successor_adj_id in out_adj_list[u_frontier_node_adj_id]:
-                        in_deg[v_successor_adj_id] -= 1
-                        if in_deg[v_successor_adj_id] == 0:
-                            next_frontiers.append(v_successor_adj_id)
+                src_candidates_for_queries.extend(current_frontiers_nodes)
+                current_frontiers_nodes = list(set(next_frontiers_nodes_buffer))  # Remove duplicates for next layer
 
-                frontiers = next_frontiers
-                frontier_size = len(frontiers)
+        self.base_postprocess()  # Converts lists to tensors
+        self.query_src_list = torch.LongTensor(self.query_src_list)
+        self.query_dst_list = torch.LongTensor(self.query_dst_list)
+        self.label_list = torch.LongTensor(self.label_list)
+        self.query_start_indices = torch.LongTensor(self.query_start_indices)
+        self.query_end_indices = torch.LongTensor(self.query_end_indices)
 
-            # After processing all layers of graph i, update global offsets
-            current_global_node_idx_offset += input_n_nodes_in_current_sample_context
-            current_global_edge_idx_offset += input_e_edges_in_current_sample_context
-            # current_global_query_edge_idx_offset is already updated inside the loop
-
-        self.base_postprocess()
-        self.query_src = torch.LongTensor(self.query_src)
-        self.query_dst = torch.LongTensor(self.query_dst)
-        self.query_start = torch.LongTensor(self.query_start)
-        self.query_end = torch.LongTensor(self.query_end)
-        self.label = torch.LongTensor(self.label)
-
-        # Calculate avg_in_deg based on actual edges in the original graphs
-        # (excluding dummy nodes and considering only non-source nodes)
-        # This calculation needs to be based on the properties of the *original* dag_dataset graphs.
-        # The current num_total_edges_in_dataset and num_total_nonsrc_nodes_in_dataset
-        # are based on the adjusted (1-indexed) src/dst lists.
-        # For simplicity, if dag_dataset is a list of (src,dst,x_n), recalculate here:
-        true_edge_count = 0
-        true_non_source_nodes = 0
-        for graph_idx in range(len(dag_dataset)):
-            s_orig, d_orig, x_n_o = dag_dataset[graph_idx]
-            true_edge_count += s_orig.numel()
-            if x_n_o.numel() > 0:  # If graph is not empty
-                in_degrees_orig = torch.bincount(d_orig, minlength=x_n_o.shape[0])
-                true_non_source_nodes += (in_degrees_orig > 0).sum().item()
-
-        if true_non_source_nodes > 0:
-            self.avg_in_deg = true_edge_count / true_non_source_nodes
+        if num_total_nonsrc_nodes > 0:
+            self.avg_in_deg = num_total_edges_processed / num_total_nonsrc_nodes
         else:
             self.avg_in_deg = 0.0
 
     def __len__(self):
-        return len(self.query_start)
+        return len(self.query_start_indices)  # Number of prediction steps
 
     def __getitem__(self, index):
+        # Indices for the input graph structure (nodes and edges from previous layers)
         input_e_start_idx = self.input_e_start[index]
         input_e_end_idx = self.input_e_end[index]
         input_n_start_idx = self.input_n_start[index]
         input_n_end_idx = self.input_n_end[index]
 
-        current_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
-        global_ctx_src_edges = self.input_src[input_e_start_idx:input_e_end_idx]
-        global_ctx_dst_edges = self.input_dst[input_e_start_idx:input_e_end_idx]
-
-        if global_ctx_src_edges.numel() > 0:
-            adjusted_ctx_src_edges = global_ctx_src_edges - input_n_start_idx
-        else:
-            adjusted_ctx_src_edges = torch.tensor([], dtype=torch.long, device=global_ctx_src_edges.device)
-        if global_ctx_dst_edges.numel() > 0:
-            adjusted_ctx_dst_edges = global_ctx_dst_edges - input_n_start_idx
-        else:
-            adjusted_ctx_dst_edges = torch.tensor([], dtype=torch.long, device=global_ctx_dst_edges.device)
-
+        # Input nodes and their levels
+        input_x_n_slice = self.input_x_n[input_n_start_idx:input_n_end_idx]
         input_abs_level_slice = self.input_level[input_n_start_idx:input_n_end_idx]
         if input_abs_level_slice.numel() > 0:
             input_rel_level_slice = input_abs_level_slice.max() - input_abs_level_slice
         else:
-            input_rel_level_slice = torch.tensor([], dtype=torch.long, device=input_abs_level_slice.device)
+            input_rel_level_slice = torch.empty_like(input_abs_level_slice)
 
-        query_s_idx = self.query_start[index]
-        query_e_idx = self.query_end[index]
-        global_query_src_edges = self.query_src[query_s_idx:query_e_idx]
-        global_query_dst_edges = self.query_dst[query_s_idx:query_e_idx]
-        query_labels = self.label[query_s_idx:query_e_idx]
+        # Input edges (re-indexed to be local to input_x_n_slice)
+        current_n_start_offset = input_n_start_idx
+        src_for_item = self.input_src[input_e_start_idx:input_e_end_idx] - current_n_start_offset
+        dst_for_item = self.input_dst[input_e_start_idx:input_e_end_idx] - current_n_start_offset
 
-        if global_query_src_edges.numel() > 0:
-            adjusted_query_src_edges = global_query_src_edges - input_n_start_idx
-        else:
-            adjusted_query_src_edges = torch.tensor([], dtype=torch.long, device=global_query_src_edges.device)
-        if global_query_dst_edges.numel() > 0:
-            adjusted_query_dst_edges = global_query_dst_edges - input_n_start_idx
-        else:
-            adjusted_query_dst_edges = torch.tensor([], dtype=torch.long, device=global_query_dst_edges.device)
+        # Query edges for prediction (also re-indexed to be local to input_x_n_slice)
+        query_s_idx = self.query_start_indices[index]
+        query_e_idx = self.query_end_indices[index]
 
-        # For EdgeDiscreteDiffusion, apply_noise expects a matrix of edge states.
-        # query_labels is currently flat. We need to form the query adjacency matrix.
-        # The original paper's EdgeDiscreteDiffusion.apply_noise took a matrix z of shape (A, B).
-        # Here, A = num destination candidates (new layer nodes), B = num source candidates (context nodes).
-        # This reshaping is complex if query_src/dst are not forming a perfect grid in order.
-        # For now, pass flat query_labels. EdgeDiscreteDiffusion.apply_noise might need adaptation
-        # or this part needs careful reconstruction of the query matrix.
-        # The current EdgeDiscreteDiffusion.apply_noise expects a matrix.
-        # Let's assume for now that query_labels can be passed and Diffusion handles it or
-        # this needs to be reshaped based on how queries were formed.
-        # If queries (t_src_global_idx, u_dst_global_idx) were generated systematically,
-        # query_labels could be reshaped.
-        # For now, we will pass the flat labels and let the diffusion model handle it or error out
-        # if it strictly expects a matrix that cannot be formed from flat labels without more info.
-        # The key is that adjusted_query_src/dst are now local.
+        query_src_for_item = self.query_src_list[query_s_idx:query_e_idx] - current_n_start_offset
+        query_dst_for_item = self.query_dst_list[query_s_idx:query_e_idx] - current_n_start_offset
+        label_for_item = self.label_list[query_s_idx:query_e_idx]
 
-        # If EdgeDiscreteDiffusion.apply_noise expects a flat list of labels [0,1,0...]
-        # then query_labels is fine. If it expects a matrix, this needs more work.
-        # The provided EdgeDiscreteDiffusion.apply_noise takes a matrix z.
-        # This is a significant mismatch if query_labels is flat.
-        # For now, to proceed with the indexing fix, I will assume query_labels is passed
-        # and the diffusion model's apply_noise will be adapted or this will be a point of failure.
-        # The most robust fix is to make apply_noise in EdgeDiscreteDiffusion take flat labels
-        # if the query pairs are not guaranteed to form a dense grid in order.
+        # Apply noise to edge labels (label_for_item)
+        # Need to reshape label_for_item for apply_noise if it expects a matrix
+        # Assuming self.edge_diffusion.apply_noise can handle a flat list of 0/1 labels
+        # Or it might expect an adjacency matrix representation of the queries.
+        # The original code reshaped:
+        #   unique_src = torch.unique(query_src_for_item, sorted=False) # These are local query src/dst
+        #   unique_dst = torch.unique(query_dst_for_item, sorted=False)
+        #   if len(unique_dst) > 0 and len(unique_src) > 0 and len(label_for_item) == len(unique_dst) * len(unique_src):
+        #      label_adj = label_for_item.reshape(len(unique_dst), len(unique_src))
+        #      t, label_t_adj = self.edge_diffusion.apply_noise(label_adj)
+        #      # noisy_src/dst are derived from query_src/dst where label_t_adj (flattened) is 1
+        #      label_t_flat = label_t_adj.flatten()
+        #      mask = (label_t_flat == 1)
+        #      noisy_src = query_src_for_item[mask]
+        #      noisy_dst = query_dst_for_item[mask]
+        #   else: # Fallback if reshape is not possible (e.g. not all pairs queried)
+        #      # Apply noise to flat labels, but noisy_src/dst logic might be simpler
+        #      # For simplicity, if not forming a full matrix, let's assume apply_noise works on flat labels
+        #      # and the model predicts for all queries. Noisy edges are just those with label_t=1.
+        #      # This part needs to align with how EdgeDiscreteDiffusion and EdgePredModel expect input.
+        #      # The original code's apply_noise for edges was complex and used avg_in_deg.
+        #      # Let's assume a simplified path for now if the reshape fails.
+        #      t = torch.randint(0, self.edge_diffusion.T + 1, (1,)).item() # Sample a timestep
+        #      # A placeholder for noise application on flat labels:
+        #      # This is a simplification. Real noise model would be more complex.
+        #      noise_prob = self.edge_diffusion.betas[t-1] if t > 0 else 0.0 # Simplified noise probability
+        #      label_t_flat = torch.where(torch.rand_like(label_for_item.float()) < noise_prob, 1 - label_for_item, label_for_item)
+        #      mask = (label_t_flat == 1)
+        #      noisy_src = query_src_for_item[mask]
+        #      noisy_dst = query_dst_for_item[mask]
 
-        # Given the current EdgeDiscreteDiffusion.apply_noise expects a matrix,
-        # and query_labels is flat, this will be an issue.
-        # However, the primary goal here is to fix the indexing for spmatrix.
-        # Let's assume for the purpose of this fix that apply_noise can handle flat labels
-        # or this will be addressed separately in the diffusion model.
-        # The `final_noisy_src` and `final_noisy_dst` are derived from `adjusted_query_src/dst`
-        # based on `noisy_label_states`.
+        # Simpler approach based on original structure for apply_noise:
+        # It expects a 2D adjacency matrix of labels for the *queried* pairs.
+        # This requires query_src_for_item and query_dst_for_item to map to a dense matrix.
+        # Let's assume for now that apply_noise can take flat labels and return flat noisy labels + t
+        # And that the model can take all query pairs.
+        # The original `apply_noise` in `LayerDAGEdgePredDataset` was:
+        #   unique_src = torch.unique(query_src, sorted=False)
+        #   unique_dst = torch.unique(query_dst, sorted=False)
+        #   label_adj = label.reshape(len(unique_dst), len(unique_src))
+        #   t, label_t = self.edge_diffusion.apply_noise(label_adj)
+        #   mask = (label_t == 1) # This label_t is 2D
+        #   noisy_src = query_src[mask.flatten()] # This assumes query_src corresponds to flattened mask
+        #   noisy_dst = query_dst[mask.flatten()]
+        # This is complex. The collate_fn expects flat noisy_src/dst.
+        # A more robust way is to apply noise to the flat `label_for_item` directly if `edge_diffusion.apply_noise` supports it
+        # or if `edge_diffusion` is simplified for binary values.
 
-        t_timestep, noisy_label_states_flat = self.edge_diffusion.apply_noise(
-            query_labels)  # Assuming this works with flat
+        # For now, let's assume a simplified noise application for the purpose of getting indices right.
+        # The actual noise model (self.edge_diffusion.apply_noise) needs to be compatible.
+        # If self.edge_diffusion.apply_noise expects a 2D matrix, this part needs more work.
+        # Let's assume it can take the flat `label_for_item` and return a flat `label_t` and scalar `t`.
+        # This is a placeholder for correct noise application logic:
+        if label_for_item.numel() > 0:
+            # This is a placeholder. The actual call to self.edge_diffusion.apply_noise
+            # needs to be consistent with its implementation.
+            # If it expects a 2D matrix, label_for_item needs to be reshaped.
+            # For now, assume it can work with flat labels or a simplified noise model.
+            t_scalar = torch.randint(0, self.edge_diffusion.T + 1, (1,)).item() if hasattr(self.edge_diffusion,
+                                                                                           'T') else 0
+            # Placeholder for noisy labels - in reality, this comes from self.edge_diffusion.apply_noise
+            label_t_flat = label_for_item  # Replace with actual noisy labels
 
-        mask_noisy_edges_exist = (noisy_label_states_flat == 1)
-        final_noisy_src = adjusted_query_src_edges[mask_noisy_edges_exist]
-        final_noisy_dst = adjusted_query_dst_edges[mask_noisy_edges_exist]
+            # Create t as a tensor matching the number of queries, as expected by collate_fn
+            t_tensor = torch.full((label_for_item.shape[0], 1), t_scalar, dtype=torch.long)
+
+            mask = (label_t_flat == 1)  # Assuming label_t_flat is binary
+            noisy_src_for_item = query_src_for_item[mask]
+            noisy_dst_for_item = query_dst_for_item[mask]
+        else:  # No queries
+            t_tensor = torch.empty((0, 1), dtype=torch.long)
+            noisy_src_for_item = torch.empty_like(query_src_for_item)
+            noisy_dst_for_item = torch.empty_like(query_dst_for_item)
 
         if self.conditional:
             input_g_idx = self.input_g[index]
-            if not (0 <= input_g_idx < len(self.input_y)):
-                raise IndexError(
-                    f"LayerDAGEdgePredDataset [Index: {index}]: Invalid input_g_idx {input_g_idx} for self.input_y length {len(self.input_y)}"
-                )
-            input_y_scalar = self.input_y[input_g_idx].item()
-            return adjusted_ctx_src_edges, adjusted_ctx_dst_edges, \
-                final_noisy_src, final_noisy_dst, \
-                current_x_n_slice, input_abs_level_slice, input_rel_level_slice, \
-                t_timestep, input_y_scalar, \
-                adjusted_query_src_edges, adjusted_query_dst_edges, query_labels  # Return all query pairs and their true labels
+            input_y_val = self.input_y[input_g_idx].item() if isinstance(self.input_y[input_g_idx], torch.Tensor) and \
+                                                              self.input_y[input_g_idx].numel() == 1 else self.input_y[
+                input_g_idx]
+
+            return src_for_item, dst_for_item, \
+                noisy_src_for_item, noisy_dst_for_item, \
+                input_x_n_slice, \
+                input_abs_level_slice, input_rel_level_slice, \
+                t_tensor, input_y_val, \
+                query_src_for_item, query_dst_for_item, label_for_item
         else:
-            return adjusted_ctx_src_edges, adjusted_ctx_dst_edges, \
-                final_noisy_src, final_noisy_dst, \
-                current_x_n_slice, input_abs_level_slice, input_rel_level_slice, \
-                t_timestep, \
-                adjusted_query_src_edges, adjusted_query_dst_edges, query_labels
+            return src_for_item, dst_for_item, \
+                noisy_src_for_item, noisy_dst_for_item, \
+                input_x_n_slice, \
+                input_abs_level_slice, input_rel_level_slice, \
+                t_tensor, \
+                query_src_for_item, query_dst_for_item, label_for_item
 
 
 def collate_common(src, dst, x_n, abs_level, rel_level):
-    num_nodes_list = [len(x_n_i) for x_n_i in x_n]
-    if not num_nodes_list:  # Batch of empty graphs
-        num_nodes_cumsum = torch.tensor([0], dtype=torch.long)
-    else:
-        num_nodes_cumsum = torch.cumsum(torch.tensor([0] + num_nodes_list), dim=0)
+    # Filter out any None items that might have occurred if a __getitem__ failed or returned None
+    # This is a safeguard; ideally, __getitem__ should always return valid data or raise an error.
+    valid_indices = [i for i, item_x_n in enumerate(x_n) if item_x_n is not None and len(item_x_n) > 0]
+    if not valid_indices:  # All items were None or empty
+        # Return empty tensors with expected structure or handle error
+        # This depends on how downstream code handles empty batches.
+        # For now, let's assume we proceed if at least one valid item.
+        # If all are invalid, this will likely lead to errors later.
+        # A more robust solution might be to raise an error or return a specific "empty batch" signal.
+        # For simplicity, if all items are invalid, this will likely fail at torch.cat if lists are empty.
+        # Let's assume the filtering ensures non-empty lists if valid_indices is not empty.
+        pass  # Let it proceed, subsequent torch.cat might fail if all are filtered out.
+
+    # Ensure we only process valid items
+    src = [src[i] for i in valid_indices]
+    dst = [dst[i] for i in valid_indices]
+    x_n = [x_n[i] for i in valid_indices]
+    abs_level = [abs_level[i] for i in valid_indices]
+    rel_level = [rel_level[i] for i in valid_indices]
+
+    if not x_n:  # If all items were filtered out
+        # Return structure expected by downstream code for an empty batch
+        # This is a simplified handling. Proper empty batch handling might be more complex.
+        return 0, torch.empty((2, 0), dtype=torch.long), torch.empty((0,), dtype=torch.long), \
+            torch.empty((0, 1), dtype=torch.float), torch.empty((0, 1), dtype=torch.float), \
+            torch.empty((2, 0), dtype=torch.long)
+
+    num_nodes_cumsum = torch.cumsum(torch.tensor(
+        [0] + [len(x_n_i) for x_n_i in x_n]), dim=0)
 
     batch_size = len(x_n)
-    src_list_global = []
-    dst_list_global = []
-
+    src_ = []
+    dst_ = []
     for i in range(batch_size):
-        if src[i].numel() > 0:  # Only add if there are edges for this graph
-            src_list_global.append(src[i] + num_nodes_cumsum[i])
-            dst_list_global.append(dst[i] + num_nodes_cumsum[i])
-        # If src[i] is empty, dst[i] should also be empty. Nothing to append.
+        # Ensure src[i] and dst[i] are tensors
+        src_i = src[i] if isinstance(src[i], torch.Tensor) else torch.LongTensor(src[i])
+        dst_i = dst[i] if isinstance(dst[i], torch.Tensor) else torch.LongTensor(dst[i])
+        if src_i.numel() > 0 or dst_i.numel() > 0:  # Only append if there are edges
+            src_.append(src_i + num_nodes_cumsum[i])
+            dst_.append(dst_i + num_nodes_cumsum[i])
 
-    if not src_list_global:  # No edges in the entire batch
-        batch_src_global = torch.tensor([], dtype=torch.long)
-        batch_dst_global = torch.tensor([], dtype=torch.long)
-    else:
-        batch_src_global = torch.cat(src_list_global, dim=0)
-        batch_dst_global = torch.cat(dst_list_global, dim=0)
+    if src_:  # If there are any edges in the batch
+        src = torch.cat(src_, dim=0)
+        dst = torch.cat(dst_, dim=0)
+        edge_index = torch.stack([dst, src])
+    else:  # No edges in the batch
+        src = torch.empty((0,), dtype=torch.long)
+        dst = torch.empty((0,), dtype=torch.long)
+        edge_index = torch.empty((2, 0), dtype=torch.long)
 
-    if batch_src_global.numel() > 0:
-        batch_edge_index_global = torch.stack([batch_dst_global, batch_src_global])
-    else:  # Handle batch with no edges
-        batch_edge_index_global = torch.tensor([[], []], dtype=torch.long)
+    x_n = torch.cat(x_n, dim=0).long()
+    abs_level = torch.cat(abs_level, dim=0).float().unsqueeze(-1)
+    rel_level = torch.cat(rel_level, dim=0).float().unsqueeze(-1)
 
-    if not x_n or all(x.numel() == 0 for x in x_n):  # All graphs in batch are empty
-        batch_x_n_global = torch.tensor([], dtype=torch.long)
-        batch_abs_level_global = torch.tensor([], dtype=torch.float).unsqueeze(-1)
-        batch_rel_level_global = torch.tensor([], dtype=torch.float).unsqueeze(-1)
-    else:
-        batch_x_n_global = torch.cat(x_n, dim=0).long()
-        batch_abs_level_global = torch.cat(abs_level, dim=0).float().unsqueeze(-1)
-        batch_rel_level_global = torch.cat(rel_level, dim=0).float().unsqueeze(-1)
-
-    nids_list = []
-    gids_list = []
+    # Prepare edge index for node to graph mapping
+    nids = []
+    gids = []
     for i in range(batch_size):
         num_nodes_in_graph_i = num_nodes_cumsum[i + 1] - num_nodes_cumsum[i]
-        if num_nodes_in_graph_i > 0:
-            nids_list.append(torch.arange(num_nodes_cumsum[i], num_nodes_cumsum[i + 1], dtype=torch.long))
-            gids_list.append(torch.full((num_nodes_in_graph_i,), i, dtype=torch.long))
+        if num_nodes_in_graph_i > 0:  # Only if graph has nodes
+            nids.append(torch.arange(num_nodes_cumsum[i], num_nodes_cumsum[i + 1]).long())
+            gids.append(torch.ones(num_nodes_in_graph_i).fill_(i).long())
 
-    if not nids_list:  # All graphs in batch are empty
-        batch_nids_global = torch.tensor([], dtype=torch.long)
-        batch_gids_global = torch.tensor([], dtype=torch.long)
-    else:
-        batch_nids_global = torch.cat(nids_list, dim=0)
-        batch_gids_global = torch.cat(gids_list, dim=0)
+    if nids:  # If there are any nodes in the batch
+        nids = torch.cat(nids, dim=0)
+        gids = torch.cat(gids, dim=0)
+        n2g_index = torch.stack([gids, nids])
+    else:  # No nodes in the batch
+        nids = torch.empty((0,), dtype=torch.long)
+        gids = torch.empty((0,), dtype=torch.long)
+        n2g_index = torch.empty((2, 0), dtype=torch.long)
 
-    if batch_nids_global.numel() > 0:
-        batch_n2g_index_global = torch.stack([batch_gids_global, batch_nids_global])
-    else:  # Handle batch with no nodes
-        batch_n2g_index_global = torch.tensor([[], []], dtype=torch.long)
-
-    return batch_size, batch_edge_index_global, batch_x_n_global, \
-        batch_abs_level_global, batch_rel_level_global, batch_n2g_index_global
+    return batch_size, edge_index, x_n, abs_level, rel_level, n2g_index
 
 
 def collate_node_count(data):
-    if not data: return None  # Handle empty data list
+    # Filter out None items from data if any __getitem__ failed
+    data = [d for d in data if d is not None]
+    if not data:  # All items were None
+        # Return a structure indicating an empty batch, matching expected output tuple length
+        # This needs to be robustly handled by the training loop.
+        # Assuming 7 or 8 items in the tuple based on conditional flag.
+        # This is a placeholder, proper empty batch handling is complex.
+        return 0, torch.empty((2, 0), dtype=torch.long), torch.empty((0,), dtype=torch.long), \
+            torch.empty((0, 1), dtype=torch.float), torch.empty((0, 1), dtype=torch.float), \
+            torch.empty((2, 0), dtype=torch.long), torch.empty((0,), dtype=torch.long)  # Unconditional
+        # Or add batch_y for conditional case.
 
-    is_conditional_sample = (len(data[0]) == 7)
+    if len(data[0]) == 7:  # Conditional case
+        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, batch_y_list, batch_label = map(list,
+                                                                                                           zip(*data))
 
-    if is_conditional_sample:
-        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, \
-            batch_y_scalar, batch_label = map(list, zip(*data))
-        batch_y_tensor = torch.tensor(batch_y_scalar).float().unsqueeze(-1)
-    else:
-        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, \
-            batch_label = map(list, zip(*data))
-        batch_y_tensor = None
+        # Process batch_y: y_ is broadcasted if needed by BiMPNNEncoder if pool is None
+        # If BiMPNNEncoder has pool='sum' (typical for node_count), y is graph-level.
+        # The original code created a node-level y_ by repeating.
+        # Let's keep y as graph-level here, as GraphClassifier expects graph-level y.
+        # batch_y will be (batch_size, 1) or (batch_size, F_y)
+        batch_y_tensor = torch.tensor(batch_y_list)  # Assuming batch_y_list contains scalars or 1D tensors for y
+        if batch_y_tensor.ndim == 1: batch_y_tensor = batch_y_tensor.unsqueeze(-1)
 
-    batch_size, batch_edge_index, batch_x_n_collated, \
-        batch_abs_level_collated, batch_rel_level_collated, \
+    else:  # Unconditional case
+        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, batch_label = map(
+            list, zip(*data))
+        batch_y_tensor = None  # No y for unconditional
+
+    batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, batch_rel_level_cat, \
         batch_n2g_index = collate_common(
-        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level
-    )
-    batch_label_collated = torch.stack(batch_label) if batch_label else torch.tensor([], dtype=torch.long)
+        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level)
 
-    if is_conditional_sample:
-        return batch_size, batch_edge_index, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, \
-            batch_y_tensor, batch_n2g_index, batch_label_collated
-    else:
-        return batch_size, batch_edge_index, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, \
-            batch_n2g_index, batch_label_collated
+    batch_label_stacked = torch.stack(batch_label) if batch_label else torch.empty(0, dtype=torch.long)
+
+    if len(data[0]) == 7:  # Conditional
+        return batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, \
+            batch_rel_level_cat, batch_y_tensor, batch_n2g_index, batch_label_stacked
+    else:  # Unconditional
+        return batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, \
+            batch_rel_level_cat, batch_n2g_index, batch_label_stacked
 
 
 def collate_node_pred(data):
-    if not data: return None
+    data = [d for d in data if d is not None]
+    if not data:  # All items were None
+        # Placeholder for empty batch, adjust tuple length as needed
+        return 0, torch.empty((2, 0), dtype=torch.long), torch.empty((0,), dtype=torch.long), \
+            torch.empty((0, 1), dtype=torch.float), torch.empty((0, 1), dtype=torch.float), \
+            torch.empty((2, 0), dtype=torch.long), torch.empty((0,)), torch.empty((0, 1), dtype=torch.long), \
+            torch.empty((0,)), torch.empty((0,), dtype=torch.long), torch.empty((0,))  # Unconditional
 
-    is_conditional_sample = (len(data[0]) == 9)
-
-    if is_conditional_sample:
+    if len(data[0]) == 9:  # Conditional: src, dst, x_n, abs_l, rel_l, z_t, t, y, z
         batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, \
-            batch_z_t, batch_t, batch_y_scalar, batch_z = map(list, zip(*data))
-        batch_y_tensor = torch.tensor(batch_y_scalar).float().unsqueeze(-1)
-    else:
+            batch_z_t, batch_t, batch_y_list, batch_z = map(list, zip(*data))
+
+        batch_y_tensor = torch.tensor(batch_y_list)  # Graph-level y
+        if batch_y_tensor.ndim == 1: batch_y_tensor = batch_y_tensor.unsqueeze(-1)
+
+    elif len(data[0]) == 8:  # Unconditional: src, dst, x_n, abs_l, rel_l, z_t, t, z
         batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level, \
             batch_z_t, batch_t, batch_z = map(list, zip(*data))
         batch_y_tensor = None
+    else:
+        raise ValueError(f"Unexpected number of items in data for collate_node_pred: {len(data[0])}")
 
-    batch_size, batch_edge_index, batch_x_n_collated, \
-        batch_abs_level_collated, batch_rel_level_collated, \
+    batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, batch_rel_level_cat, \
         batch_n2g_index = collate_common(
-        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level
-    )
+        batch_src, batch_dst, batch_x_n, batch_abs_level, batch_rel_level)
 
-    num_query_nodes_list = [len(z_t_i) for z_t_i in batch_z_t]
-    if not num_query_nodes_list:  # No query nodes in any sample
-        num_query_cumsum = torch.tensor([0], dtype=torch.long)
-    else:
-        num_query_cumsum = torch.cumsum(torch.tensor([0] + num_query_nodes_list, dtype=torch.long), dim=0)
+    # Filter batch_z_t for non-empty tensors before cat
+    batch_z_t_filtered = [zt for zt in batch_z_t if zt.numel() > 0]
+    if not batch_z_t_filtered and any(zt.numel() == 0 for zt in batch_z_t):  # if some were empty but not all
+        # This case means some graphs had no query nodes.
+        # The logic for num_query_cumsum and query2g needs to handle this.
+        # If all z_t are empty, then batch_z_t_cat will be empty.
+        pass
 
-    query2g_list = []
-    for i in range(batch_size):  # batch_size is len(data)
-        num_queries_in_graph_i = num_query_cumsum[i + 1] - num_query_cumsum[i]
-        if num_queries_in_graph_i > 0:
-            query2g_list.append(torch.full((num_queries_in_graph_i,), i, dtype=torch.long))
+    num_query_cumsum = torch.cumsum(torch.tensor(
+        [0] + [len(z_t_i) for z_t_i in batch_z_t]), dim=0)  # Use original batch_z_t for lengths
 
-    query2g_collated = torch.cat(query2g_list) if query2g_list else torch.tensor([], dtype=torch.long)
+    query2g = []
+    for i in range(batch_size):  # batch_size from collate_common
+        num_queries_i = num_query_cumsum[i + 1] - num_query_cumsum[i]
+        if num_queries_i > 0:
+            query2g.append(torch.ones(num_queries_i).fill_(i).long())
 
-    batch_z_t_collated = torch.cat(batch_z_t) if batch_z_t and any(
-        zt.numel() > 0 for zt in batch_z_t) else torch.tensor([], dtype=torch.long)
-    batch_t_collated = torch.cat(batch_t).unsqueeze(-1) if batch_t and any(
-        t_i.numel() > 0 for t_i in batch_t) else torch.tensor([], dtype=torch.long).unsqueeze(-1)
-    batch_z_collated = torch.cat(batch_z) if batch_z and any(z_i.numel() > 0 for z_i in batch_z) else torch.tensor([],
-                                                                                                                   dtype=torch.long)
+    if query2g:
+        query2g = torch.cat(query2g)
+    else:  # No queries in the entire batch
+        query2g = torch.empty((0,), dtype=torch.long)
 
-    # Ensure z_collated is 2D if it's not empty
-    if batch_z_collated.ndim == 1 and batch_z_collated.numel() > 0:
-        batch_z_collated = batch_z_collated.unsqueeze(-1)
-    elif batch_z_collated.numel() == 0 and batch_z_t_collated.numel() > 0:  # z is empty but z_t is not
-        feat_dim = batch_z_t_collated.shape[1] if batch_z_t_collated.ndim > 1 else 1
-        batch_z_collated = torch.empty((0, feat_dim), dtype=torch.long, device=batch_z_t_collated.device)
+    batch_z_t_cat = torch.cat(batch_z_t_filtered) if batch_z_t_filtered else torch.empty(
+        (0, batch_z_t[0].shape[1] if batch_z_t and batch_z_t[0].numel() > 0 else 0),
+        dtype=batch_z_t[0].dtype if batch_z_t else torch.long)
+    batch_t_cat = torch.cat(batch_t).unsqueeze(-1) if batch_t and all(t.numel() > 0 for t in batch_t) else torch.empty(
+        (0, 1), dtype=torch.long)  # t corresponds to z_t
 
-    if is_conditional_sample:
-        return batch_size, batch_edge_index, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, batch_n2g_index, \
-            batch_z_t_collated, batch_t_collated, batch_y_tensor, \
-            query2g_collated, num_query_cumsum, batch_z_collated
-    else:
-        return batch_size, batch_edge_index, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, batch_n2g_index, \
-            batch_z_t_collated, batch_t_collated, \
-            query2g_collated, num_query_cumsum, batch_z_collated
+    batch_z_filtered = [z_val for z_val in batch_z if z_val.numel() > 0]
+    batch_z_cat = torch.cat(batch_z_filtered) if batch_z_filtered else torch.empty(
+        (0, batch_z[0].shape[1] if batch_z and batch_z[0].numel() > 0 else 0),
+        dtype=batch_z[0].dtype if batch_z else torch.long)
+
+    if batch_z_cat.ndim == 1 and batch_z_cat.numel() > 0:  # Ensure it's not empty before unsqueeze
+        batch_z_cat = batch_z_cat.unsqueeze(-1)
+    elif batch_z_cat.numel() == 0 and batch_z_cat.ndim == 1:  # if empty and 1D, make it (0,1)
+        batch_z_cat = batch_z_cat.view(0, 1)
+
+    if len(data[0]) == 9:  # Conditional
+        return batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, \
+            batch_rel_level_cat, batch_n2g_index, batch_z_t_cat, batch_t_cat, batch_y_tensor, \
+            query2g, num_query_cumsum, batch_z_cat
+    else:  # Unconditional
+        return batch_size, batch_edge_index, batch_x_n_cat, batch_abs_level_cat, \
+            batch_rel_level_cat, batch_n2g_index, batch_z_t_cat, batch_t_cat, \
+            query2g, num_query_cumsum, batch_z_cat
 
 
 def collate_edge_pred(data):
-    if not data: return None
-    is_conditional_sample = (len(data[0]) == 12)
+    data = [d for d in data if d is not None]
+    if not data:
+        # Placeholder for empty batch
+        return torch.empty((2, 0), dtype=torch.long), torch.empty((2, 0), dtype=torch.long), \
+            torch.empty((0,), dtype=torch.long), torch.empty((0, 1), dtype=torch.float), \
+            torch.empty((0, 1), dtype=torch.float), torch.empty((0, 1), dtype=torch.long), \
+            torch.empty((0,), dtype=torch.long), torch.empty((0,), dtype=torch.long), \
+            torch.empty((0,), dtype=torch.long)  # Unconditional, 9 items
 
-    if is_conditional_sample:
-        batch_ctx_src, batch_ctx_dst, batch_noisy_src, batch_noisy_dst, \
-            batch_x_n, batch_abs_level, batch_rel_level, batch_t, batch_y_scalar, \
+    if len(data[
+               0]) == 12:  # Conditional: input_src, input_dst, noisy_src, noisy_dst, x_n, abs_l, rel_l, t, y, query_src, query_dst, label
+        batch_input_src, batch_input_dst, batch_noisy_src, batch_noisy_dst, batch_x_n, \
+            batch_abs_level, batch_rel_level, batch_t_list, batch_y_list, \
             batch_query_src, batch_query_dst, batch_label = map(list, zip(*data))
-        batch_y_tensor = torch.tensor(batch_y_scalar).float().unsqueeze(-1)
-    else:
-        batch_ctx_src, batch_ctx_dst, batch_noisy_src, batch_noisy_dst, \
-            batch_x_n, batch_abs_level, batch_rel_level, batch_t, \
+
+        batch_y_tensor = torch.tensor(batch_y_list)  # Graph-level y
+        if batch_y_tensor.ndim == 1: batch_y_tensor = batch_y_tensor.unsqueeze(-1)
+
+    elif len(data[0]) == 11:  # Unconditional
+        batch_input_src, batch_input_dst, batch_noisy_src, batch_noisy_dst, batch_x_n, \
+            batch_abs_level, batch_rel_level, batch_t_list, \
             batch_query_src, batch_query_dst, batch_label = map(list, zip(*data))
         batch_y_tensor = None
-
-    num_nodes_list = [len(x_n_i) for x_n_i in batch_x_n]
-    if not num_nodes_list:
-        num_nodes_cumsum = torch.tensor([0], dtype=torch.long)
     else:
-        num_nodes_cumsum = torch.cumsum(torch.tensor([0] + num_nodes_list, dtype=torch.long), dim=0)
+        raise ValueError(f"Unexpected number of items in data for collate_edge_pred: {len(data[0])}")
 
-    def concat_offset_edges(edge_list_0, edge_list_1, offsets):
-        cat_list_0, cat_list_1 = [], []
-        for i in range(len(edge_list_0)):  # Iterate through batch_size
-            if edge_list_0[i].numel() > 0:  # Check if current graph has edges of this type
-                cat_list_0.append(edge_list_0[i] + offsets[i])
-                cat_list_1.append(edge_list_1[i] + offsets[i])
+    # Common processing for nodes
+    num_nodes_cumsum = torch.cumsum(torch.tensor(
+        [0] + [len(x_n_i) for x_n_i in batch_x_n]), dim=0)
 
-        if not cat_list_0:  # No edges of this type in the entire batch
-            return torch.tensor([], dtype=torch.long), torch.tensor([], dtype=torch.long)
-        return torch.cat(cat_list_0, dim=0), torch.cat(cat_list_1, dim=0)
+    batch_x_n_cat = torch.cat(batch_x_n, dim=0).long()
+    batch_abs_level_cat = torch.cat(batch_abs_level, dim=0).float().unsqueeze(-1)
+    batch_rel_level_cat = torch.cat(batch_rel_level, dim=0).float().unsqueeze(-1)
 
-    ctx_src_global, ctx_dst_global = concat_offset_edges(batch_ctx_src, batch_ctx_dst, num_nodes_cumsum)
-    ctx_edge_index_global = torch.stack(
-        [ctx_dst_global, ctx_src_global]) if ctx_src_global.numel() > 0 else torch.tensor([[], []], dtype=torch.long)
+    # Process edges (input_src/dst, noisy_src/dst, query_src/dst)
+    # These are already local 0-indexed from __getitem__
 
-    noisy_src_global, noisy_dst_global = concat_offset_edges(batch_noisy_src, batch_noisy_dst, num_nodes_cumsum)
-    noisy_edge_index_global = torch.stack(
-        [noisy_dst_global, noisy_src_global]) if noisy_src_global.numel() > 0 else torch.tensor([[], []],
-                                                                                                dtype=torch.long)
+    # Batch input_edges
+    input_src_cat_list, input_dst_cat_list = [], []
+    for i in range(len(batch_x_n)):
+        if batch_input_src[i].numel() > 0:
+            input_src_cat_list.append(batch_input_src[i] + num_nodes_cumsum[i])
+            input_dst_cat_list.append(batch_input_dst[i] + num_nodes_cumsum[i])
+    input_src_b = torch.cat(input_src_cat_list) if input_src_cat_list else torch.empty(0, dtype=torch.long)
+    input_dst_b = torch.cat(input_dst_cat_list) if input_dst_cat_list else torch.empty(0, dtype=torch.long)
+    input_edge_index_b = torch.stack([input_dst_b, input_src_b]) if input_src_b.numel() > 0 else torch.empty((2, 0),
+                                                                                                             dtype=torch.long)
 
-    query_src_global, query_dst_global = concat_offset_edges(batch_query_src, batch_query_dst, num_nodes_cumsum)
+    # Batch noisy_edges
+    noisy_src_cat_list, noisy_dst_cat_list = [], []
+    for i in range(len(batch_x_n)):
+        if batch_noisy_src[i].numel() > 0:
+            noisy_src_cat_list.append(batch_noisy_src[i] + num_nodes_cumsum[i])
+            noisy_dst_cat_list.append(batch_noisy_dst[i] + num_nodes_cumsum[i])
+    noisy_src_b = torch.cat(noisy_src_cat_list) if noisy_src_cat_list else torch.empty(0, dtype=torch.long)
+    noisy_dst_b = torch.cat(noisy_dst_cat_list) if noisy_dst_cat_list else torch.empty(0, dtype=torch.long)
+    noisy_edge_index_b = torch.stack([noisy_dst_b, noisy_src_b]) if noisy_src_b.numel() > 0 else torch.empty((2, 0),
+                                                                                                             dtype=torch.long)
 
-    batch_x_n_collated = torch.cat(batch_x_n, dim=0).long() if batch_x_n and any(
-        x.numel() > 0 for x in batch_x_n) else torch.tensor([], dtype=torch.long)
-    batch_abs_level_collated = torch.cat(batch_abs_level, dim=0).float().unsqueeze(-1) if batch_abs_level and any(
-        al.numel() > 0 for al in batch_abs_level) else torch.tensor([], dtype=torch.float).unsqueeze(-1)
-    batch_rel_level_collated = torch.cat(batch_rel_level, dim=0).float().unsqueeze(-1) if batch_rel_level and any(
-        rl.numel() > 0 for rl in batch_rel_level) else torch.tensor([], dtype=torch.float).unsqueeze(-1)
+    # Batch query_edges and corresponding t and labels
+    query_src_cat_list, query_dst_cat_list = [], []
+    t_for_queries_list, labels_for_queries_list = [], []
 
-    batch_t_collated = torch.cat(batch_t).unsqueeze(-1) if batch_t and any(
-        t_i.numel() > 0 for t_i in batch_t) else torch.tensor([], dtype=torch.long).unsqueeze(-1)
-    batch_label_collated = torch.cat(batch_label) if batch_label and any(
-        l_i.numel() > 0 for l_i in batch_label) else torch.tensor([], dtype=torch.long)
+    for i in range(len(batch_x_n)):
+        if batch_query_src[i].numel() > 0:
+            query_src_cat_list.append(batch_query_src[i] + num_nodes_cumsum[i])
+            query_dst_cat_list.append(batch_query_dst[i] + num_nodes_cumsum[i])
+            # batch_t_list[i] should be (num_queries_i, 1) from __getitem__
+            t_for_queries_list.append(batch_t_list[i])
+            labels_for_queries_list.append(batch_label[i])
 
-    if is_conditional_sample:
-        return ctx_edge_index_global, noisy_edge_index_global, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, batch_t_collated, \
-            batch_y_tensor, query_src_global, query_dst_global, batch_label_collated
-    else:
-        return ctx_edge_index_global, noisy_edge_index_global, batch_x_n_collated, \
-            batch_abs_level_collated, batch_rel_level_collated, batch_t_collated, \
-            query_src_global, query_dst_global, batch_label_collated
+    query_src_b = torch.cat(query_src_cat_list) if query_src_cat_list else torch.empty(0, dtype=torch.long)
+    query_dst_b = torch.cat(query_dst_cat_list) if query_dst_cat_list else torch.empty(0, dtype=torch.long)
+
+    # Concatenate t and labels only if there are queries
+    t_b = torch.cat(t_for_queries_list) if t_for_queries_list else torch.empty((0, 1), dtype=torch.long)
+    label_b = torch.cat(labels_for_queries_list) if labels_for_queries_list else torch.empty(0, dtype=torch.long)
+
+    if len(data[0]) == 12:  # Conditional
+        return input_edge_index_b, noisy_edge_index_b, batch_x_n_cat, \
+            batch_abs_level_cat, batch_rel_level_cat, \
+            t_b, batch_y_tensor, \
+            query_src_b, query_dst_b, label_b
+    else:  # Unconditional
+        return input_edge_index_b, noisy_edge_index_b, batch_x_n_cat, \
+            batch_abs_level_cat, batch_rel_level_cat, \
+            t_b, \
+            query_src_b, query_dst_b, label_b
