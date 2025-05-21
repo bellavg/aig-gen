@@ -22,7 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Adjusted imports to be relative to the 'src' directory if main.py is inside 'src'
 # If main.py is at the project root, these would be 'from src import utils', etc.
 # Assuming main.py is in the same directory as the modules it's importing from, or 'src' is in PYTHONPATH
-from src import utils
+import utils
 from src.metrics.abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
 from src.diffusion_model import LiftedDenoisingDiffusion  # Changed from 'from diffusion_model import ...'
 from src.diffusion_model_discrete import \
