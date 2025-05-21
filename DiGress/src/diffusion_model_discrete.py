@@ -101,8 +101,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.number_chain_steps = cfg.general.number_chain_steps
         self.best_val_nll = 1e8
         self.val_counter = 0
+        self.supports_cudagraph_mark_step = hasattr(torch.compiler, "cudagraph_mark_step_begin")
 
     def training_step(self, data, i):
+        if self.supports_cudagraph_mark_step:
+            torch.compiler.cudagraph_mark_step_begin()
         if data.edge_index.numel() == 0:
             self.print("Found a batch with no edges. Skipping.")
             return
@@ -155,6 +158,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.sampling_metrics.reset()
 
     def validation_step(self, data, i):
+        if self.supports_cudagraph_mark_step:
+            torch.compiler.cudagraph_mark_step_begin()
         dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
         dense_data = dense_data.mask(node_mask)
         noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
@@ -225,6 +230,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             utils.setup_wandb(self.cfg)
 
     def test_step(self, data, i):
+        if self.supports_cudagraph_mark_step:
+            torch.compiler.cudagraph_mark_step_begin()
         dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
         dense_data = dense_data.mask(node_mask)
         noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
