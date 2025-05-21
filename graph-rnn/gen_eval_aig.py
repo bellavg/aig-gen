@@ -119,7 +119,7 @@ def generate_single_graph(num_target_nodes, node_model, edge_model,
     node_model.reset_hidden()
     actual_num_nodes_generated = 0
 
-    for i in range(num_target_nodes):
+    for i in range(num_target_nodes):  # Generate node 0, 1, ..., num_target_nodes-1
         h_for_edge_model, node_attr_logits = node_model(prev_adj_vec_input, prev_node_attr_input)
         current_node_attr_onehot = sample_softmax(node_attr_logits.squeeze(0).squeeze(0))
         list_node_attrs_one_hot.append(current_node_attr_onehot.cpu().numpy())
@@ -139,33 +139,32 @@ def generate_single_graph(num_target_nodes, node_model, edge_model,
         if num_edges_to_predict_for_current_node > 0:
             final_s_i_for_list[:num_edges_to_predict_for_current_node] = processed_slice_scalar_classes
 
-        if i > 0 and np.all(final_s_i_for_list[:num_edges_to_predict_for_current_node] == 0):  # EOS check
-            actual_num_nodes_generated -= 1
-            list_node_attrs_one_hot.pop()
-            break
-        # Only append S_i if the node it corresponds to is kept (i.e., not broken by EOS on this iter)
+        # --- MODIFICATION: EOS condition removed ---
+        # if i > 0 and np.all(final_s_i_for_list[:num_edges_to_predict_for_current_node] == 0): # EOS check
+        #     actual_num_nodes_generated -= 1
+        #     list_node_attrs_one_hot.pop()
+        #     break
+        # --- End MODIFICATION ---
+
         list_s_i_scalar_class_vectors.append(final_s_i_for_list)
 
         prev_adj_vec_input = adj_vec_generated_current_one_hot
         prev_node_attr_input = current_node_attr_onehot.unsqueeze(0).unsqueeze(0)
 
     final_node_attrs_np = np.array(list_node_attrs_one_hot)
-    if not list_s_i_scalar_class_vectors or actual_num_nodes_generated == 0:
-        return np.array([]), np.array([])  # Return empty if no nodes or no S_i vectors
 
-    # Ensure list_s_i_scalar_class_vectors has 'actual_num_nodes_generated' elements
-    # This list should contain S_0, S_1, ..., S_{N-1}
-    if len(list_s_i_scalar_class_vectors) != actual_num_nodes_generated:
-        print(f"Warning: S_i vector count ({len(list_s_i_scalar_class_vectors)}) "
-              f"does not match actual_num_nodes_generated ({actual_num_nodes_generated}). "
-              f"This might happen if EOS occurred on the very last target node. Adjusting S_i list.")
-        list_s_i_scalar_class_vectors = list_s_i_scalar_class_vectors[:actual_num_nodes_generated]
+    # If loop completed, actual_num_nodes_generated will be num_target_nodes
+    # and len(list_s_i_scalar_class_vectors) will be num_target_nodes.
+
+    if not list_s_i_scalar_class_vectors or actual_num_nodes_generated == 0:
+        return np.array([]), np.array([])
 
     # m_seq_to_adj_mat expects N-1 sequences (S_0 to S_{N-2}) to create an N x N matrix.
-    # Our list_s_i_scalar_class_vectors has N elements (S_0 to S_{N-1}).
-    if actual_num_nodes_generated == 1:  # Single node graph
-        m_seq_for_conversion = np.array([])  # No sequences for m_seq_to_adj_mat
+    # list_s_i_scalar_class_vectors has N elements (S_0 to S_{N-1}) if EOS was removed and loop completed.
+    if actual_num_nodes_generated == 1:
+        m_seq_for_conversion = np.array([])
     elif actual_num_nodes_generated > 1:
+        # Use S_0 to S_{N-2} for an N-node graph.
         m_seq_for_conversion = np.array(list_s_i_scalar_class_vectors[:-1])
     else:  # actual_num_nodes_generated is 0
         m_seq_for_conversion = np.array([])
@@ -174,20 +173,26 @@ def generate_single_graph(num_target_nodes, node_model, edge_model,
         m_seq_for_conversion = m_seq_for_conversion.reshape(1, -1)
 
     adj_matrix_scalar_classes = np.array([])
-    if m_seq_for_conversion.shape[0] > 0:  # If there are sequences to convert (N > 1)
+    if m_seq_for_conversion.shape[0] > 0:
         adj_matrix_scalar_classes = m_seq_to_adj_mat(m_seq_for_conversion, m_window_size)
-    elif actual_num_nodes_generated > 0:  # Handles N=1 case (or N=0 if it somehow gets here)
+    elif actual_num_nodes_generated > 0:
         adj_matrix_scalar_classes = np.zeros((actual_num_nodes_generated, actual_num_nodes_generated), dtype=int)
 
+    # Ensure node attributes match the final number of nodes.
+    # Since EOS is removed, actual_num_nodes_generated should match final_node_attrs_np.shape[0]
+    # and adj_matrix_scalar_classes.shape[0] if actual_num_nodes_generated > 0.
     if final_node_attrs_np.shape[0] != actual_num_nodes_generated:
+        print(
+            f"Warning: Mismatch final_node_attrs ({final_node_attrs_np.shape[0]}) and actual_nodes_generated ({actual_num_nodes_generated}).")
+        # This case should be less likely now without EOS modifying actual_num_nodes_generated mid-loop.
         if final_node_attrs_np.shape[0] > actual_num_nodes_generated:
             final_node_attrs_np = final_node_attrs_np[:actual_num_nodes_generated]
-        else:
-            padding_needed = actual_num_nodes_generated - final_node_attrs_np.shape[0]
-            if padding_needed > 0:
-                padding_attrs = np.zeros((padding_needed, num_node_classes))
-                final_node_attrs_np = np.vstack(
-                    [final_node_attrs_np, padding_attrs]) if final_node_attrs_np.size > 0 else padding_attrs
+        # else: (padding case is less likely if EOS is removed)
+
+    if adj_matrix_scalar_classes.shape[0] != actual_num_nodes_generated and actual_num_nodes_generated > 0:
+        print(
+            f"Warning: Mismatch adj_matrix_scalar_classes ({adj_matrix_scalar_classes.shape[0]}) and actual_nodes_generated ({actual_num_nodes_generated}). Creating zero matrix.")
+        adj_matrix_scalar_classes = np.zeros((actual_num_nodes_generated, actual_num_nodes_generated), dtype=int)
 
     return adj_matrix_scalar_classes, final_node_attrs_np
 
@@ -421,10 +426,6 @@ def generated_output_to_nx_aig(adj_matrix_scalar_classes: np.ndarray,
     G = nx.DiGraph()
     num_nodes = node_attrs_one_hot.shape[0]
     if num_nodes == 0: return G
-    # This check was problematic if adj_matrix was for N-1 nodes (from m_seq) and node_attrs for N nodes.
-    # The adj_matrix_scalar_classes is now N x N if generation was successful for N nodes.
-    # if adj_matrix_scalar_classes.size > 0 and adj_matrix_scalar_classes.shape[0] != num_nodes :
-    #     print(f"Warning: Mismatch in generated node attributes ({num_nodes}) and adj matrix ({adj_matrix_scalar_classes.shape[0]}). Using num_nodes from attributes.")
 
     for i in range(num_nodes):
         G.add_node(i, type=list(node_attrs_one_hot[i, :]))
@@ -432,17 +433,9 @@ def generated_output_to_nx_aig(adj_matrix_scalar_classes: np.ndarray,
     if adj_matrix_scalar_classes.size > 0 and adj_matrix_scalar_classes.shape == (num_nodes, num_nodes):
         for s_idx in range(num_nodes):  # Source node
             for t_idx in range(num_nodes):  # Target node
-                # adj_matrix_scalar_classes[t_idx, s_idx] is the class for edge s_idx -> t_idx
-                # This interpretation comes from how m_seq_to_adj_mat works:
-                # adj_mat[current_node_idx (target), col_idx (source)] = class_value
-                scalar_class = adj_matrix_scalar_classes[t_idx, s_idx]
-
-                # An edge s_idx -> t_idx exists if it was set by m_seq_to_adj_mat.
-                # This means s_idx must be a predecessor of t_idx in the generation order.
-                # And the scalar_class must be a valid edge type index (0 or 1 for AIGs).
-                # The S_i vectors are for connections to predecessors, so s_idx < t_idx.
-                if s_idx < t_idx:  # Edge from earlier node to later node in topological order
-                    if 0 <= scalar_class < NUM_EDGE_FEATURES:  # Check if it's a valid class index (0 or 1)
+                scalar_class = adj_matrix_scalar_classes[t_idx, s_idx]  # Class for edge s_idx -> t_idx
+                if s_idx < t_idx:
+                    if 0 <= scalar_class < NUM_EDGE_FEATURES:
                         try:
                             edge_type_key = EDGE_TYPE_KEYS[scalar_class]
                             one_hot_edge_type = EDGE_LABEL_ENCODING[edge_type_key]
@@ -453,8 +446,6 @@ def generated_output_to_nx_aig(adj_matrix_scalar_classes: np.ndarray,
                         except KeyError:
                             print(
                                 f"Warning: Edge type key for scalar class {scalar_class} not in EDGE_LABEL_ENCODING. Skipping edge {s_idx}->{t_idx}")
-                    # Else: if scalar_class is not 0 or 1, or if s_idx >= t_idx,
-                    # it's likely a padding zero from m_seq_to_adj_mat's initialization or not a valid forward edge.
     elif adj_matrix_scalar_classes.size > 0:
         print(f"Warning: adj_matrix_scalar_classes shape {adj_matrix_scalar_classes.shape} "
               f"does not match num_nodes {num_nodes}. Edges might not be correctly reconstructed.")
