@@ -8,6 +8,7 @@ import graph_tool.all as gt
 # g++ -O2 -std=c++11 -o orca orca.cpp
 import os
 import copy
+from typing import List, Tuple
 import torch
 import torch.nn as nn
 import numpy as np
