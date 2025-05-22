@@ -5,12 +5,11 @@ import time
 import torch
 import torch.nn as nn
 import wandb  # For logging
+import multiprocessing as mp # Import multiprocessing
 
 from copy import deepcopy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-import torch  # Set matmul precision for Tensor Cores
 
 # Options: 'highest' (default), 'high', 'medium'
 # 'high' or 'medium' can leverage Tensor Cores for float32 matrix multiplications
@@ -534,6 +533,15 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
 
 
 def main(args):
+    # ADD THIS LINE AT THE BEGINNING OF YOUR main FUNCTION OR THE SCRIPT
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        try:
+            mp.set_start_method('spawn', force=True)
+            print("Multiprocessing start method set to 'spawn'.")
+        except RuntimeError:
+            print("Could not set multiprocessing start method to 'spawn'. This might lead to CUDA errors in subprocesses.")
+
+
     torch.set_num_threads(args.num_threads)
 
     device_str = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -744,6 +752,16 @@ def main(args):
 
 
 if __name__ == '__main__':
+    # IT IS CRITICAL TO PUT THIS INSIDE THE if __name__ == '__main__': BLOCK
+    # OR AT THE VERY TOP OF THE SCRIPT IF IT'S ALWAYS EXECUTED DIRECTLY.
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        try:
+            mp.set_start_method('spawn', force=True)
+            print("Multiprocessing start method set to 'spawn' (from __main__).")
+        except RuntimeError as e:
+            print(f"Warning: Could not set multiprocessing start method to 'spawn' in __main__: {e}")
+
+
     from argparse import ArgumentParser
 
     parser = ArgumentParser(description="Train LayerDAG model.")
