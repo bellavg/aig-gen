@@ -690,6 +690,7 @@ def main(args):
     print("Initializing LayerDAG model...")
     model = LayerDAG(device=device,
                      node_diffusion=node_diffusion,
+                     is_model_conditional = False,
                      edge_diffusion=edge_diffusion,  # Now edge_diffusion is defined
                      **model_config)
     model.to(device)
