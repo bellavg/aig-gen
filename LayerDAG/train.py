@@ -11,8 +11,8 @@ from copy import deepcopy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Import for AMP
-from torch.cuda.amp import GradScaler, autocast
+# Removed AMP imports:
+# from torch.cuda.amp import GradScaler, autocast
 
 import torch  # Set matmul precision for Tensor Cores
 
@@ -65,8 +65,6 @@ def eval_node_count(device, val_loader, model, is_conditional):
 
         num_nodes = len(batch_x_n)
 
-        # For evaluation, dtypes should generally be float32 unless specific ops benefit from float16
-        # and are handled carefully. Here, we'll use float32 for sparse matrix values in eval.
         sparse_val_dtype_eval = torch.float32
         num_edges_eval = batch_edge_index.shape[1]
 
@@ -84,8 +82,7 @@ def eval_node_count(device, val_loader, model, is_conditional):
         batch_abs_level = batch_abs_level.to(device)
         batch_rel_level = batch_rel_level.to(device)
         batch_A_n2g = dglsp.spmatrix(
-            batch_n2g_index, shape=(batch_size, num_nodes)).to(
-            device)  # A_n2g is typically binary, no explicit vals needed for it
+            batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
         batch_label = batch_label.to(device)
 
         batch_logits = model(batch_A, batch_x_n, batch_abs_level,
@@ -113,7 +110,7 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
     """
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
-    scaler = GradScaler(enabled=(device.type == 'cuda'))
+    # scaler = GradScaler(enabled=(device.type == 'cuda')) # Removed scaler
 
     best_val_nll = float('inf')
     best_val_acc = 0
@@ -135,8 +132,7 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             num_nodes = len(batch_x_n)
             num_edges = batch_edge_index.shape[1]
 
-            # Determine dtype for sparse matrix values based on AMP state
-            sparse_val_dtype = torch.float16 if scaler.is_enabled() else torch.float32
+            sparse_val_dtype = torch.float32  # Reverted to float32
 
             if batch_edge_index.numel() > 0:
                 vals = torch.ones(num_edges, dtype=sparse_val_dtype, device=device)
@@ -150,20 +146,20 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             batch_x_n = batch_x_n.to(device)
             batch_abs_level = batch_abs_level.to(device)
             batch_rel_level = batch_rel_level.to(device)
-            # A_n2g is typically binary and used for pooling, its implicit values' dtype might not conflict
-            # or DGL handles it. If issues arise here, it might also need explicit vals.
             batch_A_n2g = dglsp.spmatrix(batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
             batch_label = batch_label.to(device)
 
             optimizer.zero_grad()
-            with autocast(enabled=(device.type == 'cuda')):
-                batch_pred = model(batch_A, batch_x_n, batch_abs_level,
-                                   batch_rel_level, batch_A_n2g, batch_y)
-                loss = criterion(batch_pred, batch_label)
+            # with autocast(enabled=(device.type == 'cuda')): # Removed autocast
+            batch_pred = model(batch_A, batch_x_n, batch_abs_level,
+                               batch_rel_level, batch_A_n2g, batch_y)
+            loss = criterion(batch_pred, batch_label)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            # scaler.scale(loss).backward() # Reverted
+            # scaler.step(optimizer) # Reverted
+            # scaler.update() # Removed
+            loss.backward()
+            optimizer.step()
 
             wandb.log({'node_count/loss': loss.item()})
 
@@ -274,7 +270,7 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
     """
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
-    scaler = GradScaler(enabled=(device.type == 'cuda'))
+    # scaler = GradScaler(enabled=(device.type == 'cuda')) # Removed scaler
 
     best_val_nll = float('inf')
     best_state_dict = deepcopy(model.state_dict())
@@ -296,7 +292,7 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
 
             num_nodes = len(batch_x_n)
             num_edges = batch_edge_index.shape[1]
-            sparse_val_dtype = torch.float16 if scaler.is_enabled() else torch.float32
+            sparse_val_dtype = torch.float32  # Reverted to float32
 
             if batch_edge_index.numel() > 0:
                 vals = torch.ones(num_edges, dtype=sparse_val_dtype, device=device)
@@ -320,23 +316,25 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
             batch_z = batch_z.to(device)
 
             optimizer.zero_grad()
-            with autocast(enabled=(device.type == 'cuda')):
-                batch_pred_logits_list = model(batch_A, batch_x_n, batch_abs_level,
-                                               batch_rel_level, batch_A_n2g, batch_z_t,
-                                               batch_t, query2g, num_query_cumsum, batch_y)
-                loss = 0
-                num_feature_dims = len(batch_pred_logits_list)
-                if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0:
-                    for d_idx in range(num_feature_dims):
-                        loss = loss + criterion(batch_pred_logits_list[d_idx], batch_z[:, d_idx])
-                    loss /= num_feature_dims
-                else:
-                    loss = torch.tensor(0.0, device=device, requires_grad=True)
+            # with autocast(enabled=(device.type == 'cuda')): # Removed autocast
+            batch_pred_logits_list = model(batch_A, batch_x_n, batch_abs_level,
+                                           batch_rel_level, batch_A_n2g, batch_z_t,
+                                           batch_t, query2g, num_query_cumsum, batch_y)
+            loss = 0
+            num_feature_dims = len(batch_pred_logits_list)
+            if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0:
+                for d_idx in range(num_feature_dims):
+                    loss = loss + criterion(batch_pred_logits_list[d_idx], batch_z[:, d_idx])
+                loss /= num_feature_dims
+            else:
+                loss = torch.tensor(0.0, device=device, requires_grad=True)
 
             if loss.requires_grad:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                # scaler.scale(loss).backward() # Reverted
+                # scaler.step(optimizer) # Reverted
+                # scaler.update() # Removed
+                loss.backward()
+                optimizer.step()
 
             wandb.log({'node_pred/loss': loss.item()})
 
@@ -391,13 +389,6 @@ def eval_edge_pred(device, val_loader, model, is_conditional):
         num_nodes = len(batch_x_n)
         sparse_val_dtype_eval = torch.float32
 
-        # Handle combined_edge_index for batch_A
-        num_edges_combined = 0
-        if batch_edge_index.numel() > 0:
-            num_edges_combined += batch_edge_index.shape[1]
-        if batch_noisy_edge_index.numel() > 0:
-            num_edges_combined += batch_noisy_edge_index.shape[1]
-
         if batch_edge_index.numel() == 0 and batch_noisy_edge_index.numel() == 0:
             combined_edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
         elif batch_edge_index.numel() == 0:
@@ -445,7 +436,7 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
     """
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
-    scaler = GradScaler(enabled=(device.type == 'cuda'))
+    # scaler = GradScaler(enabled=(device.type == 'cuda')) # Removed scaler
 
     best_val_nll = float('inf')
     best_state_dict = deepcopy(model.state_dict())
@@ -466,9 +457,8 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
                 batch_y = None
 
             num_nodes = len(batch_x_n)
-            sparse_val_dtype = torch.float16 if scaler.is_enabled() else torch.float32
+            sparse_val_dtype = torch.float32  # Reverted to float32
 
-            # Handle combined_edge_index for batch_A
             if batch_edge_index.numel() == 0 and batch_noisy_edge_index.numel() == 0:
                 combined_edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
             elif batch_edge_index.numel() == 0:
@@ -499,19 +489,21 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
             batch_label = batch_label.to(device)
 
             optimizer.zero_grad()
-            with autocast(enabled=(device.type == 'cuda')):
-                batch_pred_logits = model(batch_A, batch_x_n, batch_abs_level,
-                                          batch_rel_level, batch_t, batch_query_src,
-                                          batch_query_dst, batch_y)
-                if batch_pred_logits.shape[0] > 0:
-                    loss = criterion(batch_pred_logits, batch_label)
-                else:
-                    loss = torch.tensor(0.0, device=device, requires_grad=True)
+            # with autocast(enabled=(device.type == 'cuda')): # Removed autocast
+            batch_pred_logits = model(batch_A, batch_x_n, batch_abs_level,
+                                      batch_rel_level, batch_t, batch_query_src,
+                                      batch_query_dst, batch_y)
+            if batch_pred_logits.shape[0] > 0:
+                loss = criterion(batch_pred_logits, batch_label)
+            else:
+                loss = torch.tensor(0.0, device=device, requires_grad=True)
 
             if batch_pred_logits.shape[0] > 0:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                # scaler.scale(loss).backward() # Reverted
+                # scaler.step(optimizer) # Reverted
+                # scaler.update() # Removed
+                loss.backward()
+                optimizer.step()
                 wandb.log({'edge_pred/loss': loss.item()})
             else:
                 wandb.log({'edge_pred/loss': 0.0})
