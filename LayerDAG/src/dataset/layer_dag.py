@@ -274,40 +274,48 @@ class LayerDAGNodePredDataset(LayerDAGBaseDataset):
         self.label_start = []
         self.label_end = []
         self.node_diffusion = None
-        # For debugging
-        self.item_to_original_graph_idx = []
+        self.item_to_original_graph_idx = []  # For debugging
 
-        for i in range(len(dag_dataset)):
+        for i in range(len(dag_dataset)):  # Iterate over each original graph in the input dag_dataset
             data_i = dag_dataset[i]
             if conditional:
                 src, dst, x_n, y = data_i
-                input_g_for_cond = len(self.input_y)
+                input_g_for_cond = len(self.input_y)  # Index for conditional label y
                 self.input_y.append(y)
             else:
                 src, dst, x_n = data_i
                 input_g_for_cond = -1
 
+            # Stores mapping from this original graph's local node IDs to their actual global indices in self.input_x_n
             original_graph_local_to_actual_global_idx_map = {}
+
+            # Global start index in self.input_x_n for nodes of THIS original graph 'i'
             current_graph_nodes_global_start_offset = len(self.input_x_n)
 
-            # Tracks the GNN input graph for the current item being constructed
+            # Global start index in self.input_src for edges belonging to THIS original graph 'i'
+            # Edges for GNN inputs of items from this graph will be selected from this offset onwards.
+            current_original_graph_edges_start_in_global_list = len(self.input_src)
+
+            # item_input_nodes_global_end tracks the end of the node sequence for the GNN input of the current item.
+            # It starts with the dummy node and grows as nodes from previous layers are included.
             item_input_nodes_global_end = current_graph_nodes_global_start_offset
-            item_input_edges_global_end = len(self.input_src)
 
-            # Tracks the start of the *label* nodes (current frontier) in self.input_x_n
-            # These are added *after* the GNN input nodes for the current item.
-            current_item_label_nodes_global_start = -1  # Will be set when first label node is added
+            # current_item_gnn_input_edges_end_idx tracks the end of the edge sequence (in self.input_src)
+            # for the GNN input of the *current* item being defined.
+            # It's the snapshot of len(self.input_src) *before* edges to the current layer's (label) nodes are added.
+            current_item_gnn_input_edges_end_idx = len(
+                self.input_src)  # Initially, this is same as current_original_graph_edges_start_in_global_list
 
-            # Add dummy node for this original graph `i`.
+            # Add dummy node for this original graph 'i'.
             actual_global_idx_dummy = len(self.input_x_n)
             self.input_x_n.append(dag_dataset.dummy_category)
             self.input_level.append(0)
-            original_graph_local_to_actual_global_idx_map[-1] = actual_global_idx_dummy
-            item_input_nodes_global_end += 1
+            original_graph_local_to_actual_global_idx_map[-1] = actual_global_idx_dummy  # Map local dummy ID (-1)
+            item_input_nodes_global_end += 1  # Dummy node is now part of this graph's processed nodes for GNN input
 
+            # Prepare graph structure for layer-by-layer processing (using 1-based indexing for convenience with dummy node as 0)
             src_plus_dummy_for_adj = src + 1
             dst_plus_dummy_for_adj = dst + 1
-            current_item_level_in_original_graph = 0
 
             num_nodes_in_original_sample_incl_dummy = len(x_n) + 1
             in_deg_local_for_adj = self.get_in_deg(dst_plus_dummy_for_adj, num_nodes_in_original_sample_incl_dummy)
@@ -317,63 +325,64 @@ class LayerDAGNodePredDataset(LayerDAGBaseDataset):
             in_adj_list_local_for_adj = self.get_in_adj_list(src_plus_dummy_for_adj.tolist(),
                                                              dst_plus_dummy_for_adj.tolist())
 
+            # Identify initial frontier (nodes with no incoming edges in the original graph)
             frontiers_local_indices_for_adj = [
                 u_local for u_local in range(1, num_nodes_in_original_sample_incl_dummy) if
                 in_deg_local_for_adj[u_local] == 0
             ]
             frontier_size = len(frontiers_local_indices_for_adj)
+            current_item_level_in_original_graph = 0
 
+            # Iterate through layers (frontiers) of the current original graph
             while frontier_size > 0:
                 current_item_level_in_original_graph += 1
 
-                # Define GNN input scope for the current item (predicting attributes for current frontier)
+                # Define the GNN input scope for the current item (which predicts attributes for the current frontier)
+                # GNN input nodes: All nodes processed from previous layers of this original graph, including its dummy node.
                 self.input_n_start.append(current_graph_nodes_global_start_offset)
-                self.input_n_end.append(item_input_nodes_global_end)  # Nodes processed up to previous layer
-                # Edges for GNN input
-                current_graph_edges_global_start_offset_for_item = len(
-                    self.input_src) if current_item_level_in_original_graph == 1 and not self.input_src else (
-                    self.input_e_start[-1] if self.input_e_start else 0)  # Simplified
-                if current_item_level_in_original_graph == 1 and i == 0:  # First item of first graph
-                    current_graph_edges_global_start_offset_for_item = 0
+                self.input_n_end.append(item_input_nodes_global_end)  # Nodes up to the previous layer
 
-                self.input_e_start.append(
-                    self.input_e_end[-1] if self.input_e_end else 0)  # Start where last item's edges ended
-                self.input_e_end.append(item_input_edges_global_end)  # Edges processed up to previous layer
+                # GNN input edges: All edges accumulated from previous layers OF THIS ORIGINAL GRAPH.
+                self.input_e_start.append(current_original_graph_edges_start_in_global_list)
+                self.input_e_end.append(
+                    current_item_gnn_input_edges_end_idx)  # Edges formed by nodes up to the previous layer
 
                 self.item_to_original_graph_idx.append(i)
                 if conditional:
                     self.input_g.append(input_g_for_cond)
 
-                # Record global indices for the label nodes (current frontier)
+                # Record global indices for the label nodes (current frontier nodes)
                 # These label nodes are added to self.input_x_n *now*.
                 current_item_label_nodes_global_start = len(self.input_x_n)
                 self.label_start.append(current_item_label_nodes_global_start)
 
                 next_frontiers_local_indices_for_adj_buffer = []
-                for u_frontier_local_idx_for_adj in frontiers_local_indices_for_adj:
+                for u_frontier_local_idx_for_adj in frontiers_local_indices_for_adj:  # u_frontier is 1-indexed for adj lists
                     original_node_idx_0_based = u_frontier_local_idx_for_adj - 1
 
-                    # Add current frontier node's attributes to self.input_x_n (these are the labels z)
+                    # Add current frontier node's attributes to self.input_x_n (these are the labels 'z' for this item)
                     actual_global_idx_for_u_frontier_label = len(self.input_x_n)
                     self.input_x_n.append(x_n_list_original[original_node_idx_0_based])
                     self.input_level.append(current_item_level_in_original_graph)
                     original_graph_local_to_actual_global_idx_map[
                         original_node_idx_0_based] = actual_global_idx_for_u_frontier_label
 
-                    # Add edges from previous layers to this frontier node (these become part of GNN input for *next* item)
+                    # Add edges from previous layers TO this current frontier node.
+                    # These edges become part of the accumulated graph structure.
                     for t_source_local_idx_for_adj in in_adj_list_local_for_adj[u_frontier_local_idx_for_adj]:
-                        actual_global_dst_idx = actual_global_idx_for_u_frontier_label  # Edge to current label node
-                        if t_source_local_idx_for_adj == 0:  # Edge from dummy
+                        actual_global_dst_idx = actual_global_idx_for_u_frontier_label  # Edge destination is current frontier node
+                        if t_source_local_idx_for_adj == 0:  # Edge from dummy node
                             actual_global_src_idx = original_graph_local_to_actual_global_idx_map[-1]
-                        else:  # Edge from a real predecessor node
+                        else:  # Edge from a real predecessor node (from a previous layer)
                             original_src_node_idx_0_based = t_source_local_idx_for_adj - 1
                             actual_global_src_idx = original_graph_local_to_actual_global_idx_map[
                                 original_src_node_idx_0_based]
 
                         self.input_src.append(actual_global_src_idx)
                         self.input_dst.append(actual_global_dst_idx)
-                        item_input_edges_global_end += 1
+                        # NOTE: The problematic item_input_edges_global_end += 1 was here in the original code. It's removed.
 
+                    # For calculating the next frontier:
                     for v_target_local_idx_for_adj in out_adj_list_local_for_adj[u_frontier_local_idx_for_adj]:
                         in_deg_local_for_adj[v_target_local_idx_for_adj] -= 1
                         if in_deg_local_for_adj[v_target_local_idx_for_adj] == 0:
@@ -381,18 +390,23 @@ class LayerDAGNodePredDataset(LayerDAGBaseDataset):
 
                 self.label_end.append(len(self.input_x_n))  # Labels end after all current frontier nodes are added
 
-                # Nodes of the current frontier (which were labels) become part of GNN input for the next item.
+                # For the *next* item:
+                # The GNN input nodes will include the nodes just processed (current frontier).
                 item_input_nodes_global_end = len(self.input_x_n)
+                # The GNN input edges will include the edges just added (to the current frontier).
+                current_item_gnn_input_edges_end_idx = len(self.input_src)
 
                 frontiers_local_indices_for_adj = next_frontiers_local_indices_for_adj_buffer
                 frontier_size = len(frontiers_local_indices_for_adj)
 
-        self.base_postprocess()
+        # After processing all original graphs
+        self.base_postprocess()  # Converts lists to tensors
         self.label_start = torch.LongTensor(self.label_start)
         self.label_end = torch.LongTensor(self.label_end)
         self.item_to_original_graph_idx = torch.LongTensor(self.item_to_original_graph_idx)
 
         if get_marginal:
+            # ... (marginal calculation logic remains the same)
             input_x_n_for_marginal = self.input_x_n
             if input_x_n_for_marginal.ndim == 1:
                 input_x_n_for_marginal = input_x_n_for_marginal.unsqueeze(-1)
