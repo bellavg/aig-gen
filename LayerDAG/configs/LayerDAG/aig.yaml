@@ -23,7 +23,7 @@ node_pred:
   T: 64 # Number of diffusion timesteps for node attributes
   loader:
     batch_size: 256
-    num_workers: 4
+    num_workers: 0
   num_epochs: 5
   graph_encoder:
     x_n_emb_size: 512
