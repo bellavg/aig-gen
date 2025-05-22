@@ -14,7 +14,7 @@ node_count:
     y_emb_size: 256  # May be unused if conditional is false
     num_mpnn_layers: 3
     pool: 'sum'
-  num_epochs: 5
+  num_epochs: 1
   optimizer:
     lr: 0.0003
     amsgrad: true

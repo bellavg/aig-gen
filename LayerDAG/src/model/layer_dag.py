@@ -471,8 +471,34 @@ class NodePredModel(nn.Module):
         h_t_graph = self.t_emb(t)
         h_g_cond = torch.cat([h_g, h_t_graph], dim=1)
 
+
         h_n_t_attrs = self.x_n_emb(x_n_t)
         h_g_cond_expanded = h_g_cond[query2g]
+
+        # ---- ADD THIS DEBUG CHECK ----
+        if x_n_t.numel() > 0:  # Only check if x_n_t is not empty
+            num_features = x_n_t.shape[1]
+            # num_classes_list should be accessible here, e.g., self.num_x_n_cat (the one used for this embedding)
+            # Assuming self.x_n_emb was initialized with num_actual_node_cats_for_pred
+            # You might need to access self.node_diffusion.num_classes_list if it's not stored directly
+            # For this example, let's assume self.num_x_n_cat used for self.x_n_emb is correct
+            # The self.x_n_emb in NodePredModel has its own num_x_n_cat passed during init
+            # This was: num_x_n_cat=num_actual_node_cats_for_pred in LayerDAG constructor
+            # num_actual_node_cats_for_pred = torch.LongTensor(self.node_diffusion.num_classes_list)
+
+            # Let's assume self.x_n_emb.emb_list[d].num_embeddings gives the K for feature d
+            for d_idx in range(num_features):
+                max_val_in_feature = x_n_t[:, d_idx].max().item()
+                min_val_in_feature = x_n_t[:, d_idx].min().item()
+                num_categories_for_feature = self.x_n_emb.emb_list[d_idx].num_embeddings
+                if max_val_in_feature >= num_categories_for_feature:
+                    print(
+                        f"ERROR: Feature {d_idx} in x_n_t has max value {max_val_in_feature} >= num_categories {num_categories_for_feature}")
+                    # Potentially raise an error or breakpoint
+                if min_val_in_feature < 0:
+                    print(f"ERROR: Feature {d_idx} in x_n_t has min value {min_val_in_feature} < 0")
+                    # Potentially raise an error or breakpoint
+        # ---- END DEBUG CHECK ----
 
         h_n_t_combined = torch.cat([h_n_t_attrs, h_g_cond_expanded], dim=1)
         h_n_t = self.project_h_n(h_n_t_combined)

@@ -310,6 +310,23 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
                 batch_y = None
 
             num_nodes = len(batch_x_n)
+            # ---- ADD THIS VALIDATION ----
+            if batch_edge_index.numel() > 0:
+                max_val_in_edge_index = batch_edge_index.max().item()
+                min_val_in_edge_index = batch_edge_index.min().item()
+                if max_val_in_edge_index >= num_nodes or min_val_in_edge_index < 0:
+                    error_msg = (
+                        f"CRITICAL ERROR in batch for Node Prediction training:\n"
+                        f"  batch_edge_index.max() ({max_val_in_edge_index}) >= num_nodes ({num_nodes}) OR "
+                        f"batch_edge_index.min() ({min_val_in_edge_index}) < 0.\n"
+                        f"  batch_x_n.shape: {batch_x_n.shape}\n"
+                        f"  batch_edge_index.shape: {batch_edge_index.shape}\n"
+                    )
+                    print(error_msg)
+                    # Consider raising ValueError to stop execution cleanly before CUDA error
+                    raise ValueError("Invalid edge index for dglsp.spmatrix in main_node_pred.")
+            # ---- END VALIDATION ----
+
             if batch_edge_index.numel() > 0:
                 batch_A = dglsp.spmatrix(
                     batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
