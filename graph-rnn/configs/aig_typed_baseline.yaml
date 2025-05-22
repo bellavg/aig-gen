@@ -41,14 +41,14 @@ data:
   # num_edge_features: YOUR_NUM_EDGE_FEATURES # From aig_config.py
 
 train:
-  steps: 96000  # Default from various configs
+  steps: 40000  # Default from various configs
   batch_size: 32 # Default from various configs
   lr: 0.003      # Default from various configs
-  lr_schedule_milestones: [24000, 48000, 72000] # Adjusted proportionally from [2400, 3000] for longer training
+  lr_schedule_milestones: [14000, 28000, 32000] # Adjusted proportionally from [2400, 3000] for longer training
                                                 # Or keep as [2400, 3000] if preferred for quicker LR drops.
   lr_schedule_gamma: 0.3  # Default from various configs
   print_iter: 100         # Default from various configs
-  checkpoint_iter: 10000  # Default from various configs
+  checkpoint_iter: 8000  # Default from various configs
   checkpoint_dir: "./checkpoints_aig_typed_baseline"
   log_dir: "./log_aig_typed_baseline"
   node_attribute_loss_weight: 1.0 # Weight for the node attribute prediction loss vs edge prediction loss. Default to 1.0.

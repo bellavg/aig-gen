@@ -11,7 +11,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 # Import the new DirectedGraphDataSet
-from extension_data import DirectedGraphDataSet  # Assuming extension_data_no_shuffle.py is the filename
+# Ensure extension_data_updated.py is the correct filename if you saved my previous changes there
+from extension_data import DirectedGraphDataSet
 # Removed: from data import GraphDataSet
 
 # Make sure this model.py is the one with node attribute prediction
@@ -133,11 +134,13 @@ def train_rnn_step(graph_rnn, edge_rnn, data_batch,
     x_edge_rnn_input_packed = torch.cat((sos_edge_frame_for_packed, packed_x_adj_seq_data[:, :-1, :]), dim=1)
     y_edge_rnn_target_packed = packed_x_adj_seq_data
 
-    m_edge_pred_window = graph_rnn.input_size
+    m_edge_pred_window = graph_rnn.input_size  # This is M
 
     edge_seq_lens_for_packing = []
-    for l_nodes_in_graph in lens:
-        for i_node_idx_in_graph in range(1, l_nodes_in_graph.item() + 1):
+    for l_nodes_in_graph in lens:  # lens contains actual number of nodes for each graph in batch
+        for i_node_idx_in_graph in range(l_nodes_in_graph.item()):  # Iterate 0 to num_nodes-1 for current graph
+            # For node i_node_idx_in_graph, it has min(i_node_idx_in_graph, M) predecessors in M-window
+            # The S_i vector for node i_node_idx_in_graph has min(i_node_idx_in_graph, M) actual entries.
             edge_seq_lens_for_packing.append(min(i_node_idx_in_graph, m_edge_pred_window))
 
     y_edge_rnn_pred = edge_rnn(x_edge_rnn_input_packed,
@@ -146,35 +149,59 @@ def train_rnn_step(graph_rnn, edge_rnn, data_batch,
 
     valid_preds_list = []
     valid_targets_list = []
-    current_pos = 0
-    for i, l_nodes_in_graph in enumerate(lens):
-        graph_preds = y_edge_rnn_pred[current_pos: current_pos + l_nodes_in_graph]
-        graph_targets = y_edge_rnn_target_packed[current_pos: current_pos + l_nodes_in_graph]
+    current_pos_in_packed_data = 0  # Keep track of where we are in the packed (concatenated) data
 
-        graph_edge_seq_lens = []
-        for i_node_idx_in_graph in range(1, l_nodes_in_graph.item() + 1):
-            graph_edge_seq_lens.append(min(i_node_idx_in_graph, m_edge_pred_window))
+    # Iterate through each graph in the batch
+    for graph_idx_in_batch in range(batch_size):
+        num_nodes_this_graph = lens[graph_idx_in_batch].item()
 
-        for node_j in range(l_nodes_in_graph):
-            actual_len_edges_for_this_node = graph_edge_seq_lens[node_j]
+        # Get the predictions and targets for all nodes of the current graph from the packed batch
+        # y_edge_rnn_pred and y_edge_rnn_target_packed are sequences of [num_edges_in_m_window, edge_feature_len]
+        # for each node, concatenated across all nodes in the batch.
+
+        # Identify the start and end index for the current graph's nodes in the packed data
+        # The number of nodes processed so far for previous graphs in the batch:
+        # current_pos_in_packed_data is the sum of (nodes in graph_0 + nodes in graph_1 + ... + nodes in graph_{graph_idx_in_batch-1})
+
+        # Slice the predictions and targets for the current graph
+        # The y_edge_rnn_pred is already structured such that the first lens[0] items are for graph 0,
+        # next lens[1] items for graph 1, etc.
+        # So, current_pos_in_packed_data correctly tracks the start of each graph's node data.
+
+        graph_preds_all_nodes = y_edge_rnn_pred[
+                                current_pos_in_packed_data: current_pos_in_packed_data + num_nodes_this_graph]
+        graph_targets_all_nodes = y_edge_rnn_target_packed[
+                                  current_pos_in_packed_data: current_pos_in_packed_data + num_nodes_this_graph]
+
+        # For each node in the current graph
+        for node_j_in_graph in range(num_nodes_this_graph):
+            # Number of valid edge predictions for this specific node_j_in_graph
+            # This is min(node_j_in_graph, M)
+            actual_len_edges_for_this_node = min(node_j_in_graph, m_edge_pred_window)
+
             if actual_len_edges_for_this_node > 0:
-                valid_preds_list.append(graph_preds[node_j, :actual_len_edges_for_this_node, :])
-                valid_targets_list.append(graph_targets[node_j, :actual_len_edges_for_this_node, :])
-        current_pos += l_nodes_in_graph
+                # Get the M-window predictions for this node
+                node_preds_m_window = graph_preds_all_nodes[node_j_in_graph]  # Shape [M, edge_feature_len]
+                # Get the M-window targets for this node
+                node_targets_m_window = graph_targets_all_nodes[node_j_in_graph]  # Shape [M, edge_feature_len]
 
-    if not valid_preds_list:
-        loss_edges = torch.tensor(0.0, device=device, requires_grad=True)
+                # Slice to get only the valid part of the M-window
+                valid_preds_list.append(node_preds_m_window[:actual_len_edges_for_this_node, :])
+                valid_targets_list.append(node_targets_m_window[:actual_len_edges_for_this_node, :])
+
+        current_pos_in_packed_data += num_nodes_this_graph
+
+    if not valid_preds_list:  # If all graphs had 0 or 1 node, or M=0
+        loss_edges = torch.tensor(0.0, device=device, requires_grad=True)  # Ensure it's a tensor that requires grad
     else:
         y_edge_rnn_pred_for_loss = torch.cat(valid_preds_list, dim=0)
         y_edge_rnn_target_for_loss = torch.cat(valid_targets_list, dim=0)
 
-        if use_edge_features:
-            if y_edge_rnn_target_for_loss.shape[-1] > 1 and criterion_edges.__class__.__name__ == 'CrossEntropyLoss':
-                y_edge_rnn_target_for_loss_indices = torch.argmax(y_edge_rnn_target_for_loss, dim=-1)
-            else:
-                y_edge_rnn_target_for_loss_indices = y_edge_rnn_target_for_loss.squeeze(-1).long()
+        if use_edge_features:  # True if edge_feature_len > 1
+            # Target for CrossEntropyLoss should be class indices
+            y_edge_rnn_target_for_loss_indices = torch.argmax(y_edge_rnn_target_for_loss, dim=-1)
             loss_edges = criterion_edges(y_edge_rnn_pred_for_loss, y_edge_rnn_target_for_loss_indices)
-        else:
+        else:  # Binary edges
             loss_edges = criterion_edges(y_edge_rnn_pred_for_loss, y_edge_rnn_target_for_loss)
 
     total_loss = loss_edges + node_attribute_loss_weight * loss_node_attributes
@@ -215,42 +242,39 @@ if __name__ == "__main__":
 
     if num_node_classes_for_model <= 0:
         raise ValueError("'num_node_classes' in config['model']['GraphRNN'] must be > 0.")
-    if edge_feature_len_for_model <= 0:
+    if edge_feature_len_for_model <= 0:  # Should be 3 for (NO_EDGE, REG, INV)
         raise ValueError("'edge_feature_len' in config['model']['GraphRNN'] must be > 0.")
 
     if config['model']['edge_model'] == 'rnn':
         node_model = GraphLevelRNN(
             input_size=m_param,
             output_size=config['model']['EdgeRNN']['hidden_size'],
-            # num_node_classes is now taken from **config['model']['GraphRNN']
             **config['model']['GraphRNN']
-            # This includes num_node_classes, embedding_size, hidden_size, num_layers, edge_feature_len
         ).to(device)
         edge_model = EdgeLevelRNN(
-            **config['model']['EdgeRNN']  # This includes embedding_size, hidden_size, num_layers, edge_feature_len
+            **config['model']['EdgeRNN']
         ).to(device)
         step_fn = train_rnn_step
     else:  # MLP edge model
         node_model = GraphLevelRNN(
             input_size=m_param,
             output_size=None,
-            # num_node_classes is now taken from **config['model']['GraphRNN']
             **config['model']['GraphRNN']
         ).to(device)
         edge_model = EdgeLevelMLP(
             input_size_from_graph_rnn=config['model']['GraphRNN']['hidden_size'],
             mlp_hidden_size=config['model']['EdgeMLP']['hidden_size'],
             num_edges_to_predict=m_param,
-            edge_feature_len=edge_feature_len_for_model  # Explicitly pass derived edge_feature_len
+            edge_feature_len=edge_feature_len_for_model
         ).to(device)
         step_fn = train_mlp_step
         print("Warning: MLP edge model path is being used.")
 
-    use_edge_features_for_loss = edge_feature_len_for_model > 1
+    use_edge_features_for_loss = edge_feature_len_for_model > 1  # This will be true
 
     if use_edge_features_for_loss:
         criterion_edges = torch.nn.CrossEntropyLoss().to(device)
-    else:
+    else:  # Should not happen with edge_feature_len = 3
         criterion_edges = torch.nn.BCELoss().to(device)
 
     criterion_node_attr = torch.nn.CrossEntropyLoss().to(device)
@@ -271,7 +295,7 @@ if __name__ == "__main__":
     if args.restore_path:
         print("Restoring from checkpoint: {}".format(args.restore_path))
         state = torch.load(args.restore_path, map_location=device)
-        global_step = state.get("global_step", 0)  # Use .get for safer access
+        global_step = state.get("global_step", 0)
         node_model.load_state_dict(state["node_model"])
         edge_model.load_state_dict(state["edge_model"])
         optim_node_model.load_state_dict(state["optim_node_model"])
@@ -287,27 +311,24 @@ if __name__ == "__main__":
     pyg_file_path = config['data'].get('pyg_file_path', 'aig_directed.pt')
     if not os.path.isabs(pyg_file_path) and base_path and base_path != '.':
         pyg_file_path = os.path.join(base_path, pyg_file_path)
-    elif not os.path.isabs(pyg_file_path) and (not base_path or base_path == '.'):
-        # If base_path is not determined or is CWD, assume pyg_file_path is relative to CWD or absolute
-        pass  # pyg_file_path remains as is
 
     print(f"Attempting to load dataset from: {os.path.abspath(pyg_file_path)}")
 
     dataset = DirectedGraphDataSet(
-        dataset_type=config['model']['mode'],
+        dataset_type=config['model']['mode'],  # e.g. 'aig-custom-topsort'
         m=m_param,
         pyg_file_path=pyg_file_path,
-        num_node_features=num_node_classes_for_model,
-        num_edge_features=edge_feature_len_for_model,
+        num_node_features=num_node_classes_for_model,  # Should be 4
+        num_edge_features=edge_feature_len_for_model,  # Should be 3
         training=True,
         train_split=config['data']['train_split']
     )
 
     data_loader = DataLoader(dataset,
                              batch_size=config['train']['batch_size'],
-                             shuffle=True,
-                             num_workers=config['train'].get('num_workers', 0),  # Add num_workers from config
-                             pin_memory=config['train'].get('pin_memory', False)  # Add pin_memory from config
+                             shuffle=True,  # Shuffle is important for training
+                             num_workers=config['train'].get('num_workers', 0),
+                             pin_memory=config['train'].get('pin_memory', False)
                              )
 
     print(f"Starting training from global_step: {global_step}")
@@ -315,17 +336,19 @@ if __name__ == "__main__":
     edge_model.train()
 
     done = False
-    train_loss_sum_print_iter = 0  # For print_iter block
+    train_loss_sum_print_iter = 0
     edge_loss_sum_print_iter = 0
     node_attr_loss_sum_print_iter = 0
-    start_time_print_iter = time.time()  # For print_iter block timing
+    start_time_print_iter = time.time()
 
-    steps_per_epoch = len(data_loader) if len(data_loader) > 0 else 1  # Avoid division by zero
+    steps_per_epoch = len(data_loader) if len(data_loader) > 0 else 1
     total_epochs_approx = (config['train'][
                                'steps'] - global_step + steps_per_epoch - 1) // steps_per_epoch if steps_per_epoch > 0 else 0
     print(f"Approximate total epochs to run: {total_epochs_approx} ({steps_per_epoch} steps per epoch)")
 
     current_epoch = 0
+    # Flag to ensure debug prints only happen once for the first batch of the first epoch
+    first_batch_inspected = False
 
     while not done:
         current_epoch += 1
@@ -335,6 +358,38 @@ if __name__ == "__main__":
         epoch_node_attr_loss_sum = 0
 
         for batch_idx, data_batch in enumerate(data_loader):
+            # DEBUG PRINTS for the first batch of the first epoch
+            if not first_batch_inspected and current_epoch == 1 and batch_idx == 0:
+                print("\n" + "=" * 20 + " DEBUG: Inspecting First Data Batch " + "=" * 20)
+                if 'x_adj' in data_batch:
+                    print(f"data_batch['x_adj'].shape: {data_batch['x_adj'].shape}")
+                    if data_batch['x_adj'].numel() > 0:  # Check if tensor is not empty
+                        # Print for first graph, first node's M-window, first 5 edge slots
+                        print(
+                            f"data_batch['x_adj'][0, 0, :5, :]:\n{data_batch['x_adj'][0, 0, :min(5, data_batch['x_adj'].shape[2]), :]}")
+                    else:
+                        print("data_batch['x_adj'] is empty.")
+                else:
+                    print("data_batch does not contain 'x_adj'")
+
+                if 'node_attr_onehot' in data_batch:
+                    print(f"data_batch['node_attr_onehot'].shape: {data_batch['node_attr_onehot'].shape}")
+                    if data_batch['node_attr_onehot'].numel() > 0:
+                        # Print for first graph, attributes for first 5 nodes
+                        print(
+                            f"data_batch['node_attr_onehot'][0, :5, :]:\n{data_batch['node_attr_onehot'][0, :min(5, data_batch['node_attr_onehot'].shape[1]), :]}")
+                    else:
+                        print("data_batch['node_attr_onehot'] is empty.")
+                else:
+                    print("data_batch does not contain 'node_attr_onehot'")
+
+                if 'len' in data_batch and data_batch['len'].numel() > 0:
+                    print(f"data_batch['len'][0] (length of first graph): {data_batch['len'][0].item()}")
+                else:
+                    print("data_batch does not contain 'len' or it's empty.")
+                print("=" * 60 + "\n")
+                first_batch_inspected = True
+
             if global_step >= config['train']['steps']:
                 done = True
                 break
@@ -346,10 +401,10 @@ if __name__ == "__main__":
                     criterion_edges, criterion_node_attr,
                     optim_node_model, optim_edge_model,
                     scheduler_node_model, scheduler_edge_model,
-                    device, use_edge_features_for_loss, num_node_classes_for_model,  # Pass num_node_classes_for_model
+                    device, use_edge_features_for_loss, num_node_classes_for_model,
                     config['train'].get('node_attribute_loss_weight', 1.0)
                 )
-            else:
+            else:  # train_mlp_step
                 current_total_loss, current_edge_loss, current_node_attr_loss = step_fn(
                     node_model, edge_model, data_batch, criterion_edges,
                     optim_node_model, optim_edge_model,
@@ -368,7 +423,8 @@ if __name__ == "__main__":
 
             writer.add_scalar('loss_iter/total_loss', current_total_loss, global_step)
             writer.add_scalar('loss_iter/edge_loss', current_edge_loss, global_step)
-            if num_node_classes_for_model > 0 and (current_node_attr_loss > 0 or step_fn == train_rnn_step):
+            if num_node_classes_for_model > 0 and (
+                    current_node_attr_loss > 0 or step_fn == train_rnn_step or step_fn == train_mlp_step):  # Ensure node loss is logged if applicable
                 writer.add_scalar('loss_iter/node_attribute_loss', current_node_attr_loss, global_step)
 
             if global_step % config['train']['print_iter'] == 0:
@@ -385,7 +441,7 @@ if __name__ == "__main__":
                 log_message = (f"Epoch {current_epoch} | Step {global_step}/{config['train']['steps']} | "
                                f"Total Loss: {avg_total_loss_print:.4f} | "
                                f"Edge Loss: {avg_edge_loss_print:.4f} | ")
-                if num_node_classes_for_model > 0:  # Use the variable derived from config
+                if num_node_classes_for_model > 0:
                     log_message += f"Node Attr Loss: {avg_node_attr_loss_print:.4f} | "
                 log_message += (f"Time/Iter: {time_per_iter_print:.4f}s | "
                                 f"ETA: {datetime.timedelta(seconds=int(eta_seconds))}")
@@ -421,7 +477,7 @@ if __name__ == "__main__":
 
             writer.add_scalar('loss_epoch/total_loss', avg_epoch_total_loss, current_epoch)
             writer.add_scalar('loss_epoch/edge_loss', avg_epoch_edge_loss, current_epoch)
-            if num_node_classes_for_model > 0:  # Use the variable derived from config
+            if num_node_classes_for_model > 0:
                 writer.add_scalar('loss_epoch/node_attribute_loss', avg_epoch_node_attr_loss, current_epoch)
 
             print(f"--- End of Epoch {current_epoch} --- Avg Total Loss: {avg_epoch_total_loss:.4f}, "
