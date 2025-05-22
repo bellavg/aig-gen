@@ -2,7 +2,7 @@
 #SBATCH --job-name=layerdag_train
 #SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
-#SBATCH --time=08:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=slurm_logs/layerdag_train_%j.out
 
 
@@ -12,7 +12,7 @@ module load CUDA/11.6.0
 
 source activate LayerDAG
 # Clear pip's cache
-export CUDA_LAUNCH_BLOCKING=1 # Add this line
+
 # --- Training Command ---
 echo "Starting LayerDAG Training (Config: configs/LayerDAG/aig.yaml)"
 srun python -u train.py \

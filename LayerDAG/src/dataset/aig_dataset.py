@@ -62,17 +62,17 @@ def get_aig_dataset(path_to_your_pt_file, num_node_categories_from_config, condi
     # Remove it.
     loaded_data_list = torch.load(path_to_your_pt_file, map_location=torch.device('cpu'))
 
-    if not isinstance(loaded_data_list, list):
-        print(
-            f"Warning: Loaded data from {path_to_your_pt_file} is not a list. Attempting to use it directly if it's a single graph, otherwise this will fail.")
-        # Handle case where it might be a single graph or other structure if necessary,
-        # but the processing script saved a list.
-        # For now, assume it should be a list. If it's a single item, wrap it.
-        # if not isinstance(loaded_data_list, list) and hasattr(loaded_data_list, 'edge_index'): # Heuristic for single PyG Data
-        #    loaded_data_list = [loaded_data_list]
-        # else:
-        raise TypeError(
-            f"Expected a list of PyG Data objects from {path_to_your_pt_file}, but got {type(loaded_data_list)}")
+    # if not isinstance(loaded_data_list, list):
+    #     print(
+    #         f"Warning: Loaded data from {path_to_your_pt_file} is not a list. Attempting to use it directly if it's a single graph, otherwise this will fail.")
+    #     # Handle case where it might be a single graph or other structure if necessary,
+    #     # but the processing script saved a list.
+    #     # For now, assume it should be a list. If it's a single item, wrap it.
+    #     # if not isinstance(loaded_data_list, list) and hasattr(loaded_data_list, 'edge_index'): # Heuristic for single PyG Data
+    #     #    loaded_data_list = [loaded_data_list]
+    #     # else:
+    #     raise TypeError(
+    #         f"Expected a list of PyG Data objects from {path_to_your_pt_file}, but got {type(loaded_data_list)}")
 
     # Example: Splitting (e.g., 80% train, 20% val)
     num_graphs = len(loaded_data_list)

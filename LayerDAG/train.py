@@ -10,6 +10,9 @@ from copy import deepcopy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+# Import for AMP
+from torch.cuda.amp import GradScaler, autocast
+
 import torch  # Set matmul precision for Tensor Cores
 
 # Options: 'highest' (default), 'high', 'medium'
@@ -77,6 +80,9 @@ def eval_node_count(device, val_loader, model, is_conditional):
             batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
         batch_label = batch_label.to(device)
 
+        # For evaluation, autocast can also be used if operations are slow,
+        # but it's primarily for training speedup.
+        # If eval is slow, you can wrap the model call in autocast too.
         batch_logits = model(batch_A, batch_x_n, batch_abs_level,
                              batch_rel_level, batch_A_n2g, batch_y)
 
@@ -115,6 +121,9 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
 
+    # Initialize GradScaler if on CUDA
+    scaler = GradScaler(enabled=(device.type == 'cuda'))
+
     best_val_nll = float('inf')
     best_val_acc = 0
     best_state_dict = deepcopy(model.state_dict())
@@ -134,27 +143,6 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
 
             num_nodes = len(batch_x_n)
 
-            # ---- ADDED DEBUG ----
-            if batch_edge_index.numel() > 0:
-                max_val_in_edge_index = batch_edge_index.max().item()
-                min_val_in_edge_index = batch_edge_index.min().item()
-                if max_val_in_edge_index >= num_nodes or min_val_in_edge_index < 0:
-                    error_msg = (
-                        f"CRITICAL ERROR in batch for Node Count training:\n"
-                        f"  batch_edge_index.max() ({max_val_in_edge_index}) >= num_nodes ({num_nodes}) OR "
-                        f"batch_edge_index.min() ({min_val_in_edge_index}) < 0.\n"
-                        f"  batch_x_n.shape: {batch_x_n.shape}\n"
-                        f"  batch_edge_index.shape: {batch_edge_index.shape}\n"
-                    )
-                    print(error_msg)
-                    # To find the problematic graph(s) within the batch, you'd need to inspect
-                    # the components of `batch_data` that formed this `batch_edge_index` and `batch_x_n`
-                    # before collation, or save `batch_data` itself.
-                    # For now, we'll raise an error to halt execution.
-                    # Consider more sophisticated error handling or skipping the batch if appropriate.
-                    raise ValueError("Invalid edge index detected for spmatrix, halting.")
-            # ---- END ADDED DEBUG ----
-
             if batch_edge_index.numel() > 0:
                 batch_A = dglsp.spmatrix(batch_edge_index, shape=(num_nodes, num_nodes)).to(device)
             else:
@@ -168,13 +156,20 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             batch_A_n2g = dglsp.spmatrix(batch_n2g_index, shape=(batch_size, num_nodes)).to(device)
             batch_label = batch_label.to(device)
 
-            batch_pred = model(batch_A, batch_x_n, batch_abs_level,
-                               batch_rel_level, batch_A_n2g, batch_y)
-
-            loss = criterion(batch_pred, batch_label)
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            # Use autocast for the forward pass
+            with autocast(enabled=(device.type == 'cuda')):
+                batch_pred = model(batch_A, batch_x_n, batch_abs_level,
+                                   batch_rel_level, batch_A_n2g, batch_y)
+                loss = criterion(batch_pred, batch_label)
+
+            # Scale loss and call backward
+            scaler.scale(loss).backward()
+            # Unscale gradients and call optimizer.step()
+            scaler.step(optimizer)
+            # Update the scale for next iteration
+            scaler.update()
 
             wandb.log({'node_count/loss': loss.item()})
 
@@ -291,6 +286,8 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
 
+    scaler = GradScaler(enabled=(device.type == 'cuda'))
+
     best_val_nll = float('inf')
     best_state_dict = deepcopy(model.state_dict())
     num_patient_epochs = 0
@@ -329,23 +326,27 @@ def main_node_pred(device, train_loader, val_loader, model, config, patience, is
             num_query_cumsum = num_query_cumsum.to(device)
             batch_z = batch_z.to(device)
 
-            batch_pred_logits_list = model(batch_A, batch_x_n, batch_abs_level,
-                                           batch_rel_level, batch_A_n2g, batch_z_t,
-                                           batch_t, query2g, num_query_cumsum, batch_y)
-
-            loss = 0
-            num_feature_dims = len(batch_pred_logits_list)
-            if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0:
-                for d in range(num_feature_dims):
-                    loss = loss + criterion(batch_pred_logits_list[d], batch_z[:, d])
-                loss /= num_feature_dims
-            else:
-                loss = torch.tensor(0.0, device=device, requires_grad=True)
-
             optimizer.zero_grad()
-            if loss.requires_grad:
-                loss.backward()
-                optimizer.step()
+
+            with autocast(enabled=(device.type == 'cuda')):
+                batch_pred_logits_list = model(batch_A, batch_x_n, batch_abs_level,
+                                               batch_rel_level, batch_A_n2g, batch_z_t,
+                                               batch_t, query2g, num_query_cumsum, batch_y)
+
+                loss = 0
+                num_feature_dims = len(batch_pred_logits_list)
+                if num_feature_dims > 0 and batch_pred_logits_list[0].shape[0] > 0:
+                    for d in range(num_feature_dims):
+                        loss = loss + criterion(batch_pred_logits_list[d], batch_z[:, d])
+                    loss /= num_feature_dims
+                else:
+                    # Ensure loss is a tensor even if no predictions, for scaler
+                    loss = torch.tensor(0.0, device=device, requires_grad=True)
+
+            if loss.requires_grad:  # Only proceed if loss requires grad (e.g. not an empty batch)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
             wandb.log({'node_pred/loss': loss.item()})
 
@@ -447,6 +448,8 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **config['optimizer'])
 
+    scaler = GradScaler(enabled=(device.type == 'cuda'))
+
     best_val_nll = float('inf')
     best_state_dict = deepcopy(model.state_dict())
     num_patient_epochs = 0
@@ -492,18 +495,25 @@ def main_edge_pred(device, train_loader, val_loader, model, config, patience, is
             batch_query_dst = batch_query_dst.to(device)
             batch_label = batch_label.to(device)
 
-            batch_pred_logits = model(batch_A, batch_x_n, batch_abs_level,
-                                      batch_rel_level, batch_t, batch_query_src,
-                                      batch_query_dst, batch_y)
+            optimizer.zero_grad()
 
-            if batch_pred_logits.shape[0] > 0:
-                loss = criterion(batch_pred_logits, batch_label)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            with autocast(enabled=(device.type == 'cuda')):
+                batch_pred_logits = model(batch_A, batch_x_n, batch_abs_level,
+                                          batch_rel_level, batch_t, batch_query_src,
+                                          batch_query_dst, batch_y)
+
+                if batch_pred_logits.shape[0] > 0:
+                    loss = criterion(batch_pred_logits, batch_label)
+                else:
+                    loss = torch.tensor(0.0, device=device, requires_grad=True)
+
+            if batch_pred_logits.shape[0] > 0:  # Only backprop if there was something to predict
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 wandb.log({'edge_pred/loss': loss.item()})
             else:
-                wandb.log({'edge_pred/loss': 0.0})
+                wandb.log({'edge_pred/loss': 0.0})  # Log 0 if no predictions were made
 
         val_nll = eval_edge_pred(device, val_loader, model, is_conditional)
         wandb.log({
@@ -622,7 +632,7 @@ def main(args):
         shuffle=True,
         num_workers=config['node_count']['loader']['num_workers'],
         collate_fn=collate_node_count,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
     node_count_val_loader = DataLoader(
         val_node_count_dataset,
@@ -630,7 +640,7 @@ def main(args):
         shuffle=False,
         num_workers=config['node_count']['loader']['num_workers'],
         collate_fn=collate_node_count,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
 
     node_pred_train_loader = DataLoader(
@@ -639,7 +649,7 @@ def main(args):
         shuffle=True,
         num_workers=config['node_pred']['loader']['num_workers'],
         collate_fn=collate_node_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
     node_pred_val_loader = DataLoader(
         val_node_pred_dataset,
@@ -647,7 +657,7 @@ def main(args):
         shuffle=False,
         num_workers=config['node_pred']['loader']['num_workers'],
         collate_fn=collate_node_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
 
     edge_pred_train_loader = DataLoader(
@@ -656,7 +666,7 @@ def main(args):
         shuffle=True,
         num_workers=config['edge_pred']['loader']['num_workers'],
         collate_fn=collate_edge_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
     edge_pred_val_loader = DataLoader(
         val_edge_pred_dataset,
@@ -664,7 +674,7 @@ def main(args):
         shuffle=False,
         num_workers=config['edge_pred']['loader']['num_workers'],
         collate_fn=collate_edge_pred,
-        pin_memory=True if device_str == "cuda:0" else False
+        pin_memory=True if device.type == "cuda" else False  # Use device.type
     )
     print("DataLoaders created.")
 
@@ -688,10 +698,10 @@ def main(args):
         model_config['num_x_n_cat'] = torch.LongTensor(model_config['num_x_n_cat'])
 
     print("Initializing LayerDAG model...")
-    model = LayerDAG(device=device,
+    model = LayerDAG(device=device,  # Pass the device object itself
                      node_diffusion=node_diffusion,
                      edge_diffusion=edge_diffusion,
-                     is_model_conditional=is_conditional,  # Pass the flag here
+                     is_model_conditional=is_conditional,
                      **model_config)
     model.to(device)
     print("LayerDAG model initialized and moved to device.")
@@ -728,16 +738,14 @@ def main(args):
 
     # --- Save Model ---
     save_path = f'model_{dataset_name}_{ts}.pth'
-    # --- MODIFICATION START: Include edge_diffusion_config in saved checkpoint ---
     torch.save({
         'dataset': dataset_name,
         'node_diffusion_config': node_diffusion_config,
-        'edge_diffusion_config': edge_diffusion_config,  # Add this
+        'edge_diffusion_config': edge_diffusion_config,
         'model_config': model_config,
         'is_conditional': is_conditional,
         'model_state_dict': model.state_dict()
     }, save_path)
-    # --- MODIFICATION END ---
     print(f"Model saved to {save_path}")
     wandb.save(save_path)
     wandb.finish()
