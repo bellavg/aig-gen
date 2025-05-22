@@ -278,7 +278,7 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
         # Initialize padded x_adj (target for EdgeLevelRNN/MLP) with NO_EDGE encoding
         # NO_EDGE_ENCODING_TENSOR shape: [num_edge_features]
         padded_x_adj = NO_EDGE_ENCODING_TENSOR.clone().detach().reshape(1, 1, -1).expand(self.max_node_count, self.m,
-                                                                                         self.num_edge_features)
+                                                                                         self.num_edge_features).clone()
 
         if num_nodes_in_graph == 0:
             return {
