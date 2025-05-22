@@ -18,14 +18,20 @@ try:
     if "EDGE_NO_EDGE" not in EDGE_LABEL_ENCODING or EDGE_TYPE_KEYS[0] != "EDGE_NO_EDGE":
         raise ImportError("EDGE_NO_EDGE not configured correctly as index 0 in aig_config.py")
     NO_EDGE_ENCODING_TENSOR = torch.tensor(EDGE_LABEL_ENCODING["EDGE_NO_EDGE"], dtype=torch.float)
+    # Get specific encodings for REG and INV to use in the transformation
+    EDGE_REG_ENCODING_3FEATURE = np.array(EDGE_LABEL_ENCODING.get("EDGE_REG", [0.0, 1.0, 0.0]), dtype=np.float32)
+    EDGE_INV_ENCODING_3FEATURE = np.array(EDGE_LABEL_ENCODING.get("EDGE_INV", [0.0, 0.0, 1.0]), dtype=np.float32)
+
 
 except ImportError as e:
     DEFAULT_NUM_NODE_FEATURES = -1
     DEFAULT_NUM_EDGE_FEATURES = -1
     NO_EDGE_ENCODING_TENSOR = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float)  # Fallback if aig_config fails
+    EDGE_REG_ENCODING_3FEATURE = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # Fallback
+    EDGE_INV_ENCODING_3FEATURE = np.array([0.0, 0.0, 1.0], dtype=np.float32)  # Fallback
     print(
         f"Warning: Could not fully import from aig_config.py ({e}). "
-        "NUM_NODE_FEATURES, NUM_EDGE_FEATURES, and NO_EDGE_ENCODING_TENSOR might use fallbacks."
+        "NUM_NODE_FEATURES, NUM_EDGE_FEATURES, and encodings might use fallbacks."
         "Ensure aig_config.py is correct and accessible."
     )
 
@@ -66,7 +72,38 @@ def pyg_to_nx_directed_with_types(pyg_data, num_node_features, num_edge_features
 
     edge_index = pyg_data.edge_index.cpu().numpy()
     if hasattr(pyg_data, 'edge_attr') and pyg_data.edge_attr is not None and pyg_data.edge_attr.shape[0] > 0:
-        edge_attributes = pyg_data.edge_attr.cpu().numpy()
+        edge_attributes_original = pyg_data.edge_attr.cpu().numpy()
+
+        # MODIFICATION: Handle 2-feature edge_attr and convert to 3-feature
+        if edge_attributes_original.shape[1] == 2 and num_edge_features == 3:
+            print(
+                f"Info: Detected 2-feature edge_attr, converting to {num_edge_features}-feature for {edge_attributes_original.shape[0]} edges.")
+            transformed_edge_attributes = np.zeros((edge_attributes_original.shape[0], num_edge_features),
+                                                   dtype=np.float32)
+            # Assuming original 2-feature: [1,0] for REG, [0,1] for INV
+            # And target 3-feature encodings are from aig_config.py
+            # EDGE_REG_ENCODING_3FEATURE (e.g., [0,1,0])
+            # EDGE_INV_ENCODING_3FEATURE (e.g., [0,0,1])
+
+            # Determine what [1,0] and [0,1] in 2-feature space mean.
+            # If your data generation script used argmax, then [1,0] -> 0, [0,1] -> 1.
+            # Let's assume 2-feature [1,0] was intended as the first type (REG) and [0,1] as the second type (INV).
+
+            for i in range(edge_attributes_original.shape[0]):
+                if np.array_equal(edge_attributes_original[i], [1.0, 0.0]):  # Was REG
+                    transformed_edge_attributes[i] = EDGE_REG_ENCODING_3FEATURE
+                elif np.array_equal(edge_attributes_original[i], [0.0, 1.0]):  # Was INV
+                    transformed_edge_attributes[i] = EDGE_INV_ENCODING_3FEATURE
+                else:
+                    # Fallback or error for unexpected 2-feature vectors
+                    print(
+                        f"Warning: Unrecognized 2-feature vector {edge_attributes_original[i]} at edge index {i}. Defaulting to NO_EDGE encoding.")
+                    transformed_edge_attributes[i] = np.array(EDGE_LABEL_ENCODING.get("EDGE_NO_EDGE"), dtype=np.float32)
+            edge_attributes = transformed_edge_attributes
+        else:
+            edge_attributes = edge_attributes_original
+        # END MODIFICATION
+
         if edge_attributes.shape[1] != num_edge_features:
             raise ValueError(
                 f"Edge attributes in PyG data have {edge_attributes.shape[1]} features, but expected {num_edge_features} (for NO_EDGE, REG, INV). "
@@ -325,5 +362,3 @@ class DirectedGraphDataSet(torch.utils.data.Dataset):
             }
         else:
             raise Exception(f"Unsupported dataset_type: {self.dataset_type} in __getitem__ of DirectedGraphDataSet")
-
-

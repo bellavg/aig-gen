@@ -13,9 +13,7 @@ from tqdm import tqdm
 
 # Options: 'highest' (default), 'high', 'medium'
 # 'high' or 'medium' can leverage Tensor Cores for float32 matrix multiplications
-if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7:  # Check for Volta or newer
-    print("Setting float32 matmul precision to 'high' for Tensor Cores.")
-    torch.set_float32_matmul_precision('high')
+
 
 from setup_utils import set_seed, load_yaml
 # Ensure your dataset components are correctly imported
@@ -174,8 +172,11 @@ def main_node_count(device, train_loader, val_loader, model, config, patience, i
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            if epoch + 1 % 10 == 0:
+                print(f"Epoch {epoch + 1}, Node Count Loss: {loss.item():.4f}")
 
             wandb.log({'node_count/loss': loss.item()})
+
 
         val_nll, val_acc = eval_node_count(device, val_loader, model, is_conditional)
         wandb.log({
@@ -761,6 +762,9 @@ if __name__ == '__main__':
         except RuntimeError as e:
             print(f"Warning: Could not set multiprocessing start method to 'spawn' in __main__: {e}")
 
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7:  # Check for Volta or newer
+        print("Setting float32 matmul precision to 'high' for Tensor Cores.")
+        torch.set_float32_matmul_precision('high')
 
     from argparse import ArgumentParser
 

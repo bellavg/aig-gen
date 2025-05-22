@@ -57,6 +57,8 @@ DECODING_EDGE_TYPE_NX = {
 }
 
 
+EDGE_REG_ENCODING_3FEATURE = np.array(EDGE_LABEL_ENCODING.get("EDGE_REG", [0.0,1.0,0.0]), dtype=np.float32)
+EDGE_INV_ENCODING_3FEATURE = np.array(EDGE_LABEL_ENCODING.get("EDGE_INV", [0.0,0.0,1.0]), dtype=np.float32)
 
 # --- Final Vocab Size Calculation ---
 # Determine the highest ID used across both the main vocab and special tokens
