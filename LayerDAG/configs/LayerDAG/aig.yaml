@@ -14,7 +14,7 @@ node_count:
     y_emb_size: 256  # May be unused if conditional is false
     num_mpnn_layers: 3
     pool: 'sum'
-  num_epochs: 100
+  num_epochs: 5
   optimizer:
     lr: 0.0003
     amsgrad: true
@@ -24,7 +24,7 @@ node_pred:
   loader:
     batch_size: 256
     num_workers: 4
-  num_epochs: 200
+  num_epochs: 5
   graph_encoder:
     x_n_emb_size: 512
     y_emb_size: 512  # May be unused if conditional is false
@@ -45,7 +45,7 @@ edge_pred:
   loader:
     batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
     num_workers: 4
-  num_epochs: 500
+  num_epochs: 5
   graph_encoder:
     x_n_emb_size: 256
     y_emb_size: 64   # May be unused if conditional is false
