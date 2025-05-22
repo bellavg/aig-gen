@@ -860,10 +860,23 @@ def collate_node_pred(data):
             batch_z_t_processed.append(zt)
     batch_z_t_cat = torch.cat(batch_z_t_processed) if batch_z_t_processed else torch.empty((0, z_t_feat_dim),
                                                                                            dtype=torch.long)
+    # ------------ START OF REPLACEMENT ------------
+    batch_t_processed = []
+    for t_item in batch_t:  # Each t_item from __getitem__ is expected to be shape (1,), e.g., tensor([value])
+        if t_item.numel() > 0:
+            # Ensure it remains a 1D tensor of shape (1,) after processing.
+            # t_item.view(1) handles this correctly.
+            batch_t_processed.append(t_item.view(1))
+        else:
+            # This case handles if an empty tensor (shape (0,)) was somehow passed for a t_item
+            batch_t_processed.append(torch.empty((0,), dtype=torch.long))
 
-    batch_t_processed = [t.squeeze() if t.numel() > 0 else torch.empty(0, dtype=torch.long) for t in batch_t]
-    batch_t_cat = torch.cat(batch_t_processed).unsqueeze(-1) if any(
-        t.numel() > 0 for t in batch_t_processed) else torch.empty((0, 1), dtype=torch.long)
+    if any(t.numel() > 0 for t in batch_t_processed):
+        # Concatenate along dim 0 as batch_t_processed is a list of 1D tensors (e.g., list of [tensor([v1]), tensor([v2])])
+        batch_t_cat = torch.cat(batch_t_processed, dim=0).unsqueeze(-1)
+    else:
+        batch_t_cat = torch.empty((0, 1), dtype=torch.long)
+    # ------------- END OF REPLACEMENT -------------
 
     batch_z_processed = []
     for z_val in batch_z:
