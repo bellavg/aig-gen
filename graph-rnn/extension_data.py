@@ -76,8 +76,8 @@ def pyg_to_nx_directed_with_types(pyg_data, num_node_features, num_edge_features
 
         # MODIFICATION: Handle 2-feature edge_attr and convert to 3-feature
         if edge_attributes_original.shape[1] == 2 and num_edge_features == 3:
-            print(
-                f"Info: Detected 2-feature edge_attr, converting to {num_edge_features}-feature for {edge_attributes_original.shape[0]} edges.")
+            # print(
+            #     f"Info: Detected 2-feature edge_attr, converting to {num_edge_features}-feature for {edge_attributes_original.shape[0]} edges.")
             transformed_edge_attributes = np.zeros((edge_attributes_original.shape[0], num_edge_features),
                                                    dtype=np.float32)
             # Assuming original 2-feature: [1,0] for REG, [0,1] for INV
