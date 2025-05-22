@@ -2,7 +2,7 @@
 import math
 import os # Added for potential path joining if needed
 import networkx as nx
-
+import numpy as np
 # --- Primary Configuration Constants ---
 dataset = 'aig'
 
