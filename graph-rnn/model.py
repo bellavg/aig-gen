@@ -186,7 +186,12 @@ class EdgeLevelRNN(nn.Module):
 
         if x_edge_lens is not None:
             cpu_x_edge_lens = x_edge_lens.cpu() if x_edge_lens.is_cuda else x_edge_lens
-            x_embedded = pack_padded_sequence(x_embedded, cpu_x_edge_lens, batch_first=True, enforce_sorted=False)
+            # ### START MODIFICATION ###
+            # Ensure lengths are at least 1 for pack_padded_sequence
+            # The actual handling of 0-length sequences for loss is done in train_rnn_step
+            cpu_x_edge_lens_for_packing = cpu_x_edge_lens.clamp(min=1)
+            x_embedded = pack_padded_sequence(x_embedded, cpu_x_edge_lens_for_packing, batch_first=True,
+                                              enforce_sorted=False)
 
         gru_output, self.hidden = self.gru(x_embedded, self.hidden)
 
