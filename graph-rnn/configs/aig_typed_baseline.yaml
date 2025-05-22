@@ -12,14 +12,14 @@ model:
     num_layers: 4       # Common default
     # CRUCIAL: Set these based on your aig_config.py
     num_node_classes: 4 # e.g., 4 if you have 4 node types (PI, PO, AND, CONST0)
-    edge_feature_len: 2  # e.g., 2 if you have 2 edge types (REG, INV)
+    edge_feature_len: 3  # e.g., 2 if you have 2 edge types (REG, INV)
 
   EdgeRNN: # Configuration for the edge-level RNN
     embedding_size: 16  # Common default, smaller than GraphRNN's embedding
     hidden_size: 32     # Common default, smaller than GraphRNN's hidden
     num_layers: 4       # Common default
     # CRUCIAL: Set this based on your aig_config.py
-    edge_feature_len: 2 # Must match GraphRNN.edge_feature_len
+    edge_feature_len: 3 # Must match GraphRNN.edge_feature_len
 
 data:
   # 'dataset' can be a descriptive name. The actual data loading

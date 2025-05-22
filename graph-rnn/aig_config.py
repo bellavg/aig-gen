@@ -20,11 +20,13 @@ MIN_PO_COUNT = 1
 MAX_PO_COUNT = 8
 MIN_AND_COUNT = 1 # Assuming at least one AND gate needed
 
-
+# ... (other constants like MAX_NODE_COUNT etc.)
 
 NODE_TYPE_KEYS = ["NODE_CONST0", "NODE_PI", "NODE_AND", "NODE_PO"]
-EDGE_TYPE_KEYS = ["EDGE_REG", "EDGE_INV"]
+# Reorder EDGE_TYPE_KEYS to make EDGE_NO_EDGE index 0
+EDGE_TYPE_KEYS = ["EDGE_NO_EDGE", "EDGE_REG", "EDGE_INV"] # EDGE_NO_EDGE is now first
 
+NUM_EDGE_FEATURES = len(EDGE_TYPE_KEYS)
 
 NODE_TYPE_ENCODING = {
     "NODE_CONST0": [1.0, 0.0, 0.0, 0.0],
@@ -39,23 +41,21 @@ DECODING_NODE_TYPE_NX = {
     (0.0, 0.0, 1.0, 0.0): "NODE_AND",
     (0.0, 0.0, 0.0, 1.0): "NODE_PO"
 }
-# Derive feature counts from the size of the derived vocabularies
-NUM_NODE_FEATURES = len(NODE_TYPE_KEYS) # Should be 4
-NUM_EDGE_FEATURES = len(EDGE_TYPE_KEYS) # Should be 2
+NUM_NODE_FEATURES = len(NODE_TYPE_KEYS)
 
-
-
-# IMPORTANT: Ensure keys/order match EDGE_TYPE_VOCAB derivation and NUM_EDGE_FEATURES
-# The order here should ideally match the order in EDGE_TYPE_KEYS
+# Update EDGE_LABEL_ENCODING based on the new order
 EDGE_LABEL_ENCODING = {
-    "EDGE_REG": [1.0, 0.0],  # Index 0 feature
-    "EDGE_INV": [0.0, 1.0]   # Index 1 feature
+    "EDGE_NO_EDGE": [1.0, 0.0, 0.0], # Index 0
+    "EDGE_REG":     [0.0, 1.0, 0.0], # Index 1
+    "EDGE_INV":     [0.0, 0.0, 1.0]  # Index 2
 }
 
 DECODING_EDGE_TYPE_NX = {
-    (1.0, 0.0): "EDGE_REG" ,  # Index 0 feature
-    (0.0, 1.0) :"EDGE_INV"  # Index 1 feature
+    (1.0, 0.0, 0.0): "EDGE_NO_EDGE",
+    (0.0, 1.0, 0.0): "EDGE_REG",
+    (0.0, 0.0, 1.0): "EDGE_INV"
 }
+
 
 
 # --- Final Vocab Size Calculation ---
