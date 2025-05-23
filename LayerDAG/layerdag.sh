@@ -2,7 +2,7 @@
 #SBATCH --job-name=layerdag_train
 #SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
-#SBATCH --time=06:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=slurm_logs/layerdag_train_%j.out
 
 

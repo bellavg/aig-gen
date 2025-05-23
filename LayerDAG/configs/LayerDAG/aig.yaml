@@ -3,12 +3,12 @@ general:
   path_to_pt_file: "./aig_directed.pt" # Path to your combined AIG .pt file
   num_node_categories: 4 # From your aig_config.py (NUM_NODE_FEATURES)
   conditional: false # Set to false for unconditional random generation
-  patience: 20
+  patience: 5
 
 node_count:
   loader:
-    batch_size: 128
-    num_workers: 4
+    batch_size: 1024
+    num_workers: 12
   model:
     x_n_emb_size: 64
     y_emb_size: 256  # May be unused if conditional is false
@@ -20,10 +20,10 @@ node_count:
     amsgrad: true
 
 node_pred:
-  T: 64 # Number of diffusion timesteps for node attributes
+  T: 32
   loader:
-    batch_size: 256
-    num_workers: 0
+    batch_size: 512
+    num_workers: 12
   num_epochs: 1
   graph_encoder:
     x_n_emb_size: 512
@@ -43,9 +43,9 @@ node_pred:
 edge_pred:
   T: 16 # Number of diffusion timesteps for edges
   loader:
-    batch_size: 256 # Consider adjusting based on your AIG graph sizes and GPU memory
-    num_workers: 4
-  num_epochs: 5
+    batch_size: 1024
+    num_workers: 12
+  num_epochs: 1
   graph_encoder:
     x_n_emb_size: 256
     y_emb_size: 64   # May be unused if conditional is false
