@@ -24,7 +24,7 @@ node_pred:
   loader:
     batch_size: 256
     num_workers: 0
-  num_epochs: 5
+  num_epochs: 1
   graph_encoder:
     x_n_emb_size: 512
     y_emb_size: 512  # May be unused if conditional is false

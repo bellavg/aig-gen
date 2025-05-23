@@ -498,9 +498,9 @@ class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
         self.item_to_original_graph_idx = []
 
         num_total_edges_processed_in_original_graphs = 0
-        num_total_nonsrc_nodes_in_original_graphs = 0
+        num_total_nonsrc_nodes_in_original_graphs = 0  # Nodes that are destinations of at least one edge
 
-        for i in range(len(dag_dataset)):
+        for i in range(len(dag_dataset)):  # Iterate over each original graph
             data_i = dag_dataset[i]
             if conditional:
                 src, dst, x_n, y = data_i
@@ -511,22 +511,34 @@ class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
                 input_g_for_cond = -1
 
             num_total_edges_processed_in_original_graphs += len(src)
-            original_graph_local_to_actual_global_idx_map = {}
-            current_graph_nodes_global_start_offset = len(self.input_x_n)
 
-            item_input_nodes_global_end = current_graph_nodes_global_start_offset
-            item_input_edges_global_end = len(self.input_src)
+            # --- Initialization for the current original graph 'i' ---
+            original_graph_local_to_actual_global_idx_map = {}
+            # Global start index in self.input_x_n for ALL nodes of this original graph 'i' (including its dummy)
+            current_graph_all_nodes_global_start_offset = len(self.input_x_n)
+            # Global start index in self.input_src for ALL edges of this original graph 'i'
+            current_original_graph_all_edges_start_in_global_list = len(self.input_src)
+
+            # item_gnn_input_nodes_global_end: Tracks the end of the node sequence for the GNN input of the current item.
+            # It starts with the dummy node and grows as nodes from subsequent layers are included.
+            item_gnn_input_nodes_global_end = current_graph_all_nodes_global_start_offset
+
+            # current_item_gnn_input_edges_end_idx: Tracks the end of the *GNN input* edge sequence for the current item.
+            # These are edges formed by nodes from layers *prior* to the current target layer.
+            current_item_gnn_input_edges_end_idx = len(self.input_src)  # Initially, no GNN input edges from this graph
+
             current_item_query_list_start_idx = len(self.query_src_list)
 
+            # Add dummy node for this original graph 'i'.
             actual_global_idx_dummy = len(self.input_x_n)
             self.input_x_n.append(dag_dataset.dummy_category)
             self.input_level.append(0)
             original_graph_local_to_actual_global_idx_map[-1] = actual_global_idx_dummy
-            item_input_nodes_global_end += 1
+            item_gnn_input_nodes_global_end += 1  # Dummy node is part of GNN input
 
+            # Prepare graph structure for layer-by-layer processing
             src_plus_dummy_for_adj = src + 1
             dst_plus_dummy_for_adj = dst + 1
-            current_item_level_in_original_graph = 0
 
             num_nodes_in_original_sample_incl_dummy = len(x_n) + 1
             in_deg_local_for_adj = self.get_in_deg(dst_plus_dummy_for_adj, num_nodes_in_original_sample_incl_dummy)
@@ -536,88 +548,171 @@ class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
             in_adj_list_local_for_adj = self.get_in_adj_list(src_plus_dummy_for_adj.tolist(),
                                                              dst_plus_dummy_for_adj.tolist())
 
-            potential_source_nodes_local_0_indexed_prev_layer = [-1]  # Start with dummy node (local ID -1)
+            # --- Layer 0 (Dummy) and Layer 1 (Initial Frontier) ---
+            # Nodes that can be sources for edges to Layer 1 (only dummy initially)
+            potential_source_nodes_local_0_indexed_for_queries = [-1]
 
-            current_item_level_in_original_graph += 1  # First real layer is level 1
-            # Process the first true frontier
+            current_item_level_in_original_graph = 1  # Start with predicting edges to Layer 1
+
+            # Process the first true frontier (Layer 1 nodes)
+            # These become part of the GNN input node set for the item predicting edges to them.
             first_frontier_local_indices_for_adj = [
                 u_local for u_local in range(1, num_nodes_in_original_sample_incl_dummy) if
                 in_deg_local_for_adj[u_local] == 0
             ]
 
-            for u_node_local_adj_idx in first_frontier_local_indices_for_adj:  # 1-indexed
+            # Add Layer 1 nodes to self.input_x_n and update GNN node boundary
+            _current_layer_nodes_global_indices = []  # For query_dst
+            for u_node_local_adj_idx in first_frontier_local_indices_for_adj:
                 original_node_idx_0_based = u_node_local_adj_idx - 1
                 actual_global_idx_for_u = len(self.input_x_n)
                 self.input_x_n.append(x_n_list_original[original_node_idx_0_based])
                 self.input_level.append(current_item_level_in_original_graph)
                 original_graph_local_to_actual_global_idx_map[original_node_idx_0_based] = actual_global_idx_for_u
-            item_input_nodes_global_end += len(first_frontier_local_indices_for_adj)
-            potential_source_nodes_local_0_indexed_prev_layer.extend(
-                [idx - 1 for idx in first_frontier_local_indices_for_adj])
+                _current_layer_nodes_global_indices.append(actual_global_idx_for_u)
 
-            current_frontiers_nodes_local_indices_for_adj_next_layer = []
-            for u_node_local_adj_idx in first_frontier_local_indices_for_adj:
-                for v_target_local_adj_idx in out_adj_list_local_for_adj[u_node_local_adj_idx]:
-                    in_deg_local_for_adj[v_target_local_adj_idx] -= 1
-                    if in_deg_local_for_adj[v_target_local_adj_idx] == 0:
-                        current_frontiers_nodes_local_indices_for_adj_next_layer.append(v_target_local_adj_idx)
-            current_frontiers_nodes_local_indices_for_adj_next_layer = list(
-                set(current_frontiers_nodes_local_indices_for_adj_next_layer))
+            item_gnn_input_nodes_global_end = len(self.input_x_n)  # GNN nodes now include Layer 1
 
-            while len(current_frontiers_nodes_local_indices_for_adj_next_layer) > 0:
-                current_item_level_in_original_graph += 1
+            # --- Create first item (predicting edges to Layer 1) ---
+            if first_frontier_local_indices_for_adj:  # Only if Layer 1 exists
+                self.input_n_start.append(current_graph_all_nodes_global_start_offset)
+                self.input_n_end.append(item_gnn_input_nodes_global_end)  # GNN nodes up to Layer 1
 
-                self.input_n_start.append(current_graph_nodes_global_start_offset)
-                self.input_n_end.append(item_input_nodes_global_end)
-                self.input_e_start.append(self.input_e_end[-1] if self.input_e_end else 0)
-                self.input_e_end.append(item_input_edges_global_end)
+                self.input_e_start.append(current_original_graph_all_edges_start_in_global_list)
+                self.input_e_end.append(
+                    current_item_gnn_input_edges_end_idx)  # Edges before Layer 1 (i.e., none from this graph yet)
+
                 self.item_to_original_graph_idx.append(i)
                 if conditional: self.input_g.append(input_g_for_cond)
-
                 self.query_start_indices.append(current_item_query_list_start_idx)
+
                 num_queries_this_item = 0
-                next_frontiers_after_current_local_indices_buffer = []
-
-                for u_target_local_adj_idx in current_frontiers_nodes_local_indices_for_adj_next_layer:  # 1-indexed
-                    original_target_node_idx_0_based = u_target_local_adj_idx - 1
-                    actual_global_idx_for_u_target = len(self.input_x_n)
-                    self.input_x_n.append(x_n_list_original[original_target_node_idx_0_based])
-                    self.input_level.append(current_item_level_in_original_graph)
-                    original_graph_local_to_actual_global_idx_map[
-                        original_target_node_idx_0_based] = actual_global_idx_for_u_target
+                # Create queries from potential_source_nodes (dummy) to Layer 1 nodes
+                for actual_global_idx_for_u_target in _current_layer_nodes_global_indices:
                     num_total_nonsrc_nodes_in_original_graphs += 1
+                    # Get local adj_idx for u_target to check in_adj_list
+                    # This requires a reverse map or finding it; for simplicity, assume u_target_local_adj_idx is available if needed for in_adj_list
+                    u_target_local_adj_idx = -1  # Placeholder, find if needed for in_adj_list
+                    for k, v in original_graph_local_to_actual_global_idx_map.items():
+                        if v == actual_global_idx_for_u_target:
+                            u_target_local_adj_idx = k + 1  # Convert 0-based to 1-based adj
+                            break
 
-                    for t_source_orig_0_indexed_idx in potential_source_nodes_local_0_indexed_prev_layer:
+                    for t_source_orig_0_indexed_idx in potential_source_nodes_local_0_indexed_for_queries:
                         actual_global_src_idx = original_graph_local_to_actual_global_idx_map[
                             t_source_orig_0_indexed_idx]
                         self.query_src_list.append(actual_global_src_idx)
                         self.query_dst_list.append(actual_global_idx_for_u_target)
                         num_queries_this_item += 1
 
-                        # Check original connectivity (using adj-based local indices)
                         t_source_local_adj_idx = t_source_orig_0_indexed_idx + 1 if t_source_orig_0_indexed_idx != -1 else 0
-                        if t_source_local_adj_idx in in_adj_list_local_for_adj[u_target_local_adj_idx]:
+                        if u_target_local_adj_idx != -1 and t_source_local_adj_idx in in_adj_list_local_for_adj.get(
+                                u_target_local_adj_idx, []):
                             self.label_list.append(1)
                             self.input_src.append(actual_global_src_idx)
                             self.input_dst.append(actual_global_idx_for_u_target)
-                            item_input_edges_global_end += 1
                         else:
                             self.label_list.append(0)
 
-                    for v_next_target_local_adj_idx in out_adj_list_local_for_adj[u_target_local_adj_idx]:
-                        in_deg_local_for_adj[v_next_target_local_adj_idx] -= 1
-                        if in_deg_local_for_adj[v_next_target_local_adj_idx] == 0:
-                            next_frontiers_after_current_local_indices_buffer.append(v_next_target_local_adj_idx)
-
-                item_input_nodes_global_end += len(current_frontiers_nodes_local_indices_for_adj_next_layer)
                 current_item_query_list_start_idx += num_queries_this_item
                 self.query_end_indices.append(current_item_query_list_start_idx)
 
-                potential_source_nodes_local_0_indexed_prev_layer.extend(
-                    [idx - 1 for idx in current_frontiers_nodes_local_indices_for_adj_next_layer])
-                current_frontiers_nodes_local_indices_for_adj_next_layer = list(
-                    set(next_frontiers_after_current_local_indices_buffer))
+                # Update GNN input edge boundary *after* adding actual edges for Layer 1 connections
+                current_item_gnn_input_edges_end_idx = len(self.input_src)
 
+            # Update potential sources to include Layer 1 nodes
+            potential_source_nodes_local_0_indexed_for_queries.extend(
+                [idx - 1 for idx in first_frontier_local_indices_for_adj])
+
+            # Determine next layer's frontier (Layer L+1)
+            next_layer_frontier_local_indices_for_adj = []
+            for u_node_local_adj_idx in first_frontier_local_indices_for_adj:  # Nodes in Layer 1
+                for v_target_local_adj_idx in out_adj_list_local_for_adj.get(u_node_local_adj_idx,
+                                                                             []):  # Targets of Layer 1 nodes
+                    in_deg_local_for_adj[v_target_local_adj_idx] -= 1
+                    if in_deg_local_for_adj[v_target_local_adj_idx] == 0:
+                        next_layer_frontier_local_indices_for_adj.append(v_target_local_adj_idx)
+            next_layer_frontier_local_indices_for_adj = list(set(next_layer_frontier_local_indices_for_adj))
+
+            # --- Loop for subsequent layers (Layer 2 onwards) ---
+            while len(next_layer_frontier_local_indices_for_adj) > 0:
+                current_item_level_in_original_graph += 1  # Now processing Layer L (L >= 2)
+
+                # Nodes of current target layer (Layer L)
+                _current_layer_nodes_global_indices = []
+                for u_target_local_adj_idx in next_layer_frontier_local_indices_for_adj:
+                    original_target_node_idx_0_based = u_target_local_adj_idx - 1
+                    actual_global_idx_for_u_target = len(self.input_x_n)
+                    self.input_x_n.append(x_n_list_original[original_target_node_idx_0_based])
+                    self.input_level.append(current_item_level_in_original_graph)
+                    original_graph_local_to_actual_global_idx_map[
+                        original_target_node_idx_0_based] = actual_global_idx_for_u_target
+                    _current_layer_nodes_global_indices.append(actual_global_idx_for_u_target)
+
+                # Update GNN node boundary to include these new Layer L nodes
+                item_gnn_input_nodes_global_end = len(self.input_x_n)
+
+                # Define item for predicting edges to Layer L
+                self.input_n_start.append(current_graph_all_nodes_global_start_offset)
+                self.input_n_end.append(item_gnn_input_nodes_global_end)  # GNN nodes include up to Layer L
+
+                self.input_e_start.append(current_original_graph_all_edges_start_in_global_list)
+                self.input_e_end.append(
+                    current_item_gnn_input_edges_end_idx)  # GNN input edges are those formed up to Layer L-1
+
+                self.item_to_original_graph_idx.append(i)
+                if conditional: self.input_g.append(input_g_for_cond)
+                self.query_start_indices.append(current_item_query_list_start_idx)
+
+                num_queries_this_item = 0
+                # Create queries from potential_source_nodes (up to Layer L-1) to Layer L nodes
+                for actual_global_idx_for_u_target in _current_layer_nodes_global_indices:  # These are nodes in Layer L
+                    num_total_nonsrc_nodes_in_original_graphs += 1
+                    # Find local adj_idx for u_target to check in_adj_list
+                    u_target_local_adj_idx = -1
+                    for k, v in original_graph_local_to_actual_global_idx_map.items():
+                        if v == actual_global_idx_for_u_target:
+                            u_target_local_adj_idx = k + 1
+                            break
+
+                    for t_source_orig_0_indexed_idx in potential_source_nodes_local_0_indexed_for_queries:  # Nodes up to L-1
+                        actual_global_src_idx = original_graph_local_to_actual_global_idx_map[
+                            t_source_orig_0_indexed_idx]
+                        self.query_src_list.append(actual_global_src_idx)
+                        self.query_dst_list.append(actual_global_idx_for_u_target)
+                        num_queries_this_item += 1
+
+                        t_source_local_adj_idx = t_source_orig_0_indexed_idx + 1 if t_source_orig_0_indexed_idx != -1 else 0
+                        if u_target_local_adj_idx != -1 and t_source_local_adj_idx in in_adj_list_local_for_adj.get(
+                                u_target_local_adj_idx, []):
+                            self.label_list.append(1)
+                            self.input_src.append(actual_global_src_idx)
+                            self.input_dst.append(actual_global_idx_for_u_target)
+                        else:
+                            self.label_list.append(0)
+
+                current_item_query_list_start_idx += num_queries_this_item
+                self.query_end_indices.append(current_item_query_list_start_idx)
+
+                # Update GNN input edge boundary for the *next* item (edges to Layer L are now part of accumulated graph)
+                current_item_gnn_input_edges_end_idx = len(self.input_src)
+
+                # Update potential sources to include Layer L nodes
+                potential_source_nodes_local_0_indexed_for_queries.extend(
+                    [idx - 1 for idx in
+                     next_layer_frontier_local_indices_for_adj])  # These are local 0-indexed IDs of Layer L nodes
+
+                # Determine next layer's frontier (Layer L+1)
+                _buffer_for_next_next_layer = []
+                for u_node_local_adj_idx in next_layer_frontier_local_indices_for_adj:  # Nodes in Layer L
+                    for v_target_local_adj_idx in out_adj_list_local_for_adj.get(u_node_local_adj_idx,
+                                                                                 []):  # Targets of Layer L nodes
+                        in_deg_local_for_adj[v_target_local_adj_idx] -= 1
+                        if in_deg_local_for_adj[v_target_local_adj_idx] == 0:
+                            _buffer_for_next_next_layer.append(v_target_local_adj_idx)
+                next_layer_frontier_local_indices_for_adj = list(set(_buffer_for_next_next_layer))
+
+        # After processing all layers of the current original graph
         self.base_postprocess()
         self.query_src_list = torch.LongTensor(self.query_src_list)
         self.query_dst_list = torch.LongTensor(self.query_dst_list)
@@ -632,29 +727,50 @@ class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
             self.avg_in_deg = 0.0
 
     def __len__(self):
-        return len(self.query_start_indices)
+        return len(self.query_start_indices)  # Should be same as len(self.input_n_start)
 
     def __getitem__(self, index):
         if self.edge_diffusion is None:
             raise RuntimeError("edge_diffusion not set for LayerDAGEdgePredDataset instance.")
 
-        item_edges_start_global_idx = self.input_e_start[index]
-        item_edges_end_global_idx = self.input_e_end[index]
-        item_nodes_start_global_idx = self.input_n_start[index]
-        item_nodes_end_global_idx = self.input_n_end[index]
+        item_gnn_input_edges_start_global_idx = self.input_e_start[index]
+        item_gnn_input_edges_end_global_idx = self.input_e_end[index]
+        item_gnn_input_nodes_start_global_idx = self.input_n_start[index]
+        item_gnn_input_nodes_end_global_idx = self.input_n_end[index]
 
-        input_x_n_slice = self.input_x_n[item_nodes_start_global_idx:item_nodes_end_global_idx]
-        input_abs_level_slice = self.input_level[item_nodes_start_global_idx:item_nodes_end_global_idx]
+        # GNN input node features and levels
+        input_x_n_slice = self.input_x_n[item_gnn_input_nodes_start_global_idx:item_gnn_input_nodes_end_global_idx]
+        input_abs_level_slice = self.input_level[
+                                item_gnn_input_nodes_start_global_idx:item_gnn_input_nodes_end_global_idx]
+
         if input_abs_level_slice.numel() > 0:
             input_rel_level_slice = input_abs_level_slice.max() - input_abs_level_slice
         else:
             input_rel_level_slice = torch.empty_like(input_abs_level_slice)
 
-        src_for_item_gnn_input_global = self.input_src[item_edges_start_global_idx:item_edges_end_global_idx]
-        dst_for_item_gnn_input_global = self.input_dst[item_edges_start_global_idx:item_edges_end_global_idx]
-        src_reindexed_gnn_input = src_for_item_gnn_input_global - item_nodes_start_global_idx
-        dst_reindexed_gnn_input = dst_for_item_gnn_input_global - item_nodes_start_global_idx
+        # GNN input edges (re-indexed to be local to input_x_n_slice)
+        src_for_item_gnn_input_global = self.input_src[
+                                        item_gnn_input_edges_start_global_idx:item_gnn_input_edges_end_global_idx]
+        dst_for_item_gnn_input_global = self.input_dst[
+                                        item_gnn_input_edges_start_global_idx:item_gnn_input_edges_end_global_idx]
 
+        src_reindexed_gnn_input = src_for_item_gnn_input_global - item_gnn_input_nodes_start_global_idx
+        dst_reindexed_gnn_input = dst_for_item_gnn_input_global - item_gnn_input_nodes_start_global_idx
+
+        # --- DEBUG Check for GNN input edges ---
+        if src_reindexed_gnn_input.numel() > 0:
+            if src_reindexed_gnn_input.min() < 0 or src_reindexed_gnn_input.max() >= len(input_x_n_slice):
+                print(f"ERROR EdgePred __getitem__ GNN SRC out of bounds: index={index}, "
+                      f"min_src={src_reindexed_gnn_input.min()}, max_src={src_reindexed_gnn_input.max()}, "
+                      f"slice_len={len(input_x_n_slice)}")
+        if dst_reindexed_gnn_input.numel() > 0:
+            if dst_reindexed_gnn_input.min() < 0 or dst_reindexed_gnn_input.max() >= len(input_x_n_slice):
+                print(f"ERROR EdgePred __getitem__ GNN DST out of bounds: index={index}, "
+                      f"min_dst={dst_reindexed_gnn_input.min()}, max_dst={dst_reindexed_gnn_input.max()}, "
+                      f"slice_len={len(input_x_n_slice)}")
+        # --- End DEBUG Check ---
+
+        # Query edges (re-indexed to be local to input_x_n_slice)
         query_list_start_for_item = self.query_start_indices[index]
         query_list_end_for_item = self.query_end_indices[index]
 
@@ -662,24 +778,47 @@ class LayerDAGEdgePredDataset(LayerDAGBaseDataset):
         query_dst_global_for_item = self.query_dst_list[query_list_start_for_item:query_list_end_for_item]
         label_for_query_edges = self.label_list[query_list_start_for_item:query_list_end_for_item]
 
-        query_src_reindexed_local = query_src_global_for_item - item_nodes_start_global_idx
-        query_dst_reindexed_local = query_dst_global_for_item - item_nodes_start_global_idx
+        query_src_reindexed_local = query_src_global_for_item - item_gnn_input_nodes_start_global_idx
+        query_dst_reindexed_local = query_dst_global_for_item - item_gnn_input_nodes_start_global_idx
 
+        # --- DEBUG Check for Query edges ---
+        if query_src_reindexed_local.numel() > 0:
+            if query_src_reindexed_local.min() < 0 or query_src_reindexed_local.max() >= len(input_x_n_slice):
+                print(f"ERROR EdgePred __getitem__ QUERY SRC out of bounds: index={index}, "
+                      f"min_q_src={query_src_reindexed_local.min()}, max_q_src={query_src_reindexed_local.max()}, "
+                      f"slice_len={len(input_x_n_slice)}")
+                print(
+                    f"  query_src_global: min={query_src_global_for_item.min()}, max={query_src_global_for_item.max()}")
+                print(f"  item_gnn_input_nodes_start_global_idx: {item_gnn_input_nodes_start_global_idx}")
+
+        if query_dst_reindexed_local.numel() > 0:
+            if query_dst_reindexed_local.min() < 0 or query_dst_reindexed_local.max() >= len(input_x_n_slice):
+                print(f"ERROR EdgePred __getitem__ QUERY DST out of bounds: index={index}, "
+                      f"min_q_dst={query_dst_reindexed_local.min()}, max_q_dst={query_dst_reindexed_local.max()}, "
+                      f"slice_len={len(input_x_n_slice)}")
+                print(
+                    f"  query_dst_global: min={query_dst_global_for_item.min()}, max={query_dst_global_for_item.max()}")
+                print(f"  item_gnn_input_nodes_start_global_idx: {item_gnn_input_nodes_start_global_idx}")
+        # --- End DEBUG Check ---
+
+        # Apply noise to query edge labels
         if label_for_query_edges.numel() > 0:
-            num_candidate_sources_for_marginal_approx = len(input_x_n_slice)
+            num_candidate_sources_for_marginal_approx = len(input_x_n_slice)  # Or more specific count if available
             t_scalar, label_t_flat = self.edge_diffusion.apply_noise(
                 label_for_query_edges,
                 num_candidate_sources_for_marginal=num_candidate_sources_for_marginal_approx
             )
-            t_tensor = torch.full((label_for_query_edges.shape[0], 1),
-                                  t_scalar.item() if isinstance(t_scalar, torch.Tensor) else t_scalar, dtype=torch.long)
+            # Ensure t_scalar is correctly shaped for torch.full
+            t_val = t_scalar.item() if isinstance(t_scalar, torch.Tensor) else t_scalar
+            t_tensor = torch.full((label_for_query_edges.shape[0], 1), t_val, dtype=torch.long)
+
             noisy_mask = (label_t_flat == 1)
             noisy_src_reindexed = query_src_reindexed_local[noisy_mask]
             noisy_dst_reindexed = query_dst_reindexed_local[noisy_mask]
         else:
             t_tensor = torch.empty((0, 1), dtype=torch.long)
-            noisy_src_reindexed = torch.empty_like(query_src_reindexed_local)
-            noisy_dst_reindexed = torch.empty_like(query_dst_reindexed_local)
+            noisy_src_reindexed = torch.empty_like(query_src_reindexed_local)  # Shape (0)
+            noisy_dst_reindexed = torch.empty_like(query_dst_reindexed_local)  # Shape (0)
 
         if self.conditional:
             input_g_idx = self.input_g[index]
