@@ -37,10 +37,10 @@ MAX_TT_LENGTH = 2 ** MAX_INPUTS  # Maximum truth table length
 
 # Node and edge type encodings
 NODE_TYPE_ENCODING = {
-    "0": [0, 0, 0],
-    "PI": [1, 0, 0],  # [One-hot encoding]
-    "AND": [0, 1, 0],
-    "PO": [0, 0, 1]
+    "0": [1, 0, 0, 0],
+    "PI": [0, 1, 0, 0],  # [One-hot encoding]
+    "AND": [0, 0, 1, 0],
+    "PO": [0, 0, 0, 1]
 }
 
 EDGE_LABEL_ENCODING = {
