@@ -9,7 +9,7 @@ import numpy
 import torch.nn.functional as F
 from torch_geometric.utils.convert import to_networkx, from_networkx
 import networkx as nx
-from torch_geometric.utils import (get_laplacian, to_scipy_sparse_matrix, to_undirected)
+from torch_geometric.utils import (get_laplacian, to_scipy_sparse_matrix, to_undirected, degree)
 import glob
 
 # --- Imports from external libraries ---
@@ -110,19 +110,6 @@ def add_order_info(graph):
     
     return graph
 
-
-# --- Placeholder for Target Vector Calculation ---
-def get_structural_difference_vector(aig1, aig2):
-    """
-    !!! IMPORTANT PLACEHOLDER !!!
-    You must replace this function with your actual implementation.
-    """
-    aig1_name = getattr(aig1, 'name', 'unknown_aig1')
-    aig2_name = getattr(aig2, 'name', 'unknown_aig2')
-    print(f"      (Placeholder) Calculating structural vector between {os.path.basename(aig1_name)} and {os.path.basename(aig2_name)}")
-    return torch.randn(1, 16)
-
-
 # --- Configuration ---
 NODE_TYPE_ENCODING = {
     'CONST0': [1, 0, 0, 0], 'PI': [0, 1, 0, 0],
@@ -131,6 +118,111 @@ NODE_TYPE_ENCODING = {
 EDGE_TYPE_ENCODING = {
     'REGULAR':  [1, 0], 'INVERTED': [0, 1]
 }
+
+# --- Structural Vector Calculation ---
+
+def _calculate_graph_stats(pyg_data):
+    """
+    Calculates a 16-dimensional feature vector for a single graph.
+    
+    Args:
+        pyg_data: A torch_geometric.data.Data object, pre-processed by add_order_info.
+        
+    Returns:
+        A torch.Tensor of shape (16,) with structural graph statistics.
+    """
+    stats = {}
+    
+    # 1. Basic counts
+    stats['num_nodes'] = pyg_data.num_nodes
+    stats['num_edges'] = pyg_data.num_edges
+    
+    # 2. AND gate count (replaces PI/PO counts)
+    and_mask = (pyg_data.x[:, 2] == 1)
+    stats['num_and_gates'] = and_mask.sum().item()
+    
+    # 3. Depth and level-based stats
+    levels = pyg_data.abs_pe.float()
+    stats['graph_depth'] = levels.max().item() if levels.numel() > 0 else 0
+    stats['level_variance'] = torch.var(levels).item() if levels.numel() > 1 else 0
+
+    # 4. Fanout stats (for non-PO nodes)
+    po_mask = (pyg_data.x[:, 3] == 1)
+    non_po_mask = ~po_mask
+    fanout = degree(pyg_data.edge_index[0, :], num_nodes=pyg_data.num_nodes)[non_po_mask].float()
+    if fanout.numel() > 0:
+        stats['avg_fanout'] = fanout.mean().item()
+        stats['max_fanout'] = fanout.max().item()
+        stats['var_fanout'] = torch.var(fanout).item() if fanout.numel() > 1 else 0
+    else:
+        stats['avg_fanout'] = stats['max_fanout'] = stats['var_fanout'] = 0
+
+    # 5. Edge-level span stats
+    edge_levels_source = levels[pyg_data.edge_index[0]]
+    edge_levels_target = levels[pyg_data.edge_index[1]]
+    edge_level_spans = edge_levels_target - edge_levels_source
+    if edge_level_spans.numel() > 0:
+        stats['avg_edge_level_span'] = edge_level_spans.mean().item()
+        stats['var_edge_level_span'] = torch.var(edge_level_spans).item() if edge_level_spans.numel() > 1 else 0
+    else:
+        stats['avg_edge_level_span'] = stats['var_edge_level_span'] = 0
+
+    # 6. NetworkX-based metrics
+    G_dir = to_networkx(pyg_data, to_undirected=False)
+    stats['density'] = nx.density(G_dir)
+    
+    # Degree Assortativity (replaces PI/PO counts)
+    try:
+        assortativity = nx.degree_assortativity_coefficient(G_dir)
+        stats['degree_assortativity'] = float(assortativity) if not numpy.isnan(assortativity) else 0.0
+    except nx.NetworkXError: # Handles cases where assortativity is not defined
+        stats['degree_assortativity'] = 0.0
+
+    # Metrics on the undirected graph
+    G_undir = G_dir.to_undirected()
+    if nx.is_connected(G_undir):
+        stats['diameter'] = float(nx.diameter(G_undir))
+        stats['radius'] = float(nx.radius(G_undir))
+        
+        lap_spectrum = nx.laplacian_spectrum(G_undir)
+        stats['algebraic_connectivity'] = float(lap_spectrum[1]) if len(lap_spectrum) > 1 else 0.0
+        
+        eccentricity = nx.eccentricity(G_undir)
+        stats['avg_eccentricity'] = numpy.mean(list(eccentricity.values()))
+    else:
+        stats['diameter'] = -1.0
+        stats['radius'] = -1.0
+        stats['algebraic_connectivity'] = 0.0
+        stats['avg_eccentricity'] = -1.0
+
+    # Ensure order and convert to tensor
+    feature_order = [
+        'num_nodes', 'num_edges', 'num_and_gates', 'degree_assortativity', 
+        'graph_depth', 'avg_fanout', 'max_fanout', 'var_fanout', 
+        'level_variance', 'avg_edge_level_span', 'var_edge_level_span', 
+        'density', 'algebraic_connectivity', 'diameter', 'radius', 'avg_eccentricity'
+    ]
+    
+    return torch.tensor([stats[key] for key in feature_order], dtype=torch.float)
+
+
+def get_structural_difference_vector(pyg_data1, pyg_data2):
+    """
+    Calculates the signed difference between the structural feature vectors of two graphs.
+    
+    Args:
+        pyg_data1: The first pre-processed PyG Data object.
+        pyg_data2: The second pre-processed PyG Data object.
+        
+    Returns:
+        A torch.Tensor of shape (1, 16) representing the structural difference vector.
+    """
+    stats1 = _calculate_graph_stats(pyg_data1)
+    stats2 = _calculate_graph_stats(pyg_data2)
+    
+    difference_vector = stats1 - stats2
+    return difference_vector.unsqueeze(0)
+
 
 # --- Core Data Processing Function ---
 def create_aig_pyg_data(aig):
@@ -235,9 +327,13 @@ def process_aig_pairs_directory(base_dir, output_file, chunk_size, use_chunking)
                 if not pyg_data1 or not pyg_data2:
                     print(f"    -> Skipping pair due to processing error.")
                     continue
+                
+                # Calculate the directed difference vectors
+                y1 = get_structural_difference_vector(pyg_data1, pyg_data2)
+                y2 = get_structural_difference_vector(pyg_data2, pyg_data1) # This will be -y1
 
-                siamese_dataset.append({'graph1': pyg_data1, 'graph2': pyg_data2, 'y': get_structural_difference_vector(aig1, aig2)})
-                siamese_dataset.append({'graph1': pyg_data2, 'graph2': pyg_data1, 'y': get_structural_difference_vector(aig2, aig1)})
+                siamese_dataset.append({'graph1': pyg_data1, 'graph2': pyg_data2, 'y': y1})
+                siamese_dataset.append({'graph1': pyg_data2, 'graph2': pyg_data1, 'y': y2})
 
                 if use_chunking and len(siamese_dataset) >= chunk_size:
                     chunk_filename = f"{base_filename}_part_{chunk_count}.pkl"
