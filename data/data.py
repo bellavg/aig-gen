@@ -4,6 +4,7 @@ import torch
 import networkx as nx
 from torch_geometric.data import Data
 from torch_geometric.utils.convert import from_networkx
+import argparse
 
 # Assuming aigverse is installed or available in the path
 try:
@@ -15,7 +16,7 @@ except ImportError:
 # Assuming utils_dag.py is in the same directory or accessible in the python path
 try:
     from utils_dag import add_order_info
-except ImportError:
+except (ImportError, FileNotFoundError):
     print("Error: 'utils_dag.py' not found. Please ensure it is in the same directory as this script.")
     exit(1)
 
@@ -36,12 +37,6 @@ EDGE_TYPE_ENCODING = {
     'INVERTED': [0, 1]
 }
 NUM_EDGE_FEATURES = len(EDGE_TYPE_ENCODING['REGULAR'])
-
-# --- Memory Management Configuration ---
-# Set the number of graphs to process before saving a chunk to disk.
-# Adjust this based on your system's RAM and the average size of your graphs.
-# For 100,000 graphs, a chunk size of 1000-5000 is a good starting point.
-CHUNK_SIZE = 1000
 
 def create_aig_pyg_data(aig):
     """
@@ -123,26 +118,23 @@ def create_aig_pyg_data(aig):
         return pyg_data
 
     except Exception as e:
-        print(f"    [Error] Failed to process AIG: {e}")
+        print(f"     [Error] Failed to process AIG: {e}")
         return None
 
-def save_chunk(chunk_data, output_dir, base_filename, chunk_num):
-    """Saves a list of graph data objects to a numbered pickle file."""
-    if not chunk_data:
+def _save_data(data, output_path):
+    """Saves a list of graph data objects to a pickle file."""
+    if not data:
         return
     
-    chunk_filename = f"{base_filename}_part_{chunk_num}.pkl"
-    output_path = os.path.join(output_dir, chunk_filename)
-    
-    print(f"  Saving chunk {chunk_num} with {len(chunk_data)} graphs to '{output_path}'...")
+    print(f"  Saving {len(data)} graphs to '{output_path}'...")
     with open(output_path, 'wb') as f:
-        pickle.dump(chunk_data, f)
-    print(f"  Chunk {chunk_num} saved.")
+        pickle.dump(data, f)
+    print(f"  Saved.")
 
-def process_aig_directory(input_dir, output_dir, base_filename):
+def process_aig_directory(input_dir, output_dir, base_filename, chunk_size=1000, use_chunking=True):
     """
     Processes all .aig or .aag files in a directory, converts them to
-    a list of PyG Data objects, and saves them in chunks to pickle files.
+    a list of PyG Data objects, and saves them to pickle files.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -152,9 +144,11 @@ def process_aig_directory(input_dir, output_dir, base_filename):
         print(f"No .aig or .aag files found in '{input_dir}'")
         return
 
-    print(f"Found {len(aig_files)} AIG files. Starting processing with chunk size {CHUNK_SIZE}...")
+    print(f"Found {len(aig_files)} AIG files. Starting processing...")
+    if use_chunking:
+        print(f"Chunking is enabled with chunk size {chunk_size}.")
     
-    current_chunk = []
+    processed_data = []
     chunk_count = 1
     
     for i, filename in enumerate(aig_files):
@@ -164,46 +158,68 @@ def process_aig_directory(input_dir, output_dir, base_filename):
             aig = read_aiger_into_aig(file_path)
             pyg_data = create_aig_pyg_data(aig)
             if pyg_data:
-                current_chunk.append(pyg_data)
+                processed_data.append(pyg_data)
             
-            # If the chunk is full, save it and start a new one
-            if len(current_chunk) >= CHUNK_SIZE:
-                save_chunk(current_chunk, output_dir, base_filename, chunk_count)
-                current_chunk = []
+            if use_chunking and len(processed_data) >= chunk_size:
+                chunk_filename = f"{base_filename}_part_{chunk_count}.pkl"
+                output_path = os.path.join(output_dir, chunk_filename)
+                _save_data(processed_data, output_path)
+                processed_data = []
                 chunk_count += 1
 
         except Exception as e:
             print(f"  -> [Critical Error] Could not process {filename}. Error: {e}")
 
-    # Save any remaining graphs in the last chunk
-    if current_chunk:
-        save_chunk(current_chunk, output_dir, base_filename, chunk_count)
-
-    print(f"\nProcessing complete. Saved {chunk_count} chunk(s) to '{output_dir}'.")
-
+    # Save any remaining data
+    if use_chunking:
+        if processed_data:
+            chunk_filename = f"{base_filename}_part_{chunk_count}.pkl"
+            output_path = os.path.join(output_dir, chunk_filename)
+            _save_data(processed_data, output_path)
+        print(f"\nProcessing complete. Saved {chunk_count} chunk(s) to '{output_dir}'.")
+    else:
+        output_path = os.path.join(output_dir, f"{base_filename}.pkl")
+        _save_data(processed_data, output_path)
+        print(f"\nProcessing complete. Saved all data to '{output_path}'.")
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Process AIG files into PyTorch Geometric Data objects.")
+    parser.add_argument('--input-dir', type=str, default="./sample_aigs", help="Directory containing AIG files.")
+    parser.add_argument('--output-dir', type=str, default="./processed_aigs", help="Directory to save processed data.")
+    parser.add_argument('--output-filename', type=str, default="aig_pyg_dataset", help="Base name for the output file(s).")
+    parser.add_argument('--chunk-size', type=int, default=1000, help="Number of graphs per chunk (if chunking is enabled).")
+    parser.add_argument('--no-chunking', action='store_true', help="Disable chunking and save all data to a single file.")
+    
+    args = parser.parse_args()
+
     # --- Example Usage ---
-    INPUT_AIG_DIR = "./sample_aigs" 
-    OUTPUT_DATA_DIR = "./processed_aigs"
-    OUTPUT_FILENAME_BASE = "aig_pyg_dataset"
-
-    if not os.path.exists(INPUT_AIG_DIR):
-        print(f"Creating dummy directory '{INPUT_AIG_DIR}' for demonstration.")
-        os.makedirs(INPUT_AIG_DIR)
+    if not os.path.exists(args.input_dir):
+        print(f"Creating dummy directory '{args.input_dir}' for demonstration.")
+        os.makedirs(args.input_dir)
         dummy_aag_content = "aag 3 2 0 1 1\n2\n4\n6\n"
-        with open(os.path.join(INPUT_AIG_DIR, "and_gate.aag"), "w") as f:
+        with open(os.path.join(args.input_dir, "and_gate.aag"), "w") as f:
             f.write(dummy_aag_content)
-        print(f"Created a dummy 'and_gate.aag' file inside '{INPUT_AIG_DIR}'.")
+        print(f"Created a dummy 'and_gate.aag' file inside '{args.input_dir}'.")
 
-    process_aig_directory(INPUT_AIG_DIR, OUTPUT_DATA_DIR, OUTPUT_FILENAME_BASE)
+    process_aig_directory(
+        args.input_dir, 
+        args.output_dir, 
+        args.output_filename, 
+        chunk_size=args.chunk_size, 
+        use_chunking=not args.no_chunking
+    )
 
-    print("\n--- To load the chunked dataset in your training script, use: ---")
-    print("import os, pickle, glob")
-    print(f"data_files = sorted(glob.glob(os.path.join('{OUTPUT_DATA_DIR}', '{OUTPUT_FILENAME_BASE}_part_*.pkl')))")
-    print("all_data = []")
-    print("for file in data_files:")
-    print("    with open(file, 'rb') as f:")
-    print("        all_data.extend(pickle.load(f))")
-    print("print(f'Loaded {len(all_data)} graphs from {len(data_files)} files.')")
-
+    print("\n--- To load the processed dataset in your training script, use: ---")
+    if not args.no_chunking:
+        print("import os, pickle, glob")
+        print(f"data_files = sorted(glob.glob(os.path.join('{args.output_dir}', '{args.output_filename}_part_*.pkl')))")
+        print("all_data = []")
+        print("for file in data_files:")
+        print("    with open(file, 'rb') as f:")
+        print("        all_data.extend(pickle.load(f))")
+        print("print(f'Loaded {len(all_data)} graphs from {len(data_files)} files.')")
+    else:
+        print("import pickle")
+        print(f"with open(os.path.join('{args.output_dir}', '{args.output_filename}.pkl'), 'rb') as f:")
+        print("    all_data = pickle.load(f)")
+        print("print(f'Loaded {len(all_data)} graphs.')")
