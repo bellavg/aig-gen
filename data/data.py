@@ -30,11 +30,24 @@ NODE_TYPE_ENCODING = {
 }
 NUM_NODE_FEATURES = len(NODE_TYPE_ENCODING['PI'])
 
+# Define one-hot encodings for edge types (regular vs. inverted)
+EDGE_TYPE_ENCODING = {
+    'REGULAR':  [1, 0],
+    'INVERTED': [0, 1]
+}
+NUM_EDGE_FEATURES = len(EDGE_TYPE_ENCODING['REGULAR'])
+
+# --- Memory Management Configuration ---
+# Set the number of graphs to process before saving a chunk to disk.
+# Adjust this based on your system's RAM and the average size of your graphs.
+# For 100,000 graphs, a chunk size of 1000-5000 is a good starting point.
+CHUNK_SIZE = 1000
+
 def create_aig_pyg_data(aig):
     """
     Converts a single AIG object from aigverse into a torch_geometric.data.Data
-    object suitable for the DAGformer model. It handles node feature creation,
-    edge indexing, and runs the necessary preprocessing steps.
+    object suitable for the DAGformer model. It handles node and edge feature creation,
+    and runs the necessary preprocessing steps.
 
     Args:
         aig: An AIG object from the aigverse library.
@@ -46,7 +59,6 @@ def create_aig_pyg_data(aig):
         # --- 1. Map AIG node IDs to a new, contiguous index space ---
         node_mapping = {}
         
-        # Helper to add a node to the mapping if it's not already there
         def add_to_mapping(node_id):
             if node_id not in node_mapping:
                 node_mapping[node_id] = len(node_mapping)
@@ -66,11 +78,11 @@ def create_aig_pyg_data(aig):
         for gate_id in aig.gates():
             node_features[node_mapping[gate_id]] = NODE_TYPE_ENCODING['AND']
         
-        # --- 3. Add PO nodes and their edges ---
-        # POs are new nodes that connect from existing driver nodes.
+        # --- 3. Add PO nodes and prepare for edge creation ---
         po_start_idx = len(node_mapping)
         source_nodes, target_nodes = [], []
-        
+        edge_features = [] # List to store edge feature vectors
+
         for i, po_literal in enumerate(aig.pos()):
             po_idx = po_start_idx + i
             node_features.append(NODE_TYPE_ENCODING['PO'])
@@ -79,28 +91,33 @@ def create_aig_pyg_data(aig):
             if driver_node_id in node_mapping:
                 source_nodes.append(node_mapping[driver_node_id])
                 target_nodes.append(po_idx)
+                # Add edge feature for this PO connection
+                is_inverted = aig.is_complemented(po_literal)
+                edge_features.append(EDGE_TYPE_ENCODING['INVERTED'] if is_inverted else EDGE_TYPE_ENCODING['REGULAR'])
 
         x_tensor = torch.tensor(node_features, dtype=torch.float)
 
-        # --- 4. Get Edge Index (edge_index) ---
+        # --- 4. Get Edge Index (edge_index) and Edge Attributes (edge_attr) ---
         # Add internal edges (to AND gates)
         for edge in to_edge_list(aig):
             if edge.source in node_mapping and edge.target in node_mapping:
                 source_nodes.append(node_mapping[edge.source])
                 target_nodes.append(node_mapping[edge.target])
+                # Add edge feature for this internal connection
+                is_inverted = (edge.weight == 1)
+                edge_features.append(EDGE_TYPE_ENCODING['INVERTED'] if is_inverted else EDGE_TYPE_ENCODING['REGULAR'])
         
         edge_index_tensor = torch.tensor([source_nodes, target_nodes], dtype=torch.long)
+        edge_attr_tensor = torch.tensor(edge_features, dtype=torch.float)
 
         # --- 5. Create the initial PyG Data object ---
-        pyg_data = Data(x=x_tensor, edge_index=edge_index_tensor)
+        pyg_data = Data(x=x_tensor, edge_index=edge_index_tensor, edge_attr=edge_attr_tensor)
         
         # Add a placeholder for the target variable 'y'.
-        # This can be replaced with actual labels later.
         pyg_data.y = torch.zeros((1, 1), dtype=torch.float)
 
         # --- 6. Run the original preprocessing function from utils_dag.py ---
-        # This is a crucial step. It calculates and attaches all the necessary
-        # attributes like depth (abs_pe), the attention mask (mask_rc), etc.
+        # This calculates and attaches depth (abs_pe), attention mask (mask_rc), etc.
         add_order_info(pyg_data)
 
         return pyg_data
@@ -109,23 +126,37 @@ def create_aig_pyg_data(aig):
         print(f"    [Error] Failed to process AIG: {e}")
         return None
 
-def process_aig_directory(input_dir, output_file):
+def save_chunk(chunk_data, output_dir, base_filename, chunk_num):
+    """Saves a list of graph data objects to a numbered pickle file."""
+    if not chunk_data:
+        return
+    
+    chunk_filename = f"{base_filename}_part_{chunk_num}.pkl"
+    output_path = os.path.join(output_dir, chunk_filename)
+    
+    print(f"  Saving chunk {chunk_num} with {len(chunk_data)} graphs to '{output_path}'...")
+    with open(output_path, 'wb') as f:
+        pickle.dump(chunk_data, f)
+    print(f"  Chunk {chunk_num} saved.")
+
+def process_aig_directory(input_dir, output_dir, base_filename):
     """
     Processes all .aig or .aag files in a directory, converts them to
-    a list of PyG Data objects, and saves them to a single pickle file.
-
-    Args:
-        input_dir (str): The path to the directory containing AIG files.
-        output_file (str): The path where the output pickle file will be saved.
+    a list of PyG Data objects, and saves them in chunks to pickle files.
     """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     aig_files = [f for f in os.listdir(input_dir) if f.lower().endswith(('.aig', '.aag'))]
     if not aig_files:
         print(f"No .aig or .aag files found in '{input_dir}'")
         return
 
-    print(f"Found {len(aig_files)} AIG files. Starting processing...")
+    print(f"Found {len(aig_files)} AIG files. Starting processing with chunk size {CHUNK_SIZE}...")
     
-    all_graphs_data = []
+    current_chunk = []
+    chunk_count = 1
+    
     for i, filename in enumerate(aig_files):
         file_path = os.path.join(input_dir, filename)
         print(f"--> Processing file {i+1}/{len(aig_files)}: {filename}")
@@ -133,48 +164,46 @@ def process_aig_directory(input_dir, output_file):
             aig = read_aiger_into_aig(file_path)
             pyg_data = create_aig_pyg_data(aig)
             if pyg_data:
-                all_graphs_data.append(pyg_data)
+                current_chunk.append(pyg_data)
+            
+            # If the chunk is full, save it and start a new one
+            if len(current_chunk) >= CHUNK_SIZE:
+                save_chunk(current_chunk, output_dir, base_filename, chunk_count)
+                current_chunk = []
+                chunk_count += 1
+
         except Exception as e:
             print(f"  -> [Critical Error] Could not process {filename}. Error: {e}")
 
-    print(f"\nSuccessfully processed {len(all_graphs_data)} graphs.")
-    
-    if all_graphs_data:
-        print(f"Saving dataset to '{output_file}'...")
-        with open(output_file, 'wb') as f:
-            pickle.dump(all_graphs_data, f)
-        print("Save complete.")
+    # Save any remaining graphs in the last chunk
+    if current_chunk:
+        save_chunk(current_chunk, output_dir, base_filename, chunk_count)
+
+    print(f"\nProcessing complete. Saved {chunk_count} chunk(s) to '{output_dir}'.")
+
 
 if __name__ == '__main__':
     # --- Example Usage ---
-    # This block demonstrates how to use the script.
-    
-    # 1. Set the directory where your AIG files are located.
-    #    For example: INPUT_AIG_DIR = "/path/to/your/aigs"
     INPUT_AIG_DIR = "./sample_aigs" 
-    
-    # 2. Set the desired name for the output pickle file.
-    OUTPUT_PICKLE_FILE = "aig_pyg_dataset.pkl"
+    OUTPUT_DATA_DIR = "./processed_aigs"
+    OUTPUT_FILENAME_BASE = "aig_pyg_dataset"
 
-    # Create a dummy directory and a sample AIG file for demonstration
     if not os.path.exists(INPUT_AIG_DIR):
         print(f"Creating dummy directory '{INPUT_AIG_DIR}' for demonstration.")
         os.makedirs(INPUT_AIG_DIR)
-        # This AAG represents a simple circuit: out = (in1 AND in2)
-        # It has 3 nodes (1 const0, 2 PIs), 1 gate, and 1 PO.
         dummy_aag_content = "aag 3 2 0 1 1\n2\n4\n6\n"
         with open(os.path.join(INPUT_AIG_DIR, "and_gate.aag"), "w") as f:
             f.write(dummy_aag_content)
         print(f"Created a dummy 'and_gate.aag' file inside '{INPUT_AIG_DIR}'.")
 
-    # 3. Run the main processing function.
-    process_aig_directory(INPUT_AIG_DIR, OUTPUT_PICKLE_FILE)
+    process_aig_directory(INPUT_AIG_DIR, OUTPUT_DATA_DIR, OUTPUT_FILENAME_BASE)
 
-    # You can now load this .pkl file in your training script.
-    print("\n--- To load the data in your training script, use: ---")
-    print(f"import pickle")
-    print(f"with open('{OUTPUT_PICKLE_FILE}', 'rb') as f:")
-    print(f"    train_data = pickle.load(f)")
-    print(f"    test_data = [] # or create a split")
-    print(f"    graph_args = ... # define your graph args")
+    print("\n--- To load the chunked dataset in your training script, use: ---")
+    print("import os, pickle, glob")
+    print(f"data_files = sorted(glob.glob(os.path.join('{OUTPUT_DATA_DIR}', '{OUTPUT_FILENAME_BASE}_part_*.pkl')))")
+    print("all_data = []")
+    print("for file in data_files:")
+    print("    with open(file, 'rb') as f:")
+    print("        all_data.extend(pickle.load(f))")
+    print("print(f'Loaded {len(all_data)} graphs from {len(data_files)} files.')")
 
